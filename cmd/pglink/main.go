@@ -23,16 +23,6 @@ var bannerLines = []string{
 }
 
 func printBanner() {
-	// Check if colors are disabled
-	if os.Getenv("NO_COLOR") != "" {
-		// No color support - print plain banner
-		for _, line := range bannerLines {
-			fmt.Println(line)
-		}
-		fmt.Println()
-		return
-	}
-
 	// Gradient from teal to purple
 	teal, _ := colorful.Hex("#00CED1")
 	purple, _ := colorful.Hex("#9B30FF")
