@@ -10,7 +10,7 @@ When adding or modifying scripts in `bin/`, update this list.
 |--------|-------------|
 | `bin/build` | Build the pglink binary to `out/pglink` |
 | `bin/format` | Format Go code with `go fmt` |
-| `bin/go` | Proxy to `go` command with mise environment |
+| `bin/go` | Proxy to `go` command with mise environment (prefer `bin/build` for building) |
 | `bin/lint` | Run golangci-lint |
 | `bin/run` | Run pglink (e.g., `bin/run -config pglink.json`) |
 | `bin/setup` | Install mise tools and configure git hooks |

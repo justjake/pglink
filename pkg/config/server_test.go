@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+func ptr[T any](v T) *T { return &v }
+
 func TestPgStartupParameters_RoundTrip(t *testing.T) {
 	tests := []struct {
 		name string
@@ -104,7 +106,7 @@ func TestUserConfig_RoundTrip(t *testing.T) {
 }
 
 func TestBackendConfig_RoundTrip(t *testing.T) {
-	input := `{"host":"db.example.com","port":5432,"max_connections":100,"default_startup_parameters":{"application_name":"pglink","timezone":"UTC"}}`
+	input := `{"host":"db.example.com","port":5432,"database":"mydb","pool_max_conns":100,"pool_max_conn_lifetime":"1h","default_startup_parameters":{"application_name":"pglink","timezone":"UTC"}}`
 
 	var b BackendConfig
 	if err := json.Unmarshal([]byte(input), &b); err != nil {
@@ -122,7 +124,7 @@ func TestBackendConfig_RoundTrip(t *testing.T) {
 }
 
 func TestServerConfig_RoundTrip(t *testing.T) {
-	input := `{"listen":[":5432",":6432"],"database":"mydb","users":[{"username":{"aws_secret_arn":"arn:aws:secretsmanager:us-east-1:123:secret:db","key":"user"},"password":{"aws_secret_arn":"arn:aws:secretsmanager:us-east-1:123:secret:db","key":"pass"}}],"backend":{"host":"db.example.com","port":5432,"max_connections":100,"default_startup_parameters":{"application_name":"pglink"}},"track_extra_parameters":{"TimeZone":true,"client_encoding":true}}`
+	input := `{"database":"mydb","users":[{"username":{"aws_secret_arn":"arn:aws:secretsmanager:us-east-1:123:secret:db","key":"user"},"password":{"aws_secret_arn":"arn:aws:secretsmanager:us-east-1:123:secret:db","key":"pass"}}],"backend":{"host":"db.example.com","port":5432,"database":"mydb","pool_max_conns":100,"default_startup_parameters":{"application_name":"pglink"}},"track_extra_parameters":["TimeZone","client_encoding"]}`
 
 	var s ServerConfig
 	if err := json.Unmarshal([]byte(input), &s); err != nil {
@@ -136,5 +138,145 @@ func TestServerConfig_RoundTrip(t *testing.T) {
 
 	if string(got) != input {
 		t.Errorf("round-trip mismatch:\n  input:  %s\n  output: %s", input, string(got))
+	}
+}
+
+func TestConfig_RoundTrip(t *testing.T) {
+	input := `{"listen":[":5432",":6432"],"servers":[{"database":"mydb","users":[],"backend":{"host":"db.example.com","port":5432,"database":"mydb","pool_max_conns":100}}]}`
+
+	var c Config
+	if err := json.Unmarshal([]byte(input), &c); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	got, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	if string(got) != input {
+		t.Errorf("round-trip mismatch:\n  input:  %s\n  output: %s", input, string(got))
+	}
+}
+
+func TestBackendConfig_PoolConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		config BackendConfig
+	}{
+		{
+			name: "minimal",
+			config: BackendConfig{
+				Host:     "localhost",
+				Database: "postgres",
+			},
+		},
+		{
+			name: "with port",
+			config: BackendConfig{
+				Host:     "db.example.com",
+				Port:     ptr[uint16](5432),
+				Database: "mydb",
+			},
+		},
+		{
+			name: "with pool settings",
+			config: BackendConfig{
+				Host:                "db.example.com",
+				Port:                ptr[uint16](5432),
+				Database:            "mydb",
+				PoolMaxConns:        ptr[int32](100),
+				PoolMinConns:        ptr[int32](10),
+				PoolMaxConnLifetime: ptr("1h"),
+				PoolMaxConnIdleTime: ptr("30m"),
+			},
+		},
+		{
+			name: "with ssl",
+			config: BackendConfig{
+				Host:     "db.example.com",
+				Port:     ptr[uint16](5432),
+				Database: "mydb",
+				SSLMode:  ptr("require"),
+			},
+		},
+		{
+			name: "with connect timeout",
+			config: BackendConfig{
+				Host:           "db.example.com",
+				Database:       "mydb",
+				ConnectTimeout: ptr("5"),
+			},
+		},
+		{
+			name: "with startup parameters",
+			config: BackendConfig{
+				Host:     "db.example.com",
+				Database: "mydb",
+				DefaultStartupParameters: PgStartupParameters{
+					keys:   []string{"application_name", "timezone"},
+					values: map[string]string{"application_name": "pglink", "timezone": "UTC"},
+				},
+			},
+		},
+		{
+			name: "full config",
+			config: BackendConfig{
+				Host:                      "db.example.com",
+				Port:                      ptr[uint16](5432),
+				Database:                  "production",
+				ConnectTimeout:            ptr("10"),
+				SSLMode:                   ptr("verify-full"),
+				PoolMaxConns:              ptr[int32](50),
+				PoolMinConns:              ptr[int32](5),
+				PoolMaxConnLifetime:       ptr("1h"),
+				PoolMaxConnLifetimeJitter: ptr("5m"),
+				PoolMaxConnIdleTime:       ptr("10m"),
+				PoolHealthCheckPeriod:     ptr("1m"),
+				DefaultStartupParameters: PgStartupParameters{
+					keys:   []string{"application_name"},
+					values: map[string]string{"application_name": "pglink"},
+				},
+			},
+		},
+		{
+			name: "host with spaces",
+			config: BackendConfig{
+				Host:     "my database server",
+				Database: "my database",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			connStr := tt.config.PoolConfigString()
+			t.Logf("connection string: %s", connStr)
+
+			cfg, err := tt.config.PoolConfig()
+			if err != nil {
+				t.Fatalf("PoolConfig failed: %v", err)
+			}
+
+			if cfg.ConnConfig.Host != tt.config.Host {
+				t.Errorf("host mismatch: got %q, want %q", cfg.ConnConfig.Host, tt.config.Host)
+			}
+
+			if tt.config.Port != nil && cfg.ConnConfig.Port != *tt.config.Port {
+				t.Errorf("port mismatch: got %d, want %d", cfg.ConnConfig.Port, *tt.config.Port)
+			}
+
+			if cfg.ConnConfig.Database != tt.config.Database {
+				t.Errorf("database mismatch: got %q, want %q", cfg.ConnConfig.Database, tt.config.Database)
+			}
+
+			if tt.config.PoolMaxConns != nil && cfg.MaxConns != *tt.config.PoolMaxConns {
+				t.Errorf("max_conns mismatch: got %d, want %d", cfg.MaxConns, *tt.config.PoolMaxConns)
+			}
+
+			if tt.config.PoolMinConns != nil && cfg.MinConns != *tt.config.PoolMinConns {
+				t.Errorf("min_conns mismatch: got %d, want %d", cfg.MinConns, *tt.config.PoolMinConns)
+			}
+		})
 	}
 }

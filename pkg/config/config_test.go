@@ -1,11 +1,14 @@
 package config
 
 import (
-	"encoding/json/v2"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestParseConfig_ServerListen(t *testing.T) {
+func TestParseConfig_Listen(t *testing.T) {
 	tests := []struct {
 		name     string
 		json     string
@@ -13,27 +16,27 @@ func TestParseConfig_ServerListen(t *testing.T) {
 	}{
 		{
 			name:     "port only",
-			json:     `{"servers": [{"listen": ["5432"]}]}`,
+			json:     `{"listen": ["5432"]}`,
 			expected: []ListenAddr{":5432"},
 		},
 		{
 			name:     "colon port",
-			json:     `{"servers": [{"listen": [":5432"]}]}`,
+			json:     `{"listen": [":5432"]}`,
 			expected: []ListenAddr{":5432"},
 		},
 		{
 			name:     "host and port",
-			json:     `{"servers": [{"listen": ["127.0.0.1:5432"]}]}`,
+			json:     `{"listen": ["127.0.0.1:5432"]}`,
 			expected: []ListenAddr{"127.0.0.1:5432"},
 		},
 		{
 			name:     "multiple addresses",
-			json:     `{"servers": [{"listen": ["5432", ":6432", "192.168.1.1:7432"]}]}`,
+			json:     `{"listen": ["5432", ":6432", "192.168.1.1:7432"]}`,
 			expected: []ListenAddr{":5432", ":6432", "192.168.1.1:7432"},
 		},
 		{
 			name:     "empty listen",
-			json:     `{"servers": [{"listen": []}]}`,
+			json:     `{"listen": []}`,
 			expected: []ListenAddr{},
 		},
 	}
@@ -45,11 +48,7 @@ func TestParseConfig_ServerListen(t *testing.T) {
 				t.Fatalf("ParseConfig failed: %v", err)
 			}
 
-			if len(cfg.Servers) != 1 {
-				t.Fatalf("expected 1 server, got %d", len(cfg.Servers))
-			}
-
-			got := cfg.Servers[0].Listen
+			got := cfg.Listen
 			if len(got) != len(tt.expected) {
 				t.Fatalf("expected %d listen addresses, got %d", len(tt.expected), len(got))
 			}
@@ -71,14 +70,15 @@ func TestListenAddr_String(t *testing.T) {
 }
 
 func TestParseConfig_MultipleServers(t *testing.T) {
-	json := `{
+	jsonStr := `{
+		"listen": [":5432"],
 		"servers": [
-			{"listen": ["5432"]},
-			{"listen": ["6432", "7432"]}
+			{"database": "db1"},
+			{"database": "db2"}
 		]
 	}`
 
-	cfg, err := ParseConfig(json)
+	cfg, err := ParseConfig(jsonStr)
 	if err != nil {
 		t.Fatalf("ParseConfig failed: %v", err)
 	}
@@ -87,45 +87,325 @@ func TestParseConfig_MultipleServers(t *testing.T) {
 		t.Fatalf("expected 2 servers, got %d", len(cfg.Servers))
 	}
 
-	if len(cfg.Servers[0].Listen) != 1 || cfg.Servers[0].Listen[0] != ":5432" {
-		t.Errorf("server 0: expected [\":5432\"], got %v", cfg.Servers[0].Listen)
+	if cfg.Servers[0].Database != "db1" {
+		t.Errorf("server 0: expected database \"db1\", got %q", cfg.Servers[0].Database)
 	}
 
-	if len(cfg.Servers[1].Listen) != 2 {
-		t.Errorf("server 1: expected 2 addresses, got %d", len(cfg.Servers[1].Listen))
+	if cfg.Servers[1].Database != "db2" {
+		t.Errorf("server 1: expected database \"db2\", got %q", cfg.Servers[1].Database)
 	}
 }
 
-func TestJSONV2MapIterationOrder(t *testing.T) {
-	input := `{"zebra": "1", "apple": "2", "mango": "3", "banana": "4"}`
-	expected := []string{"zebra", "apple", "mango", "banana"}
-
-	var m map[string]string
-	if err := json.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
+func TestReadConfigFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		wantErr bool
+	}{
+		{
+			name: "minimal config",
+			file: "minimal.json",
+		},
+		{
+			name: "full config",
+			file: "full.json",
+		},
+		{
+			name: "multiple servers",
+			file: "multiple_servers.json",
+		},
+		{
+			name: "env secrets",
+			file: "env_secrets.json",
+		},
 	}
 
-	var got []string
-	for k := range m {
-		got = append(got, k)
-	}
-
-	t.Logf("Input order:     %v", expected)
-	t.Logf("Iteration order: %v", got)
-
-	match := len(got) == len(expected)
-	if match {
-		for i := range got {
-			if got[i] != expected[i] {
-				match = false
-				break
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join("testdata", tt.file)
+			cfg, err := ReadConfigFile(path)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ReadConfigFile() error = %v, wantErr %v", err, tt.wantErr)
 			}
-		}
+			if err != nil {
+				return
+			}
+
+			if len(cfg.Listen) == 0 {
+				t.Error("expected at least one listen address")
+			}
+			if len(cfg.Servers) == 0 {
+				t.Error("expected at least one server")
+			}
+
+			t.Logf("loaded config with %d listen addresses and %d servers",
+				len(cfg.Listen), len(cfg.Servers))
+		})
+	}
+}
+
+func TestConfig_Validate(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a SecretCache without AWS client (only works for insecure_value and env_var)
+	secrets := NewSecretCache(nil)
+
+	tests := []struct {
+		name        string
+		file        string
+		setup       func()
+		cleanup     func()
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "minimal config validates",
+			file: "minimal.json",
+		},
+		{
+			name: "full config validates",
+			file: "full.json",
+		},
+		{
+			name: "multiple servers validates",
+			file: "multiple_servers.json",
+		},
+		{
+			name: "env secrets with vars set",
+			file: "env_secrets.json",
+			setup: func() {
+				os.Setenv("DB_USERNAME", "testuser")
+				os.Setenv("DB_PASSWORD", "testpass")
+			},
+			cleanup: func() {
+				os.Unsetenv("DB_USERNAME")
+				os.Unsetenv("DB_PASSWORD")
+			},
+		},
+		{
+			name:        "env secrets without vars fails",
+			file:        "env_secrets.json",
+			wantErr:     true,
+			errContains: "environment variable",
+		},
+		{
+			name:        "invalid backend fails",
+			file:        "invalid_backend.json",
+			wantErr:     true,
+			errContains: "connect_timeout",
+		},
+		{
+			name:        "invalid secret ref fails",
+			file:        "invalid_secret_ref.json",
+			wantErr:     true,
+			errContains: "must have one of",
+		},
 	}
 
-	if match {
-		t.Log("json/v2 DOES preserve input order")
-	} else {
-		t.Log("json/v2 does NOT preserve input order")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup()
+			}
+			if tt.cleanup != nil {
+				defer tt.cleanup()
+			}
+
+			path := filepath.Join("testdata", tt.file)
+			cfg, err := ReadConfigFile(path)
+			if err != nil {
+				t.Fatalf("ReadConfigFile() error = %v", err)
+			}
+
+			err = cfg.Validate(ctx, secrets)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.errContains != "" && err != nil {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
+				}
+			}
+
+			if err != nil {
+				t.Logf("validation error (expected): %v", err)
+			}
+		})
 	}
+}
+
+func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
+	ctx := context.Background()
+	secrets := NewSecretCache(nil)
+
+	// Create a config with multiple errors
+	cfg := &Config{
+		Listen: []ListenAddr{":5432"},
+		Servers: []ServerConfig{
+			{
+				Database: "db1",
+				Users: []UserConfig{
+					{
+						Username: SecretRef{EnvVar: "MISSING_VAR_1"},
+						Password: SecretRef{EnvVar: "MISSING_VAR_2"},
+					},
+				},
+				Backend: BackendConfig{
+					Host:           "localhost",
+					Database:       "db1",
+					ConnectTimeout: ptr("invalid"),
+				},
+			},
+			{
+				Database: "db2",
+				Users: []UserConfig{
+					{
+						Username: SecretRef{EnvVar: "MISSING_VAR_3"},
+						Password: SecretRef{InsecureValue: "ok"},
+					},
+				},
+				Backend: BackendConfig{
+					Host:     "localhost",
+					Database: "db2",
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate(ctx, secrets)
+	if err == nil {
+		t.Fatal("expected validation errors")
+	}
+
+	errStr := err.Error()
+	t.Logf("accumulated errors: %v", err)
+
+	// Should have backend error for first server
+	if !strings.Contains(errStr, "servers[0].backend") {
+		t.Error("expected error for servers[0].backend")
+	}
+
+	// Should have secret errors
+	if !strings.Contains(errStr, "MISSING_VAR_1") {
+		t.Error("expected error for MISSING_VAR_1")
+	}
+	if !strings.Contains(errStr, "MISSING_VAR_2") {
+		t.Error("expected error for MISSING_VAR_2")
+	}
+	if !strings.Contains(errStr, "MISSING_VAR_3") {
+		t.Error("expected error for MISSING_VAR_3")
+	}
+}
+
+func TestConfig_PoolConfigFromFile(t *testing.T) {
+	path := filepath.Join("testdata", "full.json")
+	cfg, err := ReadConfigFile(path)
+	if err != nil {
+		t.Fatalf("ReadConfigFile() error = %v", err)
+	}
+
+	backend := cfg.Servers[0].Backend
+	poolCfg, err := backend.PoolConfig()
+	if err != nil {
+		t.Fatalf("PoolConfig() error = %v", err)
+	}
+
+	// Verify the pool config has expected values
+	if poolCfg.ConnConfig.Host != "db.example.com" {
+		t.Errorf("host = %q, want %q", poolCfg.ConnConfig.Host, "db.example.com")
+	}
+	if poolCfg.ConnConfig.Port != 5432 {
+		t.Errorf("port = %d, want %d", poolCfg.ConnConfig.Port, 5432)
+	}
+	if poolCfg.ConnConfig.Database != "production" {
+		t.Errorf("database = %q, want %q", poolCfg.ConnConfig.Database, "production")
+	}
+	if poolCfg.MaxConns != 100 {
+		t.Errorf("max_conns = %d, want %d", poolCfg.MaxConns, 100)
+	}
+	if poolCfg.MinConns != 10 {
+		t.Errorf("min_conns = %d, want %d", poolCfg.MinConns, 10)
+	}
+
+	// Verify startup parameters were applied
+	if poolCfg.ConnConfig.RuntimeParams["application_name"] != "pglink" {
+		t.Errorf("application_name = %q, want %q",
+			poolCfg.ConnConfig.RuntimeParams["application_name"], "pglink")
+	}
+	if poolCfg.ConnConfig.RuntimeParams["timezone"] != "UTC" {
+		t.Errorf("timezone = %q, want %q",
+			poolCfg.ConnConfig.RuntimeParams["timezone"], "UTC")
+	}
+}
+
+func TestConfig_Validate_WithMockAWS(t *testing.T) {
+	ctx := context.Background()
+
+	// Create mock AWS client with test secrets
+	mock := NewMockSecretsManagerClient()
+	mock.Secrets["arn:aws:secretsmanager:us-east-1:123456789:secret:db-creds"] = `{"username":"prod_user","password":"prod_pass123"}`
+
+	secrets := NewSecretCache(mock)
+
+	path := filepath.Join("testdata", "aws_secrets.json")
+	cfg, err := ReadConfigFile(path)
+	if err != nil {
+		t.Fatalf("ReadConfigFile() error = %v", err)
+	}
+
+	// Validation should succeed with mock
+	err = cfg.Validate(ctx, secrets)
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	// Verify the mock was called
+	if len(mock.Calls) != 1 {
+		t.Errorf("expected 1 AWS call, got %d", len(mock.Calls))
+	}
+
+	// Verify we can retrieve the secrets
+	user := cfg.Servers[0].Users[0]
+	username, err := secrets.Get(ctx, user.Username)
+	if err != nil {
+		t.Fatalf("Get username error = %v", err)
+	}
+	if username != "prod_user" {
+		t.Errorf("username = %q, want %q", username, "prod_user")
+	}
+
+	password, err := secrets.Get(ctx, user.Password)
+	if err != nil {
+		t.Fatalf("Get password error = %v", err)
+	}
+	if password != "prod_pass123" {
+		t.Errorf("password = %q, want %q", password, "prod_pass123")
+	}
+}
+
+func TestConfig_Validate_AWSSecretMissing(t *testing.T) {
+	ctx := context.Background()
+
+	// Create mock AWS client WITHOUT the required secret
+	mock := NewMockSecretsManagerClient()
+	secrets := NewSecretCache(mock)
+
+	path := filepath.Join("testdata", "aws_secrets.json")
+	cfg, err := ReadConfigFile(path)
+	if err != nil {
+		t.Fatalf("ReadConfigFile() error = %v", err)
+	}
+
+	// Validation should fail
+	err = cfg.Validate(ctx, secrets)
+	if err == nil {
+		t.Fatal("expected validation error for missing AWS secret")
+	}
+
+	if !strings.Contains(err.Error(), "secret not found") {
+		t.Errorf("error %q does not contain 'secret not found'", err.Error())
+	}
+
+	t.Logf("validation error (expected): %v", err)
 }

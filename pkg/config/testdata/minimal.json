@@ -1,0 +1,18 @@
+{
+  "listen": [":5432"],
+  "servers": [
+    {
+      "database": "myapp",
+      "users": [
+        {
+          "username": {"insecure_value": "postgres"},
+          "password": {"insecure_value": "secret123"}
+        }
+      ],
+      "backend": {
+        "host": "localhost",
+        "database": "myapp"
+      }
+    }
+  ]
+}

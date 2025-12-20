@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -117,7 +118,18 @@ func main() {
 		log.Fatalf("failed to read config: %v", err)
 	}
 
-	svc := frontend.NewService(cfg)
+	ctx := context.Background()
+
+	secrets, err := config.NewSecretCacheFromEnv(ctx)
+	if err != nil {
+		log.Fatalf("failed to create secrets cache: %v", err)
+	}
+
+	svc, err := frontend.NewService(ctx, cfg, secrets)
+	if err != nil {
+		log.Fatalf("failed to create service: %v", err)
+	}
+
 	if err := svc.Listen(); err != nil {
 		log.Fatalf("service error: %v", err)
 	}

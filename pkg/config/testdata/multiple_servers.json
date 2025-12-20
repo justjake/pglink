@@ -1,0 +1,31 @@
+{
+  "listen": [":5432"],
+  "servers": [
+    {
+      "database": "app1",
+      "users": [
+        {
+          "username": {"insecure_value": "app1_user"},
+          "password": {"insecure_value": "app1_pass"}
+        }
+      ],
+      "backend": {
+        "host": "db1.example.com",
+        "database": "app1_db"
+      }
+    },
+    {
+      "database": "app2",
+      "users": [
+        {
+          "username": {"insecure_value": "app2_user"},
+          "password": {"insecure_value": "app2_pass"}
+        }
+      ],
+      "backend": {
+        "host": "db2.example.com",
+        "database": "app2_db"
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "listen": [":5432"],
+  "servers": [
+    {
+      "database": "myapp",
+      "users": [
+        {
+          "username": {"insecure_value": "postgres"},
+          "password": {"insecure_value": "secret"}
+        }
+      ],
+      "backend": {
+        "host": "localhost",
+        "database": "myapp",
+        "connect_timeout": "not_a_number"
+      }
+    }
+  ]
+}

@@ -3,17 +3,19 @@ package config
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"iter"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ServerConfig configures a single server instance.
 type ServerConfig struct {
-	Listen               []ListenAddr    `json:"listen"`
-	Database             string          `json:"database"`
-	Users                []UserConfig    `json:"users"`
-	Backend              BackendConfig   `json:"backend"`
-	TrackExtraParameters map[string]bool `json:"track_extra_parameters,omitempty"`
+	Database             string        `json:"database"`
+	Users                []UserConfig  `json:"users"`
+	Backend              BackendConfig `json:"backend"`
+	TrackExtraParameters []string      `json:"track_extra_parameters,omitempty"`
 }
 
 // UserConfig configures authentication credentials for a user.
@@ -24,10 +26,111 @@ type UserConfig struct {
 
 // BackendConfig configures the backend PostgreSQL server to proxy to.
 type BackendConfig struct {
-	Host                     string              `json:"host"`
-	Port                     uint16              `json:"port"`
-	MaxConnections           uint                `json:"max_connections"`
+	// Connection target
+	Host     string  `json:"host"`
+	Port     *uint16 `json:"port,omitempty"`
+	Database string  `json:"database"`
+
+	// Connection settings
+	ConnectTimeout           *string `json:"connect_timeout,omitempty"`            // seconds, e.g. "5"
+	SSLMode                  *string `json:"sslmode,omitempty"`                    // disable, allow, prefer, require, verify-ca, verify-full
+	SSLKey                   *string `json:"sslkey,omitempty"`                     // path to client key
+	SSLCert                  *string `json:"sslcert,omitempty"`                    // path to client cert
+	SSLRootCert              *string `json:"sslrootcert,omitempty"`                // path to root CA cert
+	SSLPassword              *string `json:"sslpassword,omitempty"`                // password for encrypted key
+	StatementCacheCapacity   *int32  `json:"statement_cache_capacity,omitempty"`   // 0 to disable, default 512
+	DescriptionCacheCapacity *int32  `json:"description_cache_capacity,omitempty"` // 0 to disable, default 512
+
+	// Pool settings
+	PoolMaxConns              *int32  `json:"pool_max_conns,omitempty"`
+	PoolMinConns              *int32  `json:"pool_min_conns,omitempty"`
+	PoolMaxConnLifetime       *string `json:"pool_max_conn_lifetime,omitempty"`        // duration
+	PoolMaxConnLifetimeJitter *string `json:"pool_max_conn_lifetime_jitter,omitempty"` // duration
+	PoolMaxConnIdleTime       *string `json:"pool_max_conn_idle_time,omitempty"`       // duration
+	PoolHealthCheckPeriod     *string `json:"pool_health_check_period,omitempty"`      // duration
+
+	// Startup parameters sent to backend on connection
 	DefaultStartupParameters PgStartupParameters `json:"default_startup_parameters,omitempty"`
+}
+
+// PoolConfigString builds a libpq-style connection string in key=value format.
+// This includes all configured parameters except user credentials.
+func (c *BackendConfig) PoolConfigString() string {
+	var parts []string
+
+	// Helper to add a parameter if non-nil
+	addStr := func(key string, val *string) {
+		if val != nil {
+			parts = append(parts, fmt.Sprintf("%s=%s", key, escapeConnStringValue(*val)))
+		}
+	}
+	addInt32 := func(key string, val *int32) {
+		if val != nil {
+			parts = append(parts, fmt.Sprintf("%s=%d", key, *val))
+		}
+	}
+	addUint16 := func(key string, val *uint16) {
+		if val != nil {
+			parts = append(parts, fmt.Sprintf("%s=%d", key, *val))
+		}
+	}
+
+	// Connection target
+	parts = append(parts, fmt.Sprintf("host=%s", escapeConnStringValue(c.Host)))
+	addUint16("port", c.Port)
+	parts = append(parts, fmt.Sprintf("database=%s", escapeConnStringValue(c.Database)))
+
+	// Connection settings
+	addStr("connect_timeout", c.ConnectTimeout)
+	addStr("sslmode", c.SSLMode)
+	addStr("sslkey", c.SSLKey)
+	addStr("sslcert", c.SSLCert)
+	addStr("sslrootcert", c.SSLRootCert)
+	addStr("sslpassword", c.SSLPassword)
+	addInt32("statement_cache_capacity", c.StatementCacheCapacity)
+	addInt32("description_cache_capacity", c.DescriptionCacheCapacity)
+
+	// Pool settings
+	addInt32("pool_max_conns", c.PoolMaxConns)
+	addInt32("pool_min_conns", c.PoolMinConns)
+	addStr("pool_max_conn_lifetime", c.PoolMaxConnLifetime)
+	addStr("pool_max_conn_lifetime_jitter", c.PoolMaxConnLifetimeJitter)
+	addStr("pool_max_conn_idle_time", c.PoolMaxConnIdleTime)
+	addStr("pool_health_check_period", c.PoolHealthCheckPeriod)
+
+	return strings.Join(parts, " ")
+}
+
+// PoolConfig parses the connection string and returns a pgxpool.Config.
+// User credentials should be set on the returned config before use.
+func (c *BackendConfig) PoolConfig() (*pgxpool.Config, error) {
+	cfg, err := pgxpool.ParseConfig(c.PoolConfigString())
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse pool config: %w", err)
+	}
+
+	// Apply default startup parameters
+	for key, value := range c.DefaultStartupParameters.All() {
+		cfg.ConnConfig.RuntimeParams[key] = value
+	}
+
+	return cfg, nil
+}
+
+// escapeConnStringValue escapes a value for use in a libpq connection string.
+// Values containing spaces, backslashes, or single quotes need quoting.
+func escapeConnStringValue(s string) string {
+	if s == "" {
+		return "''"
+	}
+	needsQuoting := strings.ContainsAny(s, " \\'")
+	if !needsQuoting {
+		return s
+	}
+	// Escape backslashes and single quotes, then wrap in single quotes
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
+	return "'" + s + "'"
 }
 
 // PgStartupParameters is a map of PostgreSQL startup parameters
