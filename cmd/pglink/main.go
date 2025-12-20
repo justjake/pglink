@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -105,8 +105,19 @@ func main() {
 	printBanner()
 
 	configPath := flag.String("config", "", "path to pglink.json config file")
+	jsonLogs := flag.Bool("json", false, "output logs in JSON format")
 	flag.Usage = printUsage
 	flag.Parse()
+
+	// Set up logger
+	var handler slog.Handler
+	if *jsonLogs {
+		handler = slog.NewJSONHandler(os.Stdout, nil)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, nil)
+	}
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
 
 	if *configPath == "" {
 		printUsage()
@@ -115,22 +126,26 @@ func main() {
 
 	cfg, err := config.ReadConfigFile(*configPath)
 	if err != nil {
-		log.Fatalf("failed to read config: %v", err)
+		logger.Error("failed to read config", "error", err)
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
 
 	secrets, err := config.NewSecretCacheFromEnv(ctx)
 	if err != nil {
-		log.Fatalf("failed to create secrets cache: %v", err)
+		logger.Error("failed to create secrets cache", "error", err)
+		os.Exit(1)
 	}
 
-	svc, err := frontend.NewService(ctx, cfg, secrets)
+	svc, err := frontend.NewService(ctx, cfg, secrets, logger)
 	if err != nil {
-		log.Fatalf("failed to create service: %v", err)
+		logger.Error("failed to create service", "error", err)
+		os.Exit(1)
 	}
 
 	if err := svc.Listen(); err != nil {
-		log.Fatalf("service error: %v", err)
+		logger.Error("service error", "error", err)
+		os.Exit(1)
 	}
 }
