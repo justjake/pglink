@@ -1,28 +1,20 @@
 # Claude Instructions
 
-## Testing
+## Scripts
 
-Run tests using `bin/test` instead of `go test` directly.
+**Always check `bin/` for available scripts and prefer using them over direct commands.** The scripts handle environment setup (mise, GOEXPERIMENT, etc.) automatically.
 
-```sh
-bin/test ./pkg/config
-```
+When adding or modifying scripts in `bin/`, update this list.
 
-## Building
-
-Requires the jsonv2 experiment:
-
-```sh
-GOEXPERIMENT=jsonv2 go build ./...
-```
-
-## Running
-
-Use `bin/run` instead of `go run` directly.
-
-```sh
-bin/run ./cmd/pglink -config pglink.json
-```
+| Script | Description |
+|--------|-------------|
+| `bin/build` | Build the pglink binary to `out/pglink` |
+| `bin/format` | Format Go code with `go fmt` |
+| `bin/lint` | Run golangci-lint |
+| `bin/run` | Run pglink (e.g., `bin/run -config pglink.json`) |
+| `bin/setup` | Install mise tools and configure git hooks |
+| `bin/test` | Run tests (e.g., `bin/test ./pkg/config`) |
+| `bin/tidy` | Run `go mod tidy` |
 
 ## Code Style
 
