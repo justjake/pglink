@@ -1,2 +1,6 @@
 [tools]
 go = "latest"
+golangci-lint = "latest"
+
+[env]
+GOEXPERIMENT = "jsonv2"

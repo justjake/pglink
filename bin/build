@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+eval "$(mise activate bash --shims)"
+
+mkdir -p out
+exec go build -v -o out/pglink "$@" ./cmd/pglink
