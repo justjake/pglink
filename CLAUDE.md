@@ -10,6 +10,7 @@ When adding or modifying scripts in `bin/`, update this list.
 |--------|-------------|
 | `bin/build` | Build the pglink binary to `out/pglink` |
 | `bin/format` | Format Go code with `go fmt` |
+| `bin/go` | Proxy to `go` command with mise environment |
 | `bin/lint` | Run golangci-lint |
 | `bin/run` | Run pglink (e.g., `bin/run -config pglink.json`) |
 | `bin/setup` | Install mise tools and configure git hooks |
@@ -40,5 +41,34 @@ func (c *Cache) Get(key string) (string, bool) {
     }
     c.mu.RUnlock()
     return "", false
+}
+```
+
+### Iterators
+
+When implementing iterable data structures, use modern Go iterators (`iter.Seq`, `iter.Seq2`) instead of ad-hoc interfaces like `ForEach` methods. This enables use with `range` and the `iter` package utilities.
+
+```go
+// Good - use iter.Seq for iteration
+func (c *Cache) All() iter.Seq2[string, string] {
+    return func(yield func(string, string) bool) {
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        for k, v := range c.data {
+            if !yield(k, v) {
+                return
+            }
+        }
+    }
+}
+
+// Usage:
+for k, v := range cache.All() {
+    fmt.Println(k, v)
+}
+
+// Bad - ad-hoc callback interface
+func (c *Cache) ForEach(fn func(key, value string)) {
+    // ...
 }
 ```

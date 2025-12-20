@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json/v2"
 	"testing"
 )
 
@@ -92,5 +93,39 @@ func TestParseConfig_MultipleServers(t *testing.T) {
 
 	if len(cfg.Servers[1].Listen) != 2 {
 		t.Errorf("server 1: expected 2 addresses, got %d", len(cfg.Servers[1].Listen))
+	}
+}
+
+func TestJSONV2MapIterationOrder(t *testing.T) {
+	input := `{"zebra": "1", "apple": "2", "mango": "3", "banana": "4"}`
+	expected := []string{"zebra", "apple", "mango", "banana"}
+
+	var m map[string]string
+	if err := json.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+
+	t.Logf("Input order:     %v", expected)
+	t.Logf("Iteration order: %v", got)
+
+	match := len(got) == len(expected)
+	if match {
+		for i := range got {
+			if got[i] != expected[i] {
+				match = false
+				break
+			}
+		}
+	}
+
+	if match {
+		t.Log("json/v2 DOES preserve input order")
+	} else {
+		t.Log("json/v2 does NOT preserve input order")
 	}
 }

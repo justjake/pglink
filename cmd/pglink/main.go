@@ -54,14 +54,61 @@ func printBanner() {
 	fmt.Println()
 }
 
+var (
+	// Styles for usage output
+	titleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#00CED1"))
+
+	descStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888"))
+
+	flagStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9B30FF")).
+			Bold(true)
+
+	exampleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			Italic(true)
+)
+
+func printUsage() {
+	fmt.Println(titleStyle.Render("Usage:"))
+	fmt.Print("  pglink ")
+	flag.VisitAll(func(f *flag.Flag) {
+		fmt.Printf("%s ", flagStyle.Render("-"+f.Name+" <"+f.Name+">"))
+	})
+	fmt.Println()
+	fmt.Println()
+
+	fmt.Println(titleStyle.Render("Options:"))
+	flag.VisitAll(func(f *flag.Flag) {
+		typeName := fmt.Sprintf("%T", f.Value)
+		// Extract type name from *flag.stringValue -> string
+		typeName = strings.TrimPrefix(typeName, "*flag.")
+		typeName = strings.TrimSuffix(typeName, "Value")
+
+		fmt.Printf("  %s %s\n",
+			flagStyle.Render("-"+f.Name),
+			descStyle.Render(typeName))
+		fmt.Printf("      %s\n", f.Usage)
+	})
+	fmt.Println()
+
+	fmt.Println(titleStyle.Render("Example:"))
+	fmt.Println(exampleStyle.Render("  pglink -config /etc/pglink/pglink.json"))
+	fmt.Println()
+}
+
 func main() {
 	printBanner()
 
-	configPath := flag.String("config", "", "path to pglink.json config file (required)")
+	configPath := flag.String("config", "", "path to pglink.json config file")
+	flag.Usage = printUsage
 	flag.Parse()
 
 	if *configPath == "" {
-		flag.Usage()
+		printUsage()
 		os.Exit(1)
 	}
 
