@@ -48,7 +48,7 @@ func (m *MockServer) Serve() error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	backend := pgproto3.NewBackend(pgproto3.NewChunkReader(conn), conn)
 	return m.Script.Run(backend)

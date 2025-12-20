@@ -46,12 +46,9 @@ func NewSecretCacheFromEnv(ctx context.Context) (*SecretCache, error) {
 // secret from AWS Secrets Manager, caches it, and returns the key value.
 // Returns an error if the value at the given key is not a string.
 func (sc *SecretCache) Get(ctx context.Context, ref SecretRef) (string, error) {
-	sc.mu.RLock()
-	if secretData, ok := sc.cache[ref.AwsSecretArn]; ok {
-		sc.mu.RUnlock()
+	if secretData, ok := sc.getCached(ref.AwsSecretArn); ok {
 		return extractStringKey(secretData, ref.Key)
 	}
-	sc.mu.RUnlock()
 
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
@@ -69,6 +66,13 @@ func (sc *SecretCache) Get(ctx context.Context, ref SecretRef) (string, error) {
 
 	sc.cache[ref.AwsSecretArn] = secretData
 	return extractStringKey(secretData, ref.Key)
+}
+
+func (sc *SecretCache) getCached(arn string) (map[string]any, bool) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	data, ok := sc.cache[arn]
+	return data, ok
 }
 
 func (sc *SecretCache) fetchSecret(ctx context.Context, arn string) (map[string]any, error) {

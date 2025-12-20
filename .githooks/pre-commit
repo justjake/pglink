@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Run formatters
+echo "Running formatters..."
+bin/format
+
+# Check if formatting changed any files
+if ! git diff --quiet; then
+    echo "Formatting changed files. Adding changes to commit..."
+    git add -u
+fi
+
+# Run lint
+echo "Running lint..."
+bin/lint
