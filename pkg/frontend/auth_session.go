@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
@@ -17,7 +18,8 @@ import (
 
 // AuthSession manages client authentication using the PostgreSQL protocol.
 type AuthSession struct {
-	frontend    *pgproto3.Backend
+	ctx         context.Context
+	frontend    *Frontend
 	credentials UserSecretData
 	method      config.AuthMethod
 	tlsState    *tls.ConnectionState
@@ -35,7 +37,7 @@ type AuthSession struct {
 
 // NewAuthSession creates a new AuthSession.
 func NewAuthSession(
-	frontend *pgproto3.Backend,
+	frontend *Frontend,
 	credentials UserSecretData,
 	method config.AuthMethod,
 	tlsState *tls.ConnectionState,

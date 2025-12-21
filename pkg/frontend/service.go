@@ -36,6 +36,7 @@ type Service struct {
 	sessionsMu sync.Mutex
 	sessions   map[*Session]struct{}
 	sessionsWg sync.WaitGroup
+	nextPID    atomic.Uint32
 }
 
 // NewService creates a new frontend Service with the given configuration.
@@ -87,11 +88,11 @@ func (s *Service) Listen() error {
 	var listenerWg sync.WaitGroup
 	errCh := make(chan error, len(s.listeners))
 
-	for _, ln := range s.listeners {
+	for i, ln := range s.listeners {
 		listenerWg.Add(1)
 		go func(ln net.Listener) {
 			defer listenerWg.Done()
-			if err := s.acceptLoop(ln); err != nil {
+			if err := s.acceptLoop(i, ln); err != nil {
 				errCh <- err
 			}
 		}(ln)
@@ -129,7 +130,7 @@ func (s *Service) Listen() error {
 }
 
 // acceptLoop accepts connections on the given listener until it is closed.
-func (s *Service) acceptLoop(ln net.Listener) error {
+func (s *Service) acceptLoop(idx int, ln net.Listener) error {
 	maxConns := s.config.GetMaxClientConnections()
 
 	for {
@@ -147,7 +148,7 @@ func (s *Service) acceptLoop(ln net.Listener) error {
 		// Check connection limit before processing
 		currentConns := s.activeConns.Load()
 		if currentConns >= maxConns {
-			s.rejectConnection(conn, "too many connections")
+			s.rejectConnection(conn, fmt.Sprintf("too many connections (current: %d, max: %d)", currentConns, maxConns))
 			continue
 		}
 
@@ -156,7 +157,7 @@ func (s *Service) acceptLoop(ln net.Listener) error {
 		if newCount > maxConns {
 			// We went over, decrement and reject
 			s.activeConns.Add(-1)
-			s.rejectConnection(conn, "too many connections")
+			s.rejectConnection(conn, fmt.Sprintf("too many connections (current: %d, max: %d)", newCount, maxConns))
 			continue
 		}
 
@@ -208,6 +209,10 @@ func (s *Service) newSession(conn net.Conn) *Session {
 		secrets:   s.secrets,
 		config:    s.config,
 	}
+}
+
+func (s *Service) allocPID() uint32 {
+	return s.nextPID.Add(1)
 }
 
 // registerSession adds a session to the active sessions map.

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/params"
 )
 
 // Database manages connection pools to a backend PostgreSQL server.
@@ -158,6 +159,21 @@ type PooledConn struct {
 	db       *Database
 	user     config.UserConfig
 	released bool
+	state    ServerSession
+}
+
+func (pc *PooledConn) ParameterStatuses(keys []string) params.ParameterStatuses {
+	parameterStatuses := pc.state.ParameterStatuses
+	pgConn := pc.Conn.Conn().PgConn()
+	for _, key := range keys {
+		value := pgConn.ParameterStatus(key)
+		if value == "" {
+			delete(pc.state.ParameterStatuses, key)
+		} else {
+			parameterStatuses[key] = value
+		}
+	}
+	return parameterStatuses
 }
 
 // Release returns the connection to the pool.
