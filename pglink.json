@@ -1,0 +1,101 @@
+{
+  "listen": [":16432"],
+  "tls": {
+    "sslmode": "prefer",
+    "generate_cert": true,
+    "cert_path": "pglink.crt",
+    "cert_private_key_path": "pglink.key"
+  },
+  "databases": {
+    "alpha_uno": {
+      "users": [
+        {"username": {"insecure_value": "app"}, "password": {"insecure_value": "app_password"}},
+        {"username": {"insecure_value": "admin"}, "password": {"insecure_value": "admin_password"}},
+        {"username": {"insecure_value": "developer"}, "password": {"insecure_value": "developer_password"}}
+      ],
+      "backend": {
+        "host": "localhost",
+        "port": 15432,
+        "database": "uno",
+        "sslmode": "disable",
+        "pool_max_conns": 10,
+        "pool_min_idle_conns": 2
+      }
+    },
+    "alpha_dos": {
+      "users": [
+        {"username": {"insecure_value": "app"}, "password": {"insecure_value": "app_password"}},
+        {"username": {"insecure_value": "admin"}, "password": {"insecure_value": "admin_password"}},
+        {"username": {"insecure_value": "developer"}, "password": {"insecure_value": "developer_password"}}
+      ],
+      "backend": {
+        "host": "localhost",
+        "port": 15432,
+        "database": "dos",
+        "sslmode": "disable",
+        "pool_max_conns": 10,
+        "pool_min_idle_conns": 2
+      }
+    },
+    "bravo_uno": {
+      "users": [
+        {"username": {"insecure_value": "app"}, "password": {"insecure_value": "app_password"}},
+        {"username": {"insecure_value": "admin"}, "password": {"insecure_value": "admin_password"}},
+        {"username": {"insecure_value": "developer"}, "password": {"insecure_value": "developer_password"}}
+      ],
+      "backend": {
+        "host": "localhost",
+        "port": 15433,
+        "database": "uno",
+        "sslmode": "disable",
+        "pool_max_conns": 10,
+        "pool_min_idle_conns": 2
+      }
+    },
+    "bravo_dos": {
+      "users": [
+        {"username": {"insecure_value": "app"}, "password": {"insecure_value": "app_password"}},
+        {"username": {"insecure_value": "admin"}, "password": {"insecure_value": "admin_password"}},
+        {"username": {"insecure_value": "developer"}, "password": {"insecure_value": "developer_password"}}
+      ],
+      "backend": {
+        "host": "localhost",
+        "port": 15433,
+        "database": "dos",
+        "sslmode": "disable",
+        "pool_max_conns": 10,
+        "pool_min_idle_conns": 2
+      }
+    },
+    "charlie_uno": {
+      "users": [
+        {"username": {"insecure_value": "app"}, "password": {"insecure_value": "app_password"}},
+        {"username": {"insecure_value": "admin"}, "password": {"insecure_value": "admin_password"}},
+        {"username": {"insecure_value": "developer"}, "password": {"insecure_value": "developer_password"}}
+      ],
+      "backend": {
+        "host": "localhost",
+        "port": 15434,
+        "database": "uno",
+        "sslmode": "disable",
+        "pool_max_conns": 10,
+        "pool_min_idle_conns": 2
+      }
+    },
+    "charlie_dos": {
+      "users": [
+        {"username": {"insecure_value": "app"}, "password": {"insecure_value": "app_password"}},
+        {"username": {"insecure_value": "admin"}, "password": {"insecure_value": "admin_password"}},
+        {"username": {"insecure_value": "developer"}, "password": {"insecure_value": "developer_password"}}
+      ],
+      "backend": {
+        "host": "localhost",
+        "port": 15434,
+        "database": "dos",
+        "sslmode": "disable",
+        "pool_max_conns": 10,
+        "pool_min_idle_conns": 2
+      }
+    }
+  }
+}

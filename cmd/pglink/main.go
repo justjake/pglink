@@ -138,7 +138,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	svc, err := frontend.NewService(ctx, cfg, secrets, logger)
+	fsys := os.DirFS(cfg.Dir())
+	svc, err := frontend.NewService(ctx, cfg, fsys, secrets, logger)
 	if err != nil {
 		logger.Error("failed to create service", "error", err)
 		os.Exit(1)

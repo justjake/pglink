@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"iter"
 	"strings"
@@ -10,12 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ServerConfig configures a single server instance.
-type ServerConfig struct {
-	Database             string        `json:"database"`
+// DatabaseConfig configures a single database that clients can connect to.
+type DatabaseConfig struct {
+	// Database is the database name clients use to connect.
+	// This is set from the map key in the parent Config, not from JSON.
+	Database string `json:"-"`
+
 	Users                []UserConfig  `json:"users"`
 	Backend              BackendConfig `json:"backend"`
-	TrackExtraParameters []string      `json:"track_extra_parameters,omitempty"`
+	TrackExtraParameters []string      `json:"track_extra_parameters,omitzero"`
+}
+
+// Validate checks that the database configuration is valid.
+func (c *DatabaseConfig) Validate() error {
+	var errs []error
+
+	if c.Backend.PoolMaxConns <= 0 {
+		errs = append(errs, fmt.Errorf("backend.pool_max_conns is required and must be > 0"))
+	}
+
+	if c.Backend.PoolMinIdleConns != nil && *c.Backend.PoolMinIdleConns > 0 {
+		minRequired := int32(len(c.Users)) * *c.Backend.PoolMinIdleConns
+		if minRequired > c.Backend.PoolMaxConns {
+			errs = append(errs, fmt.Errorf(
+				"backend.pool_min_idle_conns (%d) * len(users) (%d) = %d exceeds backend.pool_max_conns (%d)",
+				*c.Backend.PoolMinIdleConns, len(c.Users), minRequired, c.Backend.PoolMaxConns))
+		}
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }
 
 // UserConfig configures authentication credentials for a user.
@@ -42,8 +69,8 @@ type BackendConfig struct {
 	DescriptionCacheCapacity *int32  `json:"description_cache_capacity,omitempty"` // 0 to disable, default 512
 
 	// Pool settings
-	PoolMaxConns              *int32  `json:"pool_max_conns,omitempty"`
-	PoolMinConns              *int32  `json:"pool_min_conns,omitempty"`
+	PoolMaxConns              int32   `json:"pool_max_conns"`
+	PoolMinIdleConns          *int32  `json:"pool_min_idle_conns,omitempty"`
 	PoolMaxConnLifetime       *string `json:"pool_max_conn_lifetime,omitempty"`        // duration
 	PoolMaxConnLifetimeJitter *string `json:"pool_max_conn_lifetime_jitter,omitempty"` // duration
 	PoolMaxConnIdleTime       *string `json:"pool_max_conn_idle_time,omitempty"`       // duration
@@ -91,8 +118,8 @@ func (c *BackendConfig) PoolConfigString() string {
 	addInt32("description_cache_capacity", c.DescriptionCacheCapacity)
 
 	// Pool settings
-	addInt32("pool_max_conns", c.PoolMaxConns)
-	addInt32("pool_min_conns", c.PoolMinConns)
+	parts = append(parts, fmt.Sprintf("pool_max_conns=%d", c.PoolMaxConns))
+	// Note: pool_min_idle_conns is set directly in PoolConfig(), not via connection string
 	addStr("pool_max_conn_lifetime", c.PoolMaxConnLifetime)
 	addStr("pool_max_conn_lifetime_jitter", c.PoolMaxConnLifetimeJitter)
 	addStr("pool_max_conn_idle_time", c.PoolMaxConnIdleTime)
@@ -107,6 +134,11 @@ func (c *BackendConfig) PoolConfig() (*pgxpool.Config, error) {
 	cfg, err := pgxpool.ParseConfig(c.PoolConfigString())
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse pool config: %w", err)
+	}
+
+	// Set MinIdleConns (not supported via connection string)
+	if c.PoolMinIdleConns != nil {
+		cfg.MinIdleConns = *c.PoolMinIdleConns
 	}
 
 	// Apply default startup parameters

@@ -1,8 +1,7 @@
 {
   "listen": [":5432"],
-  "servers": [
-    {
-      "database": "myapp",
+  "databases": {
+    "myapp": {
       "users": [
         {
           "username": {"insecure_value": "postgres"},
@@ -12,8 +11,9 @@
       "backend": {
         "host": "localhost",
         "database": "myapp",
+        "pool_max_conns": 10,
         "connect_timeout": "not_a_number"
       }
     }
-  ]
+  }
 }

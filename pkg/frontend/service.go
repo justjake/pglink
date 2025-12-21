@@ -2,8 +2,10 @@ package frontend
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"sync"
@@ -14,14 +16,23 @@ import (
 	"github.com/justjake/pglink/pkg/config"
 )
 
+// serviceListener holds a proxy server and its listener.
+type serviceListener struct {
+	server   *proxy.Server
+	listener net.Listener
+}
+
 // Service handles incoming client connections.
 type Service struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *slog.Logger
 
-	config  *config.Config
-	secrets *config.SecretCache
+	config    *config.Config
+	secrets   *config.SecretCache
+	tlsConfig *tls.Config
+
+	listeners map[config.ListenAddr]*serviceListener
 
 	connInfoStore         backend.ConnInfoStore
 	clientMessageHandlers *proxy.ClientMessageHandlers
@@ -30,9 +41,15 @@ type Service struct {
 
 // NewService creates a new frontend Service with the given configuration.
 // It validates the config by fetching all referenced secrets.
-func NewService(ctx context.Context, cfg *config.Config, secrets *config.SecretCache, logger *slog.Logger) (*Service, error) {
-	if err := cfg.Validate(ctx, secrets); err != nil {
+// The fsys parameter should be rooted at the config file's directory for resolving relative paths.
+func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *config.SecretCache, logger *slog.Logger) (*Service, error) {
+	if err := cfg.Validate(ctx, fsys, secrets); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	tlsConfig, err := cfg.TLSConfig(fsys)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TLS config: %w", err)
 	}
 
 	innerCtx, cancel := context.WithCancel(ctx)
@@ -47,6 +64,8 @@ func NewService(ctx context.Context, cfg *config.Config, secrets *config.SecretC
 		logger:                logger,
 		config:                cfg,
 		secrets:               secrets,
+		tlsConfig:             tlsConfig,
+		listeners:             make(map[config.ListenAddr]*serviceListener),
 		connInfoStore:         connInfoStore,
 		clientMessageHandlers: clientHandlers,
 		serverMessageHandlers: serverHandlers,
@@ -59,6 +78,7 @@ func (s *Service) newServer() *proxy.Server {
 		ConnInfoStore:         s.connInfoStore,
 		ClientMessageHandlers: s.clientMessageHandlers,
 		ServerMessageHandlers: s.serverMessageHandlers,
+		TLSConfig:             s.tlsConfig,
 		OnHandleConnError: func(err error, ctx *proxy.Ctx, conn net.Conn) {
 			if err == io.EOF {
 				return
@@ -92,43 +112,44 @@ func (s *Service) newServer() *proxy.Server {
 // When the service's context is cancelled or an error occurs, all servers
 // are shut down gracefully.
 func (s *Service) Listen() error {
-	type serverListener struct {
-		server   *proxy.Server
-		listener net.Listener
-	}
-
-	servers := make([]serverListener, 0, len(s.config.Listen))
-
 	// Set up all listeners first, each with its own server
 	for _, addr := range s.config.Listen {
 		ln, err := net.Listen("tcp", addr.String())
 		if err != nil {
 			// Close any listeners we already opened
-			for _, sl := range servers {
+			for _, sl := range s.listeners {
 				_ = sl.listener.Close()
 			}
 			return fmt.Errorf("failed to listen on %s: %w", addr, err)
 		}
-		servers = append(servers, serverListener{
+		s.listeners[addr] = &serviceListener{
 			server:   s.newServer(),
 			listener: ln,
-		})
+		}
 		s.logger.Info("listening", "addr", addr.String())
 	}
 
 	// All listeners created successfully, start serving
 	var wg sync.WaitGroup
-	errCh := make(chan error, len(servers))
+	errCh := make(chan error, len(s.listeners))
 
-	for _, sl := range servers {
+	for addr, sl := range s.listeners {
 		wg.Add(1)
-		go func(sl serverListener) {
+		go func(addr config.ListenAddr, sl *serviceListener) {
 			defer wg.Done()
 			if err := sl.server.Serve(sl.listener); err != nil {
-				errCh <- err
+				errCh <- fmt.Errorf("server %s: %w", addr, err)
 			}
-		}(sl)
+		}(addr, sl)
 	}
+
+	// Start a goroutine to shutdown servers when context is cancelled
+	go func() {
+		<-s.ctx.Done()
+		for _, sl := range s.listeners {
+			sl.server.Shutdown()
+		}
+	}()
 
 	// Wait for context cancellation or first error
 	var firstErr error
@@ -137,14 +158,8 @@ func (s *Service) Listen() error {
 		firstErr = s.ctx.Err()
 	case err := <-errCh:
 		firstErr = err
-	}
-
-	// Cancel context to signal shutdown
-	s.cancel()
-
-	// Close all listeners to stop accepting new connections
-	for _, sl := range servers {
-		_ = sl.listener.Close()
+		// Cancel context to trigger shutdown of other servers
+		s.cancel()
 	}
 
 	// Wait for all servers to finish
@@ -153,7 +168,7 @@ func (s *Service) Listen() error {
 	return firstErr
 }
 
-// Shutdown cancels the service's context, triggering graceful shutdown.
+// Shutdown cancels the service's context, triggering graceful shutdown of all servers.
 func (s *Service) Shutdown() {
 	s.cancel()
 }

@@ -1,8 +1,7 @@
 {
   "listen": [":5432"],
-  "servers": [
-    {
-      "database": "app1",
+  "databases": {
+    "app1": {
       "users": [
         {
           "username": {"insecure_value": "app1_user"},
@@ -11,11 +10,11 @@
       ],
       "backend": {
         "host": "db1.example.com",
-        "database": "app1_db"
+        "database": "app1_db",
+        "pool_max_conns": 10
       }
     },
-    {
-      "database": "app2",
+    "app2": {
       "users": [
         {
           "username": {"insecure_value": "app2_user"},
@@ -24,8 +23,9 @@
       ],
       "backend": {
         "host": "db2.example.com",
-        "database": "app2_db"
+        "database": "app2_db",
+        "pool_max_conns": 10
       }
     }
-  ]
+  }
 }

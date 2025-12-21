@@ -69,13 +69,13 @@ func TestListenAddr_String(t *testing.T) {
 	}
 }
 
-func TestParseConfig_MultipleServers(t *testing.T) {
+func TestParseConfig_MultipleDatabases(t *testing.T) {
 	jsonStr := `{
 		"listen": [":5432"],
-		"servers": [
-			{"database": "db1"},
-			{"database": "db2"}
-		]
+		"databases": {
+			"db1": {},
+			"db2": {}
+		}
 	}`
 
 	cfg, err := ParseConfig(jsonStr)
@@ -83,16 +83,20 @@ func TestParseConfig_MultipleServers(t *testing.T) {
 		t.Fatalf("ParseConfig failed: %v", err)
 	}
 
-	if len(cfg.Servers) != 2 {
-		t.Fatalf("expected 2 servers, got %d", len(cfg.Servers))
+	if len(cfg.Databases) != 2 {
+		t.Fatalf("expected 2 databases, got %d", len(cfg.Databases))
 	}
 
-	if cfg.Servers[0].Database != "db1" {
-		t.Errorf("server 0: expected database \"db1\", got %q", cfg.Servers[0].Database)
+	if cfg.Databases["db1"] == nil {
+		t.Error("expected database \"db1\" to exist")
+	} else if cfg.Databases["db1"].Database != "db1" {
+		t.Errorf("database db1: expected database \"db1\", got %q", cfg.Databases["db1"].Database)
 	}
 
-	if cfg.Servers[1].Database != "db2" {
-		t.Errorf("server 1: expected database \"db2\", got %q", cfg.Servers[1].Database)
+	if cfg.Databases["db2"] == nil {
+		t.Error("expected database \"db2\" to exist")
+	} else if cfg.Databases["db2"].Database != "db2" {
+		t.Errorf("database db2: expected database \"db2\", got %q", cfg.Databases["db2"].Database)
 	}
 }
 
@@ -111,8 +115,8 @@ func TestReadConfigFile(t *testing.T) {
 			file: "full.json",
 		},
 		{
-			name: "multiple servers",
-			file: "multiple_servers.json",
+			name: "multiple databases",
+			file: "multiple_databases.json",
 		},
 		{
 			name: "env secrets",
@@ -134,12 +138,12 @@ func TestReadConfigFile(t *testing.T) {
 			if len(cfg.Listen) == 0 {
 				t.Error("expected at least one listen address")
 			}
-			if len(cfg.Servers) == 0 {
-				t.Error("expected at least one server")
+			if len(cfg.Databases) == 0 {
+				t.Error("expected at least one database")
 			}
 
-			t.Logf("loaded config with %d listen addresses and %d servers",
-				len(cfg.Listen), len(cfg.Servers))
+			t.Logf("loaded config with %d listen addresses and %d databases",
+				len(cfg.Listen), len(cfg.Databases))
 		})
 	}
 }
@@ -167,8 +171,8 @@ func TestConfig_Validate(t *testing.T) {
 			file: "full.json",
 		},
 		{
-			name: "multiple servers validates",
-			file: "multiple_servers.json",
+			name: "multiple databases validates",
+			file: "multiple_databases.json",
 		},
 		{
 			name: "env secrets with vars set",
@@ -217,7 +221,7 @@ func TestConfig_Validate(t *testing.T) {
 				t.Fatalf("ReadConfigFile() error = %v", err)
 			}
 
-			err = cfg.Validate(ctx, secrets)
+			err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -242,8 +246,8 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 	// Create a config with multiple errors
 	cfg := &Config{
 		Listen: []ListenAddr{":5432"},
-		Servers: []ServerConfig{
-			{
+		Databases: map[string]*DatabaseConfig{
+			"db1": {
 				Database: "db1",
 				Users: []UserConfig{
 					{
@@ -257,7 +261,7 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 					ConnectTimeout: ptr("invalid"),
 				},
 			},
-			{
+			"db2": {
 				Database: "db2",
 				Users: []UserConfig{
 					{
@@ -273,7 +277,7 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 		},
 	}
 
-	err := cfg.Validate(ctx, secrets)
+	err := cfg.Validate(ctx, os.DirFS("."), secrets)
 	if err == nil {
 		t.Fatal("expected validation errors")
 	}
@@ -282,8 +286,8 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 	t.Logf("accumulated errors: %v", err)
 
 	// Should have backend error for first server
-	if !strings.Contains(errStr, "servers[0].backend") {
-		t.Error("expected error for servers[0].backend")
+	if !strings.Contains(errStr, "databases[db1].backend") {
+		t.Error("expected error for databases[db1].backend")
 	}
 
 	// Should have secret errors
@@ -298,6 +302,97 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 	}
 }
 
+func TestDatabaseConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      DatabaseConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid config",
+			config: DatabaseConfig{
+				Database: "mydb",
+				Users: []UserConfig{
+					{Username: SecretRef{InsecureValue: "user1"}, Password: SecretRef{InsecureValue: "pass1"}},
+					{Username: SecretRef{InsecureValue: "user2"}, Password: SecretRef{InsecureValue: "pass2"}},
+				},
+				Backend: BackendConfig{
+					Host:         "localhost",
+					Database:     "mydb",
+					PoolMaxConns: 20,
+					PoolMinIdleConns: ptr[int32](5),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "pool_max_conns required",
+			config: DatabaseConfig{
+				Database: "mydb",
+				Users:    []UserConfig{},
+				Backend: BackendConfig{
+					Host:         "localhost",
+					Database:     "mydb",
+					PoolMaxConns: 0,
+				},
+			},
+			wantErr:     true,
+			errContains: "pool_max_conns is required",
+		},
+		{
+			name: "pool_min_idle_conns * users exceeds max",
+			config: DatabaseConfig{
+				Database: "mydb",
+				Users: []UserConfig{
+					{Username: SecretRef{InsecureValue: "user1"}, Password: SecretRef{InsecureValue: "pass1"}},
+					{Username: SecretRef{InsecureValue: "user2"}, Password: SecretRef{InsecureValue: "pass2"}},
+					{Username: SecretRef{InsecureValue: "user3"}, Password: SecretRef{InsecureValue: "pass3"}},
+				},
+				Backend: BackendConfig{
+					Host:         "localhost",
+					Database:     "mydb",
+					PoolMaxConns: 10,
+					PoolMinIdleConns: ptr[int32](5), // 5 * 3 = 15 > 10
+				},
+			},
+			wantErr:     true,
+			errContains: "exceeds backend.pool_max_conns",
+		},
+		{
+			name: "pool_min_idle_conns * users equals max is ok",
+			config: DatabaseConfig{
+				Database: "mydb",
+				Users: []UserConfig{
+					{Username: SecretRef{InsecureValue: "user1"}, Password: SecretRef{InsecureValue: "pass1"}},
+					{Username: SecretRef{InsecureValue: "user2"}, Password: SecretRef{InsecureValue: "pass2"}},
+				},
+				Backend: BackendConfig{
+					Host:         "localhost",
+					Database:     "mydb",
+					PoolMaxConns: 10,
+					PoolMinIdleConns: ptr[int32](5), // 5 * 2 = 10 == 10
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.errContains != "" && err != nil {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
+				}
+			}
+		})
+	}
+}
+
 func TestConfig_PoolConfigFromFile(t *testing.T) {
 	path := filepath.Join("testdata", "full.json")
 	cfg, err := ReadConfigFile(path)
@@ -305,7 +400,12 @@ func TestConfig_PoolConfigFromFile(t *testing.T) {
 		t.Fatalf("ReadConfigFile() error = %v", err)
 	}
 
-	backend := cfg.Servers[0].Backend
+	server := cfg.Databases["production"]
+	if server == nil {
+		t.Fatal("expected server \"production\" to exist")
+	}
+
+	backend := server.Backend
 	poolCfg, err := backend.PoolConfig()
 	if err != nil {
 		t.Fatalf("PoolConfig() error = %v", err)
@@ -355,7 +455,7 @@ func TestConfig_Validate_WithMockAWS(t *testing.T) {
 	}
 
 	// Validation should succeed with mock
-	err = cfg.Validate(ctx, secrets)
+	err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets)
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -366,7 +466,11 @@ func TestConfig_Validate_WithMockAWS(t *testing.T) {
 	}
 
 	// Verify we can retrieve the secrets
-	user := cfg.Servers[0].Users[0]
+	server := cfg.Databases["production"]
+	if server == nil {
+		t.Fatal("expected server \"production\" to exist")
+	}
+	user := server.Users[0]
 	username, err := secrets.Get(ctx, user.Username)
 	if err != nil {
 		t.Fatalf("Get username error = %v", err)
@@ -398,7 +502,7 @@ func TestConfig_Validate_AWSSecretMissing(t *testing.T) {
 	}
 
 	// Validation should fail
-	err = cfg.Validate(ctx, secrets)
+	err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets)
 	if err == nil {
 		t.Fatal("expected validation error for missing AWS secret")
 	}

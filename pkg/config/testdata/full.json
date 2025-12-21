@@ -1,8 +1,7 @@
 {
   "listen": [":5432", "127.0.0.1:6432"],
-  "servers": [
-    {
-      "database": "production",
+  "databases": {
+    "production": {
       "users": [
         {
           "username": {"insecure_value": "app_user"},
@@ -20,7 +19,7 @@
         "sslmode": "require",
         "connect_timeout": "10",
         "pool_max_conns": 100,
-        "pool_min_conns": 10,
+        "pool_min_idle_conns": 10,
         "pool_max_conn_lifetime": "1h",
         "pool_max_conn_idle_time": "30m",
         "pool_health_check_period": "1m",
@@ -31,5 +30,5 @@
       },
       "track_extra_parameters": ["TimeZone", "client_encoding"]
     }
-  ]
+  }
 }
