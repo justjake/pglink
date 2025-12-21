@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -23,7 +24,8 @@ type DatabaseConfig struct {
 }
 
 // Validate checks that the database configuration is valid.
-func (c *DatabaseConfig) Validate() error {
+// It verifies pool constraints and that all usernames are unique.
+func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) error {
 	var errs []error
 
 	if c.Backend.PoolMaxConns <= 0 {
@@ -39,6 +41,21 @@ func (c *DatabaseConfig) Validate() error {
 		}
 	}
 
+	// Check for duplicate usernames
+	seenUsernames := make(map[string]int) // username -> first index seen
+	for i, user := range c.Users {
+		username, err := secrets.Get(ctx, user.Username)
+		if err != nil {
+			// Secret resolution errors are reported elsewhere; skip duplicate check for this user
+			continue
+		}
+		if firstIdx, exists := seenUsernames[username]; exists {
+			errs = append(errs, fmt.Errorf("users[%d].username: duplicate username %q (first seen at users[%d])", i, username, firstIdx))
+		} else {
+			seenUsernames[username] = i
+		}
+	}
+
 	if len(errs) == 0 {
 		return nil
 	}
@@ -49,6 +66,22 @@ func (c *DatabaseConfig) Validate() error {
 type UserConfig struct {
 	Username SecretRef `json:"username"`
 	Password SecretRef `json:"password"`
+}
+
+// String returns a string representation of the user config.
+// Format: "insecure:<value>", "env:<var>", or "aws:<arn>?key=<key>"
+func (u UserConfig) String() string {
+	ref := u.Username
+	switch {
+	case ref.InsecureValue != "":
+		return "insecure:" + ref.InsecureValue
+	case ref.EnvVar != "":
+		return "env:" + ref.EnvVar
+	case ref.AwsSecretArn != "":
+		return "aws:" + ref.AwsSecretArn + "?key=" + ref.Key
+	default:
+		return "<invalid>"
+	}
 }
 
 // BackendConfig configures the backend PostgreSQL server to proxy to.

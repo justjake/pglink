@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,11 +15,13 @@ import (
 // Database manages connection pools to a backend PostgreSQL server.
 // It coordinates multiple per-user pools under a global connection limit,
 // providing fair scheduling and connection stealing when at capacity.
+//
+// All pools are created eagerly in NewDatabase and the userPools map is
+// immutable after construction, so no locking is needed.
 type Database struct {
 	config  config.DatabaseConfig
 	secrets *config.SecretCache
 
-	mu        sync.RWMutex
 	userPools map[config.UserConfig]*pgxpool.Pool
 
 	// Connection coordination
@@ -55,29 +56,14 @@ func NewDatabase(ctx context.Context, cfg config.DatabaseConfig, secrets *config
 	return db, nil
 }
 
-// GetPool returns the connection pool for the given user, or nil if none exists.
+// GetPool returns the connection pool for the given user.
+// Panics if the user is not known (all valid users have pools created in NewDatabase).
 func (d *Database) GetPool(user config.UserConfig) *pgxpool.Pool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.userPools[user]
-}
-
-// SetPool sets the connection pool for the given user.
-func (d *Database) SetPool(user config.UserConfig, pool *pgxpool.Pool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.userPools[user] = pool
-}
-
-// getPool returns the pool for the user.
-// Since pools are created eagerly in NewDatabase, this should always succeed
-// for valid users.
-func (d *Database) getPool(user config.UserConfig) (*pgxpool.Pool, error) {
-	pool := d.GetPool(user)
+	pool := d.userPools[user]
 	if pool == nil {
-		return nil, fmt.Errorf("no pool for user (this should not happen)")
+		panic("Database: unknown user")
 	}
-	return pool, nil
+	return pool
 }
 
 // createPool creates a new connection pool for the given user.
@@ -196,10 +182,7 @@ func (pc *PooledConn) Release() {
 // Failing to release connections will exhaust the connection pool.
 func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*PooledConn, error) {
 	// Get the user's pool (created eagerly in NewDatabase)
-	pool, err := d.getPool(user)
-	if err != nil {
-		return nil, err
-	}
+	pool := d.GetPool(user)
 
 	// Acquire with retry loop for handling connection limit
 	for {
@@ -245,28 +228,16 @@ func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*Pooled
 // tryStealIdleConnection attempts to close an idle connection from any pool
 // except the excluded user. Returns true if a connection was stolen.
 func (d *Database) tryStealIdleConnection(exclude config.UserConfig) bool {
-	// Collect candidate pools under the lock, then release before blocking operations
-	var candidates []*pgxpool.Pool
-
-	d.mu.RLock()
 	for user, pool := range d.userPools {
 		if user == exclude {
 			continue
 		}
-		stat := pool.Stat()
-		if stat.IdleConns() > 0 {
-			candidates = append(candidates, pool)
+		if pool.Stat().IdleConns() > 0 {
+			if d.tryHijackIdleConnection(pool) {
+				return true
+			}
 		}
 	}
-	d.mu.RUnlock()
-
-	// Try to steal from each candidate (outside the lock to avoid deadlock)
-	for _, pool := range candidates {
-		if d.tryHijackIdleConnection(pool) {
-			return true
-		}
-	}
-
 	return false
 }
 
@@ -295,19 +266,14 @@ func (d *Database) tryHijackIdleConnection(pool *pgxpool.Pool) bool {
 
 // Stats returns statistics about the database's connection pools.
 func (d *Database) Stats() DatabaseStats {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	stats := DatabaseStats{
 		ConnManager: d.connMgr.stats(),
 		Pools:       make(map[string]PoolStats),
 	}
 
 	for user, pool := range d.userPools {
-		// Use username as key (need to resolve it)
-		key := fmt.Sprintf("user_%p", &user) // Use pointer as simple key
 		poolStat := pool.Stat()
-		stats.Pools[key] = PoolStats{
+		stats.Pools[user.String()] = PoolStats{
 			TotalConns:    poolStat.TotalConns(),
 			AcquiredConns: poolStat.AcquiredConns(),
 			IdleConns:     poolStat.IdleConns(),
@@ -340,11 +306,7 @@ type PoolStats struct {
 
 // Close closes all connection pools.
 func (d *Database) Close() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	for _, pool := range d.userPools {
 		pool.Close()
 	}
-	d.userPools = make(map[config.UserConfig]*pgxpool.Pool)
 }

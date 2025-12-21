@@ -303,6 +303,9 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 }
 
 func TestDatabaseConfig_Validate(t *testing.T) {
+	ctx := context.Background()
+	secrets := NewSecretCache(nil)
+
 	tests := []struct {
 		name        string
 		config      DatabaseConfig
@@ -318,9 +321,9 @@ func TestDatabaseConfig_Validate(t *testing.T) {
 					{Username: SecretRef{InsecureValue: "user2"}, Password: SecretRef{InsecureValue: "pass2"}},
 				},
 				Backend: BackendConfig{
-					Host:         "localhost",
-					Database:     "mydb",
-					PoolMaxConns: 20,
+					Host:             "localhost",
+					Database:         "mydb",
+					PoolMaxConns:     20,
 					PoolMinIdleConns: ptr[int32](5),
 				},
 			},
@@ -350,9 +353,9 @@ func TestDatabaseConfig_Validate(t *testing.T) {
 					{Username: SecretRef{InsecureValue: "user3"}, Password: SecretRef{InsecureValue: "pass3"}},
 				},
 				Backend: BackendConfig{
-					Host:         "localhost",
-					Database:     "mydb",
-					PoolMaxConns: 10,
+					Host:             "localhost",
+					Database:         "mydb",
+					PoolMaxConns:     10,
 					PoolMinIdleConns: ptr[int32](5), // 5 * 3 = 15 > 10
 				},
 			},
@@ -368,19 +371,37 @@ func TestDatabaseConfig_Validate(t *testing.T) {
 					{Username: SecretRef{InsecureValue: "user2"}, Password: SecretRef{InsecureValue: "pass2"}},
 				},
 				Backend: BackendConfig{
-					Host:         "localhost",
-					Database:     "mydb",
-					PoolMaxConns: 10,
+					Host:             "localhost",
+					Database:         "mydb",
+					PoolMaxConns:     10,
 					PoolMinIdleConns: ptr[int32](5), // 5 * 2 = 10 == 10
 				},
 			},
 			wantErr: false,
 		},
+		{
+			name: "duplicate usernames",
+			config: DatabaseConfig{
+				Database: "mydb",
+				Users: []UserConfig{
+					{Username: SecretRef{InsecureValue: "same_user"}, Password: SecretRef{InsecureValue: "pass1"}},
+					{Username: SecretRef{InsecureValue: "different_user"}, Password: SecretRef{InsecureValue: "pass2"}},
+					{Username: SecretRef{InsecureValue: "same_user"}, Password: SecretRef{InsecureValue: "pass3"}},
+				},
+				Backend: BackendConfig{
+					Host:         "localhost",
+					Database:     "mydb",
+					PoolMaxConns: 10,
+				},
+			},
+			wantErr:     true,
+			errContains: "duplicate username",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
+			err := tt.config.Validate(ctx, secrets)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -424,8 +445,8 @@ func TestConfig_PoolConfigFromFile(t *testing.T) {
 	if poolCfg.MaxConns != 100 {
 		t.Errorf("max_conns = %d, want %d", poolCfg.MaxConns, 100)
 	}
-	if poolCfg.MinConns != 10 {
-		t.Errorf("min_conns = %d, want %d", poolCfg.MinConns, 10)
+	if poolCfg.MinIdleConns != 10 {
+		t.Errorf("min_idle_conns = %d, want %d", poolCfg.MinIdleConns, 10)
 	}
 
 	// Verify startup parameters were applied

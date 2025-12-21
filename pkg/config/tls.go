@@ -121,8 +121,16 @@ func (c *JsonTLSConfig) Required() bool {
 	return c.SSLMode == SSLModeRequire
 }
 
+// TLSResult contains the result of creating a TLS configuration.
+type TLSResult struct {
+	// Config is the TLS configuration, or nil if TLS is disabled.
+	Config *tls.Config
+	// WrittenFiles contains the paths of any certificate files that were written.
+	WrittenFiles []string
+}
+
 // NewTLS creates a tls.Config based on the configuration.
-// Returns nil if TLS is disabled.
+// Returns a TLSResult with nil Config if TLS is disabled.
 // If GenerateCert is true and CertPath/CertPrivateKeyPath are set,
 // the generated certificate will be written to those paths if they don't exist.
 //
@@ -131,13 +139,14 @@ func (c *JsonTLSConfig) Required() bool {
 //   - resolvePath: function to resolve relative paths to absolute paths for writing
 //
 // The caller should call Validate() before calling NewTLS().
-func (c *JsonTLSConfig) NewTLS(fsys fs.FS, resolvePath func(string) string) (*tls.Config, error) {
+func (c *JsonTLSConfig) NewTLS(fsys fs.FS, resolvePath func(string) string) (TLSResult, error) {
 	if !c.Enabled() {
-		return nil, nil
+		return TLSResult{}, nil
 	}
 
 	var cert tls.Certificate
 	var err error
+	var writtenFiles []string
 
 	if c.GenerateCert {
 		// Check if we should write to paths
@@ -149,13 +158,13 @@ func (c *JsonTLSConfig) NewTLS(fsys fs.FS, resolvePath func(string) string) (*tl
 			// Both files exist, load them instead of generating
 			cert, err = loadX509KeyPairFS(fsys, c.CertPath, c.CertPrivateKeyPath)
 			if err != nil {
-				return nil, fmt.Errorf("failed to load certificate: %w", err)
+				return TLSResult{}, fmt.Errorf("failed to load certificate: %w", err)
 			}
 		} else {
 			// Generate new cert
 			cert, err = generateSelfSignedCert()
 			if err != nil {
-				return nil, fmt.Errorf("failed to generate self-signed certificate: %w", err)
+				return TLSResult{}, fmt.Errorf("failed to generate self-signed certificate: %w", err)
 			}
 
 			// Write to paths if configured and files don't exist
@@ -163,20 +172,24 @@ func (c *JsonTLSConfig) NewTLS(fsys fs.FS, resolvePath func(string) string) (*tl
 				certAbsPath := resolvePath(c.CertPath)
 				keyAbsPath := resolvePath(c.CertPrivateKeyPath)
 				if err := writeCertToFiles(cert, certAbsPath, keyAbsPath); err != nil {
-					return nil, fmt.Errorf("failed to write certificate to files: %w", err)
+					return TLSResult{}, fmt.Errorf("failed to write certificate to files: %w", err)
 				}
+				writtenFiles = []string{certAbsPath, keyAbsPath}
 			}
 		}
 	} else {
 		cert, err = loadX509KeyPairFS(fsys, c.CertPath, c.CertPrivateKeyPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load certificate: %w", err)
+			return TLSResult{}, fmt.Errorf("failed to load certificate: %w", err)
 		}
 	}
 
-	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
+	return TLSResult{
+		Config: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		},
+		WrittenFiles: writtenFiles,
 	}, nil
 }
 
@@ -205,13 +218,17 @@ func loadX509KeyPairFS(fsys fs.FS, certPath, keyPath string) (tls.Certificate, e
 }
 
 // writeCertToFiles writes a certificate and its private key to the specified paths.
-func writeCertToFiles(cert tls.Certificate, certPath, keyPath string) error {
+func writeCertToFiles(cert tls.Certificate, certPath, keyPath string) (err error) {
 	// Write certificate
 	certOut, err := os.Create(certPath)
 	if err != nil {
 		return fmt.Errorf("failed to create cert file: %w", err)
 	}
-	defer certOut.Close()
+	defer func() {
+		if cerr := certOut.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("failed to close cert file: %w", cerr)
+		}
+	}()
 
 	for _, certBytes := range cert.Certificate {
 		if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certBytes}); err != nil {
@@ -224,7 +241,11 @@ func writeCertToFiles(cert tls.Certificate, certPath, keyPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create key file: %w", err)
 	}
-	defer keyOut.Close()
+	defer func() {
+		if kerr := keyOut.Close(); kerr != nil && err == nil {
+			err = fmt.Errorf("failed to close key file: %w", kerr)
+		}
+	}()
 
 	privKey, ok := cert.PrivateKey.(*ecdsa.PrivateKey)
 	if !ok {

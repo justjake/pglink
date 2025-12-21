@@ -40,16 +40,15 @@ type Service struct {
 }
 
 // NewService creates a new frontend Service with the given configuration.
-// It validates the config by fetching all referenced secrets.
+// The caller should validate the config before calling this function.
 // The fsys parameter should be rooted at the config file's directory for resolving relative paths.
 func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *config.SecretCache, logger *slog.Logger) (*Service, error) {
-	if err := cfg.Validate(ctx, fsys, secrets); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
-	}
-
-	tlsConfig, err := cfg.TLSConfig(fsys)
+	tlsResult, err := cfg.TLSConfig(fsys)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TLS config: %w", err)
+	}
+	for _, path := range tlsResult.WrittenFiles {
+		logger.Warn("wrote generated TLS certificate", "path", path)
 	}
 
 	innerCtx, cancel := context.WithCancel(ctx)
@@ -64,7 +63,7 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 		logger:                logger,
 		config:                cfg,
 		secrets:               secrets,
-		tlsConfig:             tlsConfig,
+		tlsConfig:             tlsResult.Config,
 		listeners:             make(map[config.ListenAddr]*serviceListener),
 		connInfoStore:         connInfoStore,
 		clientMessageHandlers: clientHandlers,
@@ -80,10 +79,6 @@ func (s *Service) newServer() *proxy.Server {
 		ServerMessageHandlers: s.serverMessageHandlers,
 		TLSConfig:             s.tlsConfig,
 		OnHandleConnError: func(err error, ctx *proxy.Ctx, conn net.Conn) {
-			if err == io.EOF {
-				return
-			}
-
 			client := conn.RemoteAddr().String()
 			serverAddr := ""
 			if ctx.ConnInfo.ServerAddress != nil {
@@ -94,6 +89,11 @@ func (s *Service) newServer() *proxy.Server {
 			if ctx.ConnInfo.StartupParameters != nil {
 				user = ctx.ConnInfo.StartupParameters["user"]
 				database = ctx.ConnInfo.StartupParameters["database"]
+			}
+
+			if err == io.EOF {
+				s.logger.Info("connection closed", "client", client, "server", serverAddr, "user", user, "database", database)
+				return
 			}
 
 			s.logger.Error("connection error",

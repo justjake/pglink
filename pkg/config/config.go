@@ -3,7 +3,6 @@ package config
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -15,8 +14,8 @@ import (
 
 // Config holds the pglink configuration.
 type Config struct {
-	Listen  []ListenAddr              `json:"listen"`
-	TLS     JsonTLSConfig             `json:"tls,omitzero"`
+	Listen    []ListenAddr               `json:"listen"`
+	TLS       JsonTLSConfig              `json:"tls,omitzero"`
 	Databases map[string]*DatabaseConfig `json:"databases"`
 
 	// filePath is the path to the config file on disk (not serialized).
@@ -100,10 +99,10 @@ func (c *Config) Secrets() iter.Seq2[string, SecretRef] {
 }
 
 // TLSConfig returns the TLS configuration for incoming client connections.
-// Returns nil, nil if TLS is disabled.
+// Returns a TLSResult with nil Config if TLS is disabled.
 // The fsys parameter is used to read certificate files; paths are relative to fsys root.
 // The caller should call Validate() before calling TLSConfig().
-func (c *Config) TLSConfig(fsys fs.FS) (*tls.Config, error) {
+func (c *Config) TLSConfig(fsys fs.FS) (TLSResult, error) {
 	return c.TLS.NewTLS(fsys, c.FileRelativePath)
 }
 
@@ -121,7 +120,7 @@ func (c *Config) Validate(ctx context.Context, fsys fs.FS, secrets *SecretCache)
 	}
 
 	for name, db := range c.Databases {
-		if err := db.Validate(); err != nil {
+		if err := db.Validate(ctx, secrets); err != nil {
 			errs = append(errs, fmt.Errorf("databases[%s]: %w", name, err))
 		}
 		if _, err := db.Backend.PoolConfig(); err != nil {

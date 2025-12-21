@@ -139,6 +139,13 @@ func main() {
 	}
 
 	fsys := os.DirFS(cfg.Dir())
+
+	if err := cfg.Validate(ctx, fsys, secrets); err != nil {
+		logger.Error("config validation failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("config validated", "path", cfg.FilePath())
+
 	svc, err := frontend.NewService(ctx, cfg, fsys, secrets, logger)
 	if err != nil {
 		logger.Error("failed to create service", "error", err)
