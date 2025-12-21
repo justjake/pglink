@@ -18,9 +18,23 @@ type Config struct {
 	TLS       JsonTLSConfig              `json:"tls,omitzero"`
 	Databases map[string]*DatabaseConfig `json:"databases"`
 
+	// MaxClientConnections is the maximum number of concurrent client connections
+	// the proxy will accept. New connections beyond this limit are immediately
+	// rejected with an error. If nil or 0, defaults to 1000.
+	MaxClientConnections *int32 `json:"max_client_connections,omitzero"`
+
 	// filePath is the path to the config file on disk (not serialized).
 	// Used for resolving relative paths in the config.
 	filePath string
+}
+
+// GetMaxClientConnections returns the maximum client connections setting,
+// defaulting to 1000 if not configured.
+func (c *Config) GetMaxClientConnections() int32 {
+	if c.MaxClientConnections == nil || *c.MaxClientConnections == 0 {
+		return 1000
+	}
+	return *c.MaxClientConnections
 }
 
 // FilePath returns the path to the config file on disk.

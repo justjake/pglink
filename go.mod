@@ -11,7 +11,6 @@ require (
 	github.com/jackc/pgproto3/v2 v2.1.1
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/lucasb-eyer/go-colorful v1.2.0
-	github.com/rueian/pgbroker v0.0.19
 	github.com/stretchr/testify v1.8.1
 )
 
@@ -37,6 +36,7 @@ require (
 	github.com/cybergarage/go-safecast v1.3.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
+	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

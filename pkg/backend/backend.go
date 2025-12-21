@@ -4,7 +4,6 @@ package backend
 
 import (
 	_ "github.com/jackc/pgx/v5/pgproto3"
-	_ "github.com/rueian/pgbroker/proxy"
 )
 
 // Conn represents a connection to a backend PostgreSQL server.
