@@ -2,15 +2,16 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+eval "$(mise activate bash --shims)"
 
-# Run formatters
-echo "Running formatters..."
-bin/format
-
-# Check if formatting changed any files
-if ! git diff --quiet; then
-    echo "Formatting changed files. Adding changes to commit..."
-    git add -u
+# Check if formatting is needed
+unformatted=$(find . -name '*.go' -not -path './vendor/*' | xargs gofmt -l)
+if [[ -n "$unformatted" ]]; then
+    echo "These files need formatting:"
+    echo "$unformatted"
+    echo ""
+    echo "Run 'bin/format' to fix."
+    exit 1
 fi
 
 # Run lint

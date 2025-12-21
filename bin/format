@@ -4,4 +4,4 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 eval "$(mise activate bash --shims)"
 
-go fmt ./...
+find . -name '*.go' -not -path './vendor/*' | xargs gofmt -w
