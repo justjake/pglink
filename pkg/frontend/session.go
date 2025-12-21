@@ -11,6 +11,7 @@ import (
 	"maps"
 	"math/rand/v2"
 	"net"
+	"runtime"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -48,9 +49,22 @@ type Session struct {
 	// Client's view of the server's session state.
 	state backend.ServerSession
 
+	// nil until a backend connection is acquired at least once
+	// handles forwarding NOTIFY messages to the appropriate client.
+
+	// Established client connection.
+	frontendNextMsg    chan pgproto3.FrontendMessage
+	frontendDisposeMsg chan pgproto3.FrontendMessage
+
+	readErrors chan error
+
 	// The server.
 	// nil until a backend connection is acquired to run a transaction.
-	backend *backend.PooledConn
+	// nil once the backend connection is released.
+	backend             *backend.PooledConn
+	backendNextMsg      chan pgproto3.BackendMessage
+	backendDisposeMsg   chan pgproto3.BackendMessage
+	backendConnectedCtx context.Context
 }
 
 // Context returns the session's context, which is canceled when Close is called.
@@ -59,13 +73,15 @@ func (s *Session) Context() context.Context {
 }
 
 // Select over reading from frontend, reading from backend, or receiving a context cancellation.
-func (s *Session) ReceiveFrontendOrBackend() (pgproto3.FrontendMessage, error) {
+func (s *Session) ReceiveAny() (pgproto3.Message, error) {
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
-	case msg := <-s.frontend.Receive():
+	case err := <-s.readErrors:
+		return nil, err
+	case msg := <-s.frontendNextMsg:
 		return msg, nil
-	case msg := <-s.backend.Receive():
+	case msg := <-s.backendNextMsg:
 		return msg, nil
 	}
 }
@@ -73,6 +89,18 @@ func (s *Session) ReceiveFrontendOrBackend() (pgproto3.FrontendMessage, error) {
 // Close cancels the session's context and releases associated resources.
 func (s *Session) Close() {
 	s.cancel()
+	if s.frontendNextMsg != nil {
+		close(s.frontendNextMsg)
+	}
+	if s.frontendDisposeMsg != nil {
+		close(s.frontendDisposeMsg)
+	}
+	if s.backendNextMsg != nil {
+		close(s.backendNextMsg)
+	}
+	if s.backendDisposeMsg != nil {
+		close(s.backendDisposeMsg)
+	}
 	if s.conn != nil {
 		closeErr := s.conn.Close()
 		if closeErr != nil {
@@ -164,12 +192,45 @@ func (s *Session) Run() {
 	// command cycle.
 	s.sendReadyForQuery()
 
+	go func() {
+		defer s.logger.Debug("frontend reader routine exited")
+		for {
+			msg, err := s.frontend.Receive()
+			if s.ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				s.readErrors <- err
+				return
+			}
+			s.frontendNextMsg <- msg
+
+			// Messages are ony valid until the next call to Receive() So we need to
+			// block the reader routine until the session is done with the message.
+			select {
+			case <-s.ctx.Done():
+				return
+			case returned := <-s.frontendDisposeMsg:
+				if returned != msg {
+					panic(fmt.Errorf("session did not release message in order for reuse: expectedc %T %p != actual %T %p", msg, msg, returned, returned))
+				}
+			}
+		}
+	}()
+
 	for {
 		// Initial state: no backend connection, so only receive from frontend.
-		msg, err := s.frontend.Receive()
+		anyMsg, err := s.ReceiveAny()
 		if err != nil {
-			s.logger.Error("error receiving client message", "error", err)
+			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving client message: %v", err))
+			return
 		}
+
+		msg, ok := anyMsg.(pgproto3.FrontendMessage)
+		if !ok {
+			panic(fmt.Errorf("expected frontend message, got %T", anyMsg))
+		}
+
 		s.logger.Debug("recv client message", "type", fmt.Sprintf("%T", msg))
 
 		if IsTerminateConnMessage(msg) {
@@ -186,8 +247,8 @@ func (s *Session) Run() {
 			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("idle client not in copy mode: %T", msg))
 			return
 		} else if IsSimpleQueryModeMessage(msg) || IsExtendedQueryModeMessage(msg) {
-			// Messages that acquire a backend connection (happy path).
-			if err := s.handleMessageWithBackend(msg); err != nil {
+			// Enter state where we have a backend connection.
+			if err := s.runWithBackend(msg); err != nil {
 				return err
 			}
 		} else {
@@ -195,114 +256,26 @@ func (s *Session) Run() {
 			return
 		}
 
-		// Handle client messages while there's no backend connection.
-		// The happy path is the start of a new command cycle.
+		// We have returned from having a backend to being idle.
+	}
+}
 
-		switch msg := msg.(type) {
-		case *pgproto3.Terminate:
-			s.logger.Info("client terminated connection")
-			return
-		// Simple Query flow:
-		case *pgproto3.Query:
-			// Simple query.
-			// Destroys unnamed prepared statement & portal.
+func (s *Session) runWithBackend(firstMsg pgproto3.FrontendMessage) error {
+	if err := s.acquireBackend(); err != nil {
+		s.sendError(backend.ErrorFatal, pgerrcode.CannotConnectNow, fmt.Sprintf("failed to acquire backend: %v", err))
+		return err
+	}
+	defer s.releaseBackend()
+	msg := firstMsg
 
-		// Extended Query flow:
-		case *pgproto3.Parse:
-			// Extended Query 1: parse text into a prepared statement.
-		case *pgproto3.Bind:
-			// Extended Query 2: Bind parameters to a prepared statement.
-		case *pgproto3.Execute:
-			// Extended Query 3: Execute a prepared statement, requesting N or all rows.
-			// May need to be called again if server replies PortalSuspended.
-			// Execute phase is always terminated by the appearance of exactly one of
-			// these messages:
-			// - PortalSuspended: execute ended before completion, call Execute again.
-			// - CommandComplete: success
-			// - ErrorResponse: failure
-			// - EmptyQueryResponse: the portal was created from an empty query string
-		case *pgproto3.Sync:
-			// Extended Query 4: Command pipeline complete.
-			//
-			// Causes the backend to close the current transaction if it's not inside a
-			// BEGIN/COMMIT transaction block (“close” meaning to commit if no error, or
-			// roll back if error).
-			// then, a ReadyForQuery response is issued.
-			//
-			// The purpose of Sync is to provide a resynchronization point for error
-			// recovery. When an error is detected while processing any extended-query
-			// message, the backend issues ErrorResponse, then reads and discards
-			// messages until a Sync is reached, then issues ReadyForQuery and returns
-			// to normal message processing. (But note that no skipping occurs if an
-			// error is detected while processing Sync — this ensures that there is
-			// one and only one ReadyForQuery sent for each Sync.)
+	for {
 
-		// In addition to these fundamental, required operations, there are several
-		// optional operations that can be used with extended-query protocol.
-		case *pgproto3.Describe:
-			// Extended Query tool: Describe prepared statement or portal.
-			//
-			// The Describe message (portal variant) specifies the name of an existing
-			// portal (or an empty string for the unnamed portal). The response is a
-			// RowDescription message describing the rows that will be returned by
-			// executing the portal; or a NoData message if the portal does not
-			// contain a query that will return rows; or ErrorResponse if there is no
-			// such portal.
-			//
-			// The Describe message (statement variant) specifies the name of an
-			// existing prepared statement (or an empty string for the unnamed
-			// prepared statement). The response is a ParameterDescription message
-			// describing the parameters needed by the statement, followed by a
-			// RowDescription message describing the rows that will be returned when
-			// the statement is eventually executed (or a NoData message if the
-			// statement will not return rows). ErrorResponse is issued if there is no
-			// such prepared statement. Note that since Bind has not yet been issued,
-			// the formats to be used for returned columns are not yet known to the
-			// backend; the format code fields in the RowDescription message will be
-			// zeroes in this case.
-		case *pgproto3.Close:
-			// Close prepared statement/portal.
-			// Note that closing a prepared statement implicitly closes any open
-			// portals that were constructed from that statement.
-		case *pgproto3.Flush:
-			// The Flush message does not cause any specific output to be generated,
-			// but forces the backend to deliver any data pending in its output
-			// buffers. A Flush must be sent after any extended-query command except
-			// Sync, if the frontend wishes to examine the results of that command
-			// before issuing more commands. Without Flush, messages returned by the
-			// backend will be combined into the minimum possible number of packets to
-			// minimize network overhead.
-
-		case *pgproto3.FunctionCall:
-			// Call a function; seems to work like a simple query? Or maybe it works with both modes?
-
-		case *pgproto3.CopyData:
-		case *pgproto3.CopyDone:
-		case *pgproto3.CopyFail:
-			// state error: we cannot be copying without a backend.
-			return
-
-		case *pgproto3.GSSEncRequest:
-		case *pgproto3.GSSResponse:
-		case *pgproto3.PasswordMessage:
-		case *pgproto3.SASLInitialResponse:
-		case *pgproto3.SASLResponse:
-		case *pgproto3.SSLRequest:
-		case *pgproto3.StartupMessage:
-			// state error: startup completed already.
-			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("startup completed already: %T", msg))
-			return
-		case *pgproto3.CancelRequest:
-			return
-		default:
-			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("unknown client message: %T", msg))
-			return
+		msg, err := s.ReceiveAny()
+		if err != nil {
+			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving message: %v", err))
+			return err
 		}
 	}
-
-	// TODO: Establish backend connection and proxy messages
-	// For now, send a "not implemented" error
-	s.sendError("FATAL", pgerrcode.FeatureNotSupported, "proxy functionality not yet implemented")
 }
 
 // handleStartup processes the initial connection: TLS negotiation and startup message.
@@ -472,6 +445,10 @@ func (s *Session) initSessionProcessState() {
 	} else {
 		s.trackedParameters = params.BaseTrackedParameters
 	}
+
+	s.readErrors = make(chan error)
+	s.frontendMessages = make(chan pgproto3.FrontendMessage)
+	s.backendMessages = make(chan pgproto3.BackendMessage)
 }
 
 func (s *Session) sendReadyForQuery() {
@@ -521,10 +498,19 @@ func (s *Session) sendBackendParameterStatusChanges() {
 
 // sendError sends an error response to the client.
 func (s *Session) sendError(severity backend.Severity, code string, message string) {
+	_, file, line, _ := runtime.Caller(1)
+
+	// TODO: i hope we aren't disclosing secrets in this log message
+	s.logger.Warn("sent error to client", "severity", severity, "code", code, "message", message, "file", file, "line", line)
+
+	// This we definitely want to do
 	s.frontend.Send(&pgproto3.ErrorResponse{
 		Severity: string(severity),
 		Code:     code,
 		Message:  message,
+		File:     file,
+		Line:     line,
+		Hint:     "pglink proxy error",
 	})
 }
 
@@ -605,7 +591,10 @@ func IsStartupModeMessage(msg pgproto3.FrontendMessage) bool {
 func IsSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.Query:
+		// Simple query.
+		// Destroys unnamed prepared statement & portal.
 	case *pgproto3.FunctionCall:
+		// Call a function; seems to work like a simple query? Or maybe it works with both modes?
 		return true
 	}
 	return false
@@ -613,13 +602,71 @@ func IsSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 
 func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
+	// Extended Query flow:
 	case *pgproto3.Parse:
+		// Extended Query 1: parse text into a prepared statement.
 	case *pgproto3.Bind:
+		// Extended Query 2: Bind parameters to a prepared statement.
 	case *pgproto3.Execute:
+		// Extended Query 3: Execute a prepared statement, requesting N or all rows.
+		// May need to be called again if server replies PortalSuspended.
+		// Execute phase is always terminated by the appearance of exactly one of
+		// these messages:
+		// - PortalSuspended: execute ended before completion, call Execute again.
+		// - CommandComplete: success
+		// - ErrorResponse: failure
+		// - EmptyQueryResponse: the portal was created from an empty query string
 	case *pgproto3.Sync:
+		// Extended Query 4: Command pipeline complete.
+		//
+		// Causes the backend to close the current transaction if it's not inside a
+		// BEGIN/COMMIT transaction block (“close” meaning to commit if no error, or
+		// roll back if error).
+		// then, a ReadyForQuery response is issued.
+		//
+		// The purpose of Sync is to provide a resynchronization point for error
+		// recovery. When an error is detected while processing any extended-query
+		// message, the backend issues ErrorResponse, then reads and discards
+		// messages until a Sync is reached, then issues ReadyForQuery and returns
+		// to normal message processing. (But note that no skipping occurs if an
+		// error is detected while processing Sync — this ensures that there is
+		// one and only one ReadyForQuery sent for each Sync.)
+
+	// In addition to these fundamental, required operations, there are several
+	// optional operations that can be used with extended-query protocol.
 	case *pgproto3.Describe:
+		// Extended Query tool: Describe prepared statement or portal.
+		//
+		// The Describe message (portal variant) specifies the name of an existing
+		// portal (or an empty string for the unnamed portal). The response is a
+		// RowDescription message describing the rows that will be returned by
+		// executing the portal; or a NoData message if the portal does not
+		// contain a query that will return rows; or ErrorResponse if there is no
+		// such portal.
+		//
+		// The Describe message (statement variant) specifies the name of an
+		// existing prepared statement (or an empty string for the unnamed
+		// prepared statement). The response is a ParameterDescription message
+		// describing the parameters needed by the statement, followed by a
+		// RowDescription message describing the rows that will be returned when
+		// the statement is eventually executed (or a NoData message if the
+		// statement will not return rows). ErrorResponse is issued if there is no
+		// such prepared statement. Note that since Bind has not yet been issued,
+		// the formats to be used for returned columns are not yet known to the
+		// backend; the format code fields in the RowDescription message will be
+		// zeroes in this case.
 	case *pgproto3.Close:
+		// Close prepared statement/portal.
+		// Note that closing a prepared statement implicitly closes any open
+		// portals that were constructed from that statement.
 	case *pgproto3.Flush:
+		// The Flush message does not cause any specific output to be generated,
+		// but forces the backend to deliver any data pending in its output
+		// buffers. A Flush must be sent after any extended-query command except
+		// Sync, if the frontend wishes to examine the results of that command
+		// before issuing more commands. Without Flush, messages returned by the
+		// backend will be combined into the minimum possible number of packets to
+		// minimize network overhead.
 		return true
 	}
 	return false
