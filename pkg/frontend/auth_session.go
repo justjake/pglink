@@ -12,19 +12,21 @@ import (
 	"github.com/cybergarage/go-sasl/sasl/scram"
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
+	"github.com/justjake/pglink/pkg/config"
 )
 
 // AuthSession manages client authentication using the PostgreSQL protocol.
 type AuthSession struct {
 	frontend    *pgproto3.Backend
 	credentials UserSecretData
-	method      AuthMethod
+	method      config.AuthMethod
 	tlsState    *tls.ConnectionState
 
 	// MD5 state
 	md5Salt [4]byte
 
 	// SCRAM state
+	scramIterations    int
 	scramServer        *scram.Server
 	channelBindingData []byte
 	channelBindingType ChannelBindingType
@@ -35,26 +37,28 @@ type AuthSession struct {
 func NewAuthSession(
 	frontend *pgproto3.Backend,
 	credentials UserSecretData,
-	method AuthMethod,
+	method config.AuthMethod,
 	tlsState *tls.ConnectionState,
+	scramIterations int,
 ) (*AuthSession, error) {
 	s := &AuthSession{
-		frontend:    frontend,
-		credentials: credentials,
-		method:      method,
-		tlsState:    tlsState,
+		frontend:        frontend,
+		credentials:     credentials,
+		method:          method,
+		tlsState:        tlsState,
+		scramIterations: scramIterations,
 	}
 
 	// Initialize method-specific state
 	switch method {
-	case AuthMethodMD5:
+	case config.AuthMethodMD5:
 		salt := make([]byte, 4)
 		if _, err := rand.Read(salt); err != nil {
 			return nil, fmt.Errorf("failed to generate MD5 salt: %w", err)
 		}
 		copy(s.md5Salt[:], salt)
 
-	case AuthMethodSCRAMSHA256, AuthMethodSCRAMSHA256Plus:
+	case config.AuthMethodSCRAMSHA256, config.AuthMethodSCRAMSHA256Plus:
 		if tlsState != nil {
 			data, cbType, err := getChannelBindingData(tlsState)
 			if err != nil {
@@ -72,55 +76,25 @@ func NewAuthSession(
 // It sends the appropriate auth request, handles client responses,
 // and returns nil on success or an error on failure.
 func (s *AuthSession) Run() error {
-	// Send initial auth request
-	s.frontend.Send(s.authRequest())
-
-	// Handle the authentication exchange
 	switch s.method {
-	case AuthMethodPlain:
+	case config.AuthMethodPlaintext:
 		return s.runPlainAuth()
-	case AuthMethodMD5:
+	case config.AuthMethodMD5:
 		return s.runMD5Auth()
-	case AuthMethodSCRAMSHA256, AuthMethodSCRAMSHA256Plus:
+	case config.AuthMethodSCRAMSHA256, config.AuthMethodSCRAMSHA256Plus:
 		return s.runSCRAMAuth()
 	default:
 		return fmt.Errorf("unsupported auth method: %s", s.method)
 	}
 }
 
-// authRequest returns the initial authentication request message.
-func (s *AuthSession) authRequest() pgproto3.BackendMessage {
-	switch s.method {
-	case AuthMethodPlain:
-		return &pgproto3.AuthenticationCleartextPassword{}
-
-	case AuthMethodMD5:
-		return &pgproto3.AuthenticationMD5Password{Salt: s.md5Salt}
-
-	case AuthMethodSCRAMSHA256:
-		return &pgproto3.AuthenticationSASL{
-			AuthMechanisms: []string{scramSASLMechanismSHA256},
-		}
-
-	case AuthMethodSCRAMSHA256Plus:
-		if s.tlsState == nil {
-			// No TLS, can only offer non-PLUS
-			return &pgproto3.AuthenticationSASL{
-				AuthMechanisms: []string{scramSASLMechanismSHA256},
-			}
-		}
-		// Offer both; PLUS preferred but allow fallback
-		return &pgproto3.AuthenticationSASL{
-			AuthMechanisms: []string{scramSASLMechanismSHA256Plus, scramSASLMechanismSHA256},
-		}
-
-	default:
-		return nil
-	}
-}
-
 // runPlainAuth handles cleartext password authentication.
 func (s *AuthSession) runPlainAuth() error {
+	if err := s.frontend.SetAuthType(pgproto3.AuthTypeCleartextPassword); err != nil {
+		return fmt.Errorf("failed to set auth type: %w", err)
+	}
+	s.frontend.Send(&pgproto3.AuthenticationCleartextPassword{})
+
 	msg, err := s.frontend.Receive()
 	if err != nil {
 		return fmt.Errorf("failed to receive password: %w", err)
@@ -140,6 +114,11 @@ func (s *AuthSession) runPlainAuth() error {
 
 // runMD5Auth handles MD5 password authentication.
 func (s *AuthSession) runMD5Auth() error {
+	if err := s.frontend.SetAuthType(pgproto3.AuthTypeMD5Password); err != nil {
+		return fmt.Errorf("failed to set auth type: %w", err)
+	}
+	s.frontend.Send(&pgproto3.AuthenticationMD5Password{Salt: s.md5Salt})
+
 	msg, err := s.frontend.Receive()
 	if err != nil {
 		return fmt.Errorf("failed to receive password: %w", err)
@@ -160,6 +139,23 @@ func (s *AuthSession) runMD5Auth() error {
 
 // runSCRAMAuth handles SCRAM-SHA-256 authentication (with or without channel binding).
 func (s *AuthSession) runSCRAMAuth() error {
+	if err := s.frontend.SetAuthType(pgproto3.AuthTypeSASL); err != nil {
+		return fmt.Errorf("failed to set auth type: %w", err)
+	}
+
+	// Send SASL authentication request
+	if s.tlsState == nil {
+		// No TLS, can only offer non-PLUS
+		s.frontend.Send(&pgproto3.AuthenticationSASL{
+			AuthMechanisms: []string{scramSASLMechanismSHA256},
+		})
+	} else {
+		// TLS available: offer both PLUS (preferred) and non-PLUS (fallback)
+		s.frontend.Send(&pgproto3.AuthenticationSASL{
+			AuthMechanisms: []string{scramSASLMechanismSHA256Plus, scramSASLMechanismSHA256},
+		})
+	}
+
 	// Step 1: Receive SASL initial response (client-first-message)
 	msg, err := s.frontend.Receive()
 	if err != nil {
@@ -259,9 +255,9 @@ func (s *AuthSession) runSCRAMAuth() error {
 // initSCRAMServer initializes the SCRAM server.
 func (s *AuthSession) initSCRAMServer() error {
 	server, err := scram.NewServer(
-		scram.WithServerCredentialStore(newCredentialStore(s.credentials)),
+		scram.WithServerCredentialStore(&s.credentials),
 		scram.WithServerHashFunc(scram.HashSHA256()),
-		scram.WithServerIterationCount(4096),
+		scram.WithServerIterationCount(s.scramIterations),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create SCRAM server: %w", err)

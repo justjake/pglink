@@ -264,6 +264,21 @@ func writeCertToFiles(cert tls.Certificate, certPath, keyPath string) (err error
 	return nil
 }
 
+// defaultTLSConfig returns the default TLS configuration when no TLS config is specified.
+// It generates a self-signed certificate in memory without persistence.
+func defaultTLSConfig() (TLSResult, error) {
+	cert, err := generateSelfSignedCert()
+	if err != nil {
+		return TLSResult{}, fmt.Errorf("failed to generate default self-signed certificate: %w", err)
+	}
+	return TLSResult{
+		Config: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		},
+	}, nil
+}
+
 // generateSelfSignedCert creates a self-signed certificate for development use.
 func generateSelfSignedCert() (tls.Certificate, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

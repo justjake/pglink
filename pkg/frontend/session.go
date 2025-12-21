@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -67,6 +68,7 @@ func (s *Session) Run() {
 
 	// Create pgproto3 backend for protocol handling
 	s.frontend = pgproto3.NewBackend(s.conn, s.conn)
+	s.enableTracing()
 
 	// Handle TLS and startup
 	if err := s.handleStartup(); err != nil {
@@ -122,6 +124,12 @@ func (s *Session) handleStartup() error {
 		if err != nil {
 			return fmt.Errorf("failed to read startup message after GSS decline: %w", err)
 		}
+	}
+
+	// Reject non-SSL connections if SSL is required
+	if s.config.TLSRequired() && s.tlsState == nil {
+		s.sendError("FATAL", pgerrcode.ProtocolViolation, "SSL/TLS required")
+		return errors.New("SSL/TLS required but client did not request SSL")
 	}
 
 	// Process startup message
@@ -191,6 +199,7 @@ func (s *Session) handleSSLRequest() error {
 
 	// Recreate the pgproto3 backend with the TLS connection
 	s.frontend = pgproto3.NewBackend(s.conn, s.conn)
+	s.enableTracing()
 
 	return nil
 }
@@ -225,14 +234,8 @@ func (s *Session) authenticate() error {
 
 	creds := NewUserSecretData(username, password)
 
-	// Choose auth method based on TLS state
-	method := AuthMethodSCRAMSHA256
-	if s.tlsState != nil {
-		method = AuthMethodSCRAMSHA256Plus
-	}
-
 	// Create and run auth session
-	authSession, err := NewAuthSession(s.frontend, creds, method, s.tlsState)
+	authSession, err := NewAuthSession(s.frontend, creds, s.config.GetAuthMethod(), s.tlsState, s.config.GetSCRAMIterations())
 	if err != nil {
 		return fmt.Errorf("failed to create auth session: %w", err)
 	}
@@ -241,34 +244,7 @@ func (s *Session) authenticate() error {
 		return err
 	}
 
-	// Send backend parameters
-	s.sendBackendStartup()
 	return nil
-}
-
-// sendBackendStartup sends the standard post-authentication messages to the client.
-func (s *Session) sendBackendStartup() {
-	// Send some standard parameters
-	params := []struct{ name, value string }{
-		{"server_version", "14.0 (pglink)"},
-		{"server_encoding", "UTF8"},
-		{"client_encoding", "UTF8"},
-		{"DateStyle", "ISO, MDY"},
-		{"TimeZone", "UTC"},
-	}
-
-	for _, p := range params {
-		s.frontend.Send(&pgproto3.ParameterStatus{Name: p.name, Value: p.value})
-	}
-
-	// Send BackendKeyData (fake process ID and secret key)
-	s.frontend.Send(&pgproto3.BackendKeyData{
-		ProcessID: 1,
-		SecretKey: 1,
-	})
-
-	// Send ReadyForQuery
-	s.frontend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
 }
 
 // sendError sends an error response to the client.
@@ -278,4 +254,43 @@ func (s *Session) sendError(severity, code, message string) {
 		Code:     code,
 		Message:  message,
 	})
+}
+
+// enableTracing enables pgproto3 protocol tracing if debug logging is enabled.
+func (s *Session) enableTracing() {
+	if s.logger.Enabled(s.ctx, slog.LevelDebug) {
+		s.frontend.Trace(&slogTraceWriter{session: s}, pgproto3.TracerOptions{
+			SuppressTimestamps: true,
+		})
+	}
+}
+
+// slogTraceWriter implements io.Writer to convert pgproto3 trace output to slog debug calls.
+// It references the Session directly so it picks up logger metadata updates.
+type slogTraceWriter struct {
+	session *Session
+	buf     bytes.Buffer
+}
+
+// Write implements io.Writer. It buffers input and logs complete lines.
+func (w *slogTraceWriter) Write(p []byte) (n int, err error) {
+	n = len(p)
+	w.buf.Write(p)
+
+	// Process complete lines
+	for {
+		line, err := w.buf.ReadBytes('\n')
+		if err != nil {
+			// No complete line yet, put the partial data back
+			w.buf.Write(line)
+			break
+		}
+		// Trim the newline and log
+		line = bytes.TrimSuffix(line, []byte("\n"))
+		if len(line) > 0 {
+			w.session.logger.Debug("pgproto3", "trace", string(line))
+		}
+	}
+
+	return n, nil
 }

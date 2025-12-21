@@ -140,7 +140,7 @@ func main() {
 
 	fsys := os.DirFS(cfg.Dir())
 
-	if err := cfg.Validate(ctx, fsys, secrets); err != nil {
+	if err := cfg.Validate(ctx, fsys, secrets, logger); err != nil {
 		logger.Error("config validation failed", "error", err)
 		os.Exit(1)
 	}

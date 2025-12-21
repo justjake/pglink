@@ -8,15 +8,56 @@ import (
 	"fmt"
 	"io/fs"
 	"iter"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
 
+// AuthMethod represents the authentication method to use for client connections.
+type AuthMethod string
+
+const (
+	// AuthMethodPlaintext uses cleartext password authentication.
+	// Requires TLS to be enabled.
+	AuthMethodPlaintext AuthMethod = "plaintext"
+	// AuthMethodMD5 uses MD5-hashed password authentication.
+	// TLS is strongly recommended but not required.
+	AuthMethodMD5 AuthMethod = "md5_password"
+	// AuthMethodSCRAMSHA256 uses SCRAM-SHA-256 authentication.
+	// This is the default and most secure option.
+	// When TLS is available, SCRAM-SHA-256-PLUS with channel binding will be offered.
+	AuthMethodSCRAMSHA256 AuthMethod = "scram-sha-256"
+	// AuthMethodSCRAMSHA256Plus uses SCRAM-SHA-256 with channel binding.
+	// Requires TLS. This is not directly configurable; use "scram-sha-256"
+	// and PLUS will be offered automatically when TLS is available.
+	AuthMethodSCRAMSHA256Plus AuthMethod = "scram-sha-256-plus"
+)
+
+// Valid returns true if the auth method is a recognized user-configurable value.
+func (m AuthMethod) Valid() bool {
+	switch m {
+	case AuthMethodPlaintext, AuthMethodMD5, AuthMethodSCRAMSHA256, "":
+		return true
+	default:
+		return false
+	}
+}
+
 // Config holds the pglink configuration.
 type Config struct {
 	Listen    []ListenAddr               `json:"listen"`
-	TLS       JsonTLSConfig              `json:"tls,omitzero"`
+	TLS       *JsonTLSConfig             `json:"tls,omitzero"`
 	Databases map[string]*DatabaseConfig `json:"databases"`
+
+	// AuthMethod specifies the authentication method for client connections.
+	// Valid values: "plaintext", "md5_password", "scram-sha-256"
+	// Defaults to "scram-sha-256" if not specified.
+	AuthMethod AuthMethod `json:"auth_method,omitzero"`
+
+	// SCRAMIterations is the number of iterations for SCRAM-SHA-256 authentication.
+	// Higher values provide better protection against brute-force attacks but
+	// make authentication slower. Defaults to 4096 (PostgreSQL default).
+	SCRAMIterations *int32 `json:"scram_iterations,omitzero"`
 
 	// MaxClientConnections is the maximum number of concurrent client connections
 	// the proxy will accept. New connections beyond this limit are immediately
@@ -35,6 +76,22 @@ func (c *Config) GetMaxClientConnections() int32 {
 		return 1000
 	}
 	return *c.MaxClientConnections
+}
+
+// GetAuthMethod returns the configured auth method, defaulting to SCRAM-SHA-256.
+func (c *Config) GetAuthMethod() AuthMethod {
+	if c.AuthMethod == "" {
+		return AuthMethodSCRAMSHA256
+	}
+	return c.AuthMethod
+}
+
+// GetSCRAMIterations returns the SCRAM iteration count, defaulting to 4096 (PostgreSQL default).
+func (c *Config) GetSCRAMIterations() int {
+	if c.SCRAMIterations == nil || *c.SCRAMIterations == 0 {
+		return 4096
+	}
+	return int(*c.SCRAMIterations)
 }
 
 // FilePath returns the path to the config file on disk.
@@ -113,32 +170,73 @@ func (c *Config) Secrets() iter.Seq2[string, SecretRef] {
 }
 
 // TLSConfig returns the TLS configuration for incoming client connections.
-// Returns a TLSResult with nil Config if TLS is disabled.
+// Returns a TLSResult with nil Config if TLS is explicitly disabled.
+// If TLS is not configured at all, returns a default TLS config with an
+// in-memory generated self-signed certificate.
 // The fsys parameter is used to read certificate files; paths are relative to fsys root.
 // The caller should call Validate() before calling TLSConfig().
 func (c *Config) TLSConfig(fsys fs.FS) (TLSResult, error) {
+	if c.TLS == nil {
+		// No TLS config specified - use default with in-memory generated cert
+		return defaultTLSConfig()
+	}
 	return c.TLS.NewTLS(fsys, c.FileRelativePath)
 }
 
+// TLSEnabled returns true if TLS is enabled (either explicitly or by default).
+func (c *Config) TLSEnabled() bool {
+	if c.TLS == nil {
+		return true // Default is TLS enabled with generated cert
+	}
+	return c.TLS.Enabled()
+}
+
+// TLSRequired returns true if TLS is required for all connections.
+func (c *Config) TLSRequired() bool {
+	if c.TLS == nil {
+		return false // Default allows non-TLS connections
+	}
+	return c.TLS.Required()
+}
+
 // Validate verifies the configuration is valid:
+// - Auth method is valid and compatible with TLS settings
 // - TLS config is valid
 // - All backend configs produce valid pool configs
 // - All secrets are accessible
 // The fsys parameter is used to check if referenced files exist.
 // It does not stop at the first error; all errors are accumulated and returned together.
-func (c *Config) Validate(ctx context.Context, fsys fs.FS, secrets *SecretCache) error {
+// Warnings are logged via the provided logger.
+func (c *Config) Validate(ctx context.Context, fsys fs.FS, secrets *SecretCache, logger *slog.Logger) error {
 	var errs []error
 
-	if err := c.TLS.Validate(fsys); err != nil {
-		errs = append(errs, fmt.Errorf("tls: %w", err))
+	// Validate auth method
+	if !c.AuthMethod.Valid() {
+		errs = append(errs, fmt.Errorf("auth_method: invalid value %q, must be one of: plaintext, md5_password, scram-sha-256", c.AuthMethod))
+	}
+
+	// Check auth method vs TLS requirements
+	tlsEnabled := c.TLSEnabled()
+	authMethod := c.GetAuthMethod()
+
+	if authMethod == AuthMethodPlaintext && !tlsEnabled {
+		errs = append(errs, errors.New("auth_method \"plaintext\" requires TLS to be enabled"))
+	}
+
+	if authMethod == AuthMethodMD5 && !tlsEnabled && logger != nil {
+		logger.Warn("auth_method \"md5_password\" without TLS is insecure; consider enabling TLS")
+	}
+
+	// Validate TLS config (only if explicitly configured)
+	if c.TLS != nil {
+		if err := c.TLS.Validate(fsys); err != nil {
+			errs = append(errs, fmt.Errorf("tls: %w", err))
+		}
 	}
 
 	for name, db := range c.Databases {
 		if err := db.Validate(ctx, secrets); err != nil {
 			errs = append(errs, fmt.Errorf("databases[%s]: %w", name, err))
-		}
-		if _, err := db.Backend.PoolConfig(); err != nil {
-			errs = append(errs, fmt.Errorf("databases[%s].backend: %w", name, err))
 		}
 	}
 

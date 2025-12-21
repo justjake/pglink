@@ -3,35 +3,11 @@ package frontend
 import (
 	"crypto/md5"
 	"crypto/tls"
+	"errors"
 	"fmt"
 
 	"github.com/cybergarage/go-sasl/sasl/auth"
 )
-
-// AuthMethod represents the authentication method to use.
-type AuthMethod int
-
-const (
-	AuthMethodPlain AuthMethod = iota
-	AuthMethodMD5
-	AuthMethodSCRAMSHA256
-	AuthMethodSCRAMSHA256Plus
-)
-
-func (m AuthMethod) String() string {
-	switch m {
-	case AuthMethodPlain:
-		return "plain"
-	case AuthMethodMD5:
-		return "md5"
-	case AuthMethodSCRAMSHA256:
-		return "scram-sha-256"
-	case AuthMethodSCRAMSHA256Plus:
-		return "scram-sha-256-plus"
-	default:
-		return "unknown"
-	}
-}
 
 const (
 	scramSASLMechanismSHA256     = "SCRAM-SHA-256"
@@ -71,7 +47,7 @@ func (u UserSecretData) String() string {
 
 // GoString returns a safe string for %#v formatting that never includes the password.
 func (u UserSecretData) GoString() string {
-	return fmt.Sprintf("UserSecretData{username: %q, password: [REDACTED]}", u.username)
+	return u.String()
 }
 
 // Format implements fmt.Formatter to ensure the password is never printed.
@@ -90,14 +66,17 @@ func (u UserSecretData) Format(f fmt.State, verb rune) {
 	}
 }
 
-// MarshalJSON returns a JSON representation that never includes the password.
+// errUserSecretDataMarshal is returned when attempting to marshal UserSecretData.
+var errUserSecretDataMarshal = errors.New("UserSecretData must not be serialized")
+
+// MarshalJSON always returns an error to prevent accidental serialization of credentials.
 func (u UserSecretData) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`{"username":%q,"password":"[REDACTED]"}`, u.username)), nil
+	return nil, errUserSecretDataMarshal
 }
 
-// MarshalText returns a text representation that never includes the password.
+// MarshalText always returns an error to prevent accidental serialization of credentials.
 func (u UserSecretData) MarshalText() ([]byte, error) {
-	return []byte(u.String()), nil
+	return nil, errUserSecretDataMarshal
 }
 
 // computeMD5Password computes the MD5 password hash.
@@ -116,27 +95,17 @@ func computeMD5Password(creds UserSecretData, salt [4]byte) string {
 	return "md5" + fmt.Sprintf("%x", h2.Sum(nil))
 }
 
-// credentialStore implements auth.CredentialStore for SCRAM authentication.
-type credentialStore struct {
-	creds UserSecretData
-}
-
-// newCredentialStore creates a new credential store for the given credentials.
-func newCredentialStore(creds UserSecretData) *credentialStore {
-	return &credentialStore{creds: creds}
-}
-
-// LookupCredential implements auth.CredentialStore.
-func (cs *credentialStore) LookupCredential(q auth.Query) (auth.Credential, bool, error) {
+// LookupCredential implements auth.CredentialStore for SCRAM authentication.
+func (u *UserSecretData) LookupCredential(q auth.Query) (auth.Credential, bool, error) {
 	// Verify username matches
-	if q.Username() != cs.creds.Username() {
+	if q.Username() != u.Username() {
 		return nil, false, nil
 	}
 
 	// Return credential with the password
 	cred := auth.NewCredential(
-		auth.WithCredentialUsername(cs.creds.Username()),
-		auth.WithCredentialPassword(cs.creds.Password()),
+		auth.WithCredentialUsername(u.Username()),
+		auth.WithCredentialPassword(u.Password()),
 	)
 	return cred, true, nil
 }

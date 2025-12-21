@@ -24,7 +24,7 @@ type DatabaseConfig struct {
 }
 
 // Validate checks that the database configuration is valid.
-// It verifies pool constraints and that all usernames are unique.
+// It verifies pool constraints, backend config, and that all usernames are unique.
 func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) error {
 	var errs []error
 
@@ -39,6 +39,11 @@ func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) err
 				"backend.pool_min_idle_conns (%d) * len(users) (%d) = %d exceeds backend.pool_max_conns (%d)",
 				*c.Backend.PoolMinIdleConns, len(c.Users), minRequired, c.Backend.PoolMaxConns))
 		}
+	}
+
+	// Validate backend configuration
+	if err := c.Backend.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("backend: %w", err))
 	}
 
 	// Check for duplicate usernames
@@ -159,6 +164,13 @@ func (c *BackendConfig) PoolConfigString() string {
 	addStr("pool_health_check_period", c.PoolHealthCheckPeriod)
 
 	return strings.Join(parts, " ")
+}
+
+// Validate checks that the backend configuration is valid by attempting
+// to parse the pool configuration.
+func (c *BackendConfig) Validate() error {
+	_, err := c.PoolConfig()
+	return err
 }
 
 // PoolConfig parses the connection string and returns a pgxpool.Config.

@@ -221,7 +221,7 @@ func TestConfig_Validate(t *testing.T) {
 				t.Fatalf("ReadConfigFile() error = %v", err)
 			}
 
-			err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets)
+			err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets, nil)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -277,7 +277,7 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 		},
 	}
 
-	err := cfg.Validate(ctx, os.DirFS("."), secrets)
+	err := cfg.Validate(ctx, os.DirFS("."), secrets, nil)
 	if err == nil {
 		t.Fatal("expected validation errors")
 	}
@@ -286,8 +286,8 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 	t.Logf("accumulated errors: %v", err)
 
 	// Should have backend error for first server
-	if !strings.Contains(errStr, "databases[db1].backend") {
-		t.Error("expected error for databases[db1].backend")
+	if !strings.Contains(errStr, "databases[db1]") || !strings.Contains(errStr, "backend") {
+		t.Error("expected error for databases[db1] backend")
 	}
 
 	// Should have secret errors
@@ -476,7 +476,7 @@ func TestConfig_Validate_WithMockAWS(t *testing.T) {
 	}
 
 	// Validation should succeed with mock
-	err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets)
+	err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets, nil)
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -523,7 +523,7 @@ func TestConfig_Validate_AWSSecretMissing(t *testing.T) {
 	}
 
 	// Validation should fail
-	err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets)
+	err = cfg.Validate(ctx, os.DirFS(cfg.Dir()), secrets, nil)
 	if err == nil {
 		t.Fatal("expected validation error for missing AWS secret")
 	}
