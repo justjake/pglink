@@ -1,5 +1,14 @@
 # Claude Instructions
 
+We are implementing a serious, high-performance PostgreSQL wire protocol proxy intended for use in production called "pglink".
+
+## Structure
+
+- `pkg/frontend`: Interactions between clients and the proxy. Accepts incoming connections, authenticates clients, proxies client requests to the backend.
+- `pkg/backend`: Interactions between the proxy and backend PostgreSQL / Materialize servers. Pools connections to the backend.
+- `pkg/config`: Config loading and validation.
+- `cmd/pglink`: Main entry point.
+
 ## Scripts
 
 **Always check `bin/` for available scripts and prefer using them over direct commands.** The scripts handle environment setup (mise, GOEXPERIMENT, etc.) automatically.
