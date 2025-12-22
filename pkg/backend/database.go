@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/justjake/pglink/pkg/config"
-	"github.com/justjake/pglink/pkg/params"
 )
 
 // Database manages connection pools to a backend PostgreSQL server.
@@ -20,24 +20,27 @@ import (
 // All pools are created eagerly in NewDatabase and the userPools map is
 // immutable after construction, so no locking is needed.
 type Database struct {
-	config  config.DatabaseConfig
+	config  *config.DatabaseConfig
 	secrets *config.SecretCache
 
 	userPools map[config.UserConfig]*pgxpool.Pool
 
 	// Connection coordination
 	connMgr *connManager[config.UserConfig]
+
+	logger *slog.Logger
 }
 
 // NewDatabase creates a new Database with the given database configuration.
 // The global max connections is taken from cfg.Backend.PoolMaxConns.
 // All user pools are created eagerly to respect MinIdleConns settings.
-func NewDatabase(ctx context.Context, cfg config.DatabaseConfig, secrets *config.SecretCache) (*Database, error) {
+func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *config.SecretCache, logger *slog.Logger) (*Database, error) {
 	db := &Database{
 		config:    cfg,
 		secrets:   secrets,
 		userPools: make(map[config.UserConfig]*pgxpool.Pool),
 		connMgr:   newConnManager(cfg.Backend.PoolMaxConns, cfg.Users),
+		logger:    logger,
 	}
 
 	// Set up connection stealing callback
@@ -153,42 +156,6 @@ func (d *Database) PoolConfig(ctx context.Context, user config.UserConfig) (*pgx
 	return d.poolConfigForUser(ctx, user)
 }
 
-// PooledConn wraps a pgxpool connection with automatic release tracking.
-type PooledConn struct {
-	*pgxpool.Conn
-	db       *Database
-	user     config.UserConfig
-	released bool
-	state    ServerSession
-}
-
-func (pc *PooledConn) ParameterStatuses(keys []string) params.ParameterStatuses {
-	parameterStatuses := pc.state.ParameterStatuses
-	pgConn := pc.Conn.Conn().PgConn()
-	for _, key := range keys {
-		value := pgConn.ParameterStatus(key)
-		if value == "" {
-			delete(pc.state.ParameterStatuses, key)
-		} else {
-			parameterStatuses[key] = value
-		}
-	}
-	return parameterStatuses
-}
-
-// Release returns the connection to the pool.
-// It is safe to call Release multiple times.
-func (pc *PooledConn) Release() {
-	if pc.released {
-		return
-	}
-	pc.released = true
-	pc.Conn.Release()
-	// Note: We don't release dbConns here because the connection goes back
-	// to the pool as idle. dbConns is only decremented in BeforeClose when
-	// the connection is actually closed.
-}
-
 // Acquire acquires a connection from the pool for the given user.
 // It respects the global connection limit and uses fair scheduling when
 // at capacity, ensuring that users with many pending requests don't
@@ -211,9 +178,8 @@ func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*Pooled
 		conn, err := pool.Acquire(ctx)
 		if err == nil {
 			return &PooledConn{
-				Conn: conn,
-				db:   d,
-				user: user,
+				Conn:    conn,
+				session: GetOrCreateSession(conn.Conn().PgConn(), d, user),
 			}, nil
 		}
 
@@ -325,4 +291,8 @@ func (d *Database) Close() {
 	for _, pool := range d.userPools {
 		pool.Close()
 	}
+}
+
+func (d *Database) Name() string {
+	return fmt.Sprintf("%s:%d/%s", d.config.Backend.Host, d.config.Backend.Port, d.config.Backend.Database)
 }

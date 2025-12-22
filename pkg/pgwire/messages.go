@@ -1,4 +1,4 @@
-package params
+package pgwire
 
 import (
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -7,13 +7,21 @@ import (
 // FromFrontend wraps a message that came from the frontend.
 // Used if message is both Frontend and Backend, to distinguish its origin at runtime.
 type FromFrontend[T pgproto3.FrontendMessage] struct {
-	msg T
+	T T
+}
+
+type FrontendMessage interface {
+	Frontend()
 }
 
 // FromBackend wraps a message that came from the backend.
 // Used if message is both Frontend and Backend, to distinguish its origin at runtime.
 type FromBackend[T pgproto3.BackendMessage] struct {
-	msg T
+	T T
+}
+
+type BackendMessage interface {
+	Backend()
 }
 
 //go:generate go run ./generate.go -fn IsStartupModeMessage -from=Frontend -type=Startup
@@ -137,7 +145,7 @@ func IsCancelMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -from=Frontend -type=TerminateConn
+//go:generate go run ./generate.go -fn=IsTerminateConnMessage -from=Frontend -type=TerminateConn
 func IsTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.Terminate:
@@ -251,4 +259,34 @@ func IsBackendAsyncMessage(msg pgproto3.BackendMessage) bool {
 		return true
 	}
 	return false
+}
+
+func ToFrontendMessage(msg pgproto3.FrontendMessage) (FrontendMessage, bool) {
+	if m, ok := ToFrontendCancel(msg); ok {
+		return m, true
+	} else if m, ok := ToFrontendCopy(msg); ok {
+		return m, true
+	} else if m, ok := ToFrontendSimpleQuery(msg); ok {
+		return m, true
+	} else if m, ok := ToFrontendExtendedQuery(msg); ok {
+		return m, true
+	} else if m, ok := ToFrontendTerminateConn(msg); ok {
+		return m, true
+	}
+	return nil, false
+}
+
+func ToBackendMessage(msg pgproto3.BackendMessage) (BackendMessage, bool) {
+	if m, ok := ToBackendAsync(msg); ok {
+		return m, true
+	} else if m, ok := ToBackendCopy(msg); ok {
+		return m, true
+	} else if m, ok := ToBackendExtendedQuery(msg); ok {
+		return m, true
+	} else if m, ok := ToBackendResponse(msg); ok {
+		return m, true
+	} else if m, ok := ToBackendStartup(msg); ok {
+		return m, true
+	}
+	return nil, false
 }

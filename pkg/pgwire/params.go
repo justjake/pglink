@@ -1,4 +1,4 @@
-package params
+package pgwire
 
 // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-ASYNC
 //
@@ -30,6 +30,10 @@ const (
 	ParamIntervalStyle              = "IntervalStyle"
 	ParamTimeZone                   = "TimeZone"
 	ParamIsSuperuser                = "is_superuser"
+
+	// Startup parameters
+	ParamUser     = "user"
+	ParamDatabase = "database"
 )
 
 var BaseTrackedParameters = []string{
@@ -62,11 +66,14 @@ var BaseParameterStatuses = ParameterStatuses{
 type ParameterStatusDiff map[string]*string
 
 func (base ParameterStatuses) DiffToTip(tip ParameterStatuses) ParameterStatusDiff {
-	diff := ParameterStatusDiff{}
+	var diff ParameterStatusDiff
 
 	// Items in tip that are different are upserted.
 	for tipKey, tipValue := range tip {
 		if baseValue, baseHas := base[tipKey]; !baseHas || baseValue != tipValue {
+			if diff == nil {
+				diff = make(ParameterStatusDiff)
+			}
 			diff[tipKey] = &tipValue
 		}
 	}
@@ -74,6 +81,9 @@ func (base ParameterStatuses) DiffToTip(tip ParameterStatuses) ParameterStatusDi
 	// Items in base that are not in tip are deleted.
 	for baseKey := range base {
 		if _, tipHas := tip[baseKey]; !tipHas {
+			if diff == nil {
+				diff = make(ParameterStatusDiff)
+			}
 			diff[baseKey] = nil
 		}
 	}

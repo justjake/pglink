@@ -18,7 +18,7 @@ import (
 
 	"github.com/justjake/pglink/pkg/backend"
 	"github.com/justjake/pglink/pkg/config"
-	"github.com/justjake/pglink/pkg/params"
+	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // Session represents a client's session with the Service.
@@ -47,7 +47,7 @@ type Session struct {
 	trackedParameters []string
 
 	// Client's view of the server's session state.
-	state backend.ServerSession
+	state pgwire.ProtocolState
 
 	// nil until a backend connection is acquired at least once
 	// handles forwarding NOTIFY messages to the appropriate client.
@@ -222,7 +222,7 @@ func (s *Session) Run() {
 		// Initial state: no backend connection, so only receive from frontend.
 		anyMsg, err := s.ReceiveAny()
 		if err != nil {
-			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving client message: %v", err))
+			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving client message: %v", err))
 			return
 		}
 
@@ -233,26 +233,26 @@ func (s *Session) Run() {
 
 		s.logger.Debug("recv client message", "type", fmt.Sprintf("%T", msg))
 
-		if IsTerminateConnMessage(msg) {
+		if pgwire.IsTerminateConnMessage(msg) {
 			// Messages that close the connection.
 			s.logger.Info("client terminated connection")
 			return
-		} else if IsCancelMessage(msg) {
-			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("cancel request received on normal connection: %T", msg))
+		} else if pgwire.IsCancelMessage(msg) {
+			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("cancel request received on normal connection: %T", msg))
 			return
-		} else if IsStartupModeMessage(msg) {
-			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("startup completed already: %T", msg))
+		} else if pgwire.IsStartupModeMessage(msg) {
+			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("startup completed already: %T", msg))
 			return
-		} else if IsCopyModeMessage(msg) {
-			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("idle client not in copy mode: %T", msg))
+		} else if pgwire.IsCopyModeMessage(msg) {
+			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("idle client not in copy mode: %T", msg))
 			return
-		} else if IsSimpleQueryModeMessage(msg) || IsExtendedQueryModeMessage(msg) {
+		} else if pgwire.IsSimpleQueryModeMessage(msg) || pgwire.IsExtendedQueryModeMessage(msg) {
 			// Enter state where we have a backend connection.
 			if err := s.runWithBackend(msg); err != nil {
 				return err
 			}
 		} else {
-			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("unknown client message: %T", msg))
+			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("unknown client message: %T", msg))
 			return
 		}
 
@@ -261,18 +261,29 @@ func (s *Session) Run() {
 }
 
 func (s *Session) runWithBackend(firstMsg pgproto3.FrontendMessage) error {
+	oldLogger := s.logger
 	if err := s.acquireBackend(); err != nil {
-		s.sendError(backend.ErrorFatal, pgerrcode.CannotConnectNow, fmt.Sprintf("failed to acquire backend: %v", err))
+		s.sendError(pgwire.ErrorFatal, pgerrcode.CannotConnectNow, fmt.Sprintf("failed to acquire backend: %v", err))
 		return err
 	}
 	defer s.releaseBackend()
+	s.logger = s.logger.With("backend", s.backend.Name())
+	defer func() { s.logger = oldLogger }()
+
 	msg := firstMsg
 
 	for {
+		if pgwire.IsSimpleQueryModeMessage(msg) {
+			if err := s.runSimpleQuery(msg); err != nil {
+				return err
+			}
+		} else if pgwire.IsExtendedQueryModeMessage(msg) {
+			clientMsg
+		}
 
 		msg, err := s.ReceiveAny()
 		if err != nil {
-			s.sendError(backend.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving message: %v", err))
+			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving message: %v", err))
 			return err
 		}
 	}
@@ -438,17 +449,14 @@ func (s *Session) initSessionProcessState() {
 	s.state.SecretCancelKey = rand.Uint32()
 	s.state.ParameterStatuses = maps.Collect(s.dbConfig.Backend.DefaultStartupParameters.All())
 	maps.Copy(s.state.ParameterStatuses, s.startupParameters)
-	s.state.TxStatus = backend.TxIdle
+	s.state.TxStatus = pgwire.TxIdle
 	if len(s.dbConfig.TrackExtraParameters) > 0 {
-		s.trackedParameters = append(s.trackedParameters, params.BaseTrackedParameters...)
+		s.trackedParameters = append(s.trackedParameters, pgwire.BaseTrackedParameters...)
 		s.trackedParameters = append(s.trackedParameters, s.dbConfig.TrackExtraParameters...)
 	} else {
-		s.trackedParameters = params.BaseTrackedParameters
+		s.trackedParameters = pgwire.BaseTrackedParameters
 	}
-
-	s.readErrors = make(chan error)
-	s.frontendMessages = make(chan pgproto3.FrontendMessage)
-	s.backendMessages = make(chan pgproto3.BackendMessage)
+	// TODO: channels?
 }
 
 func (s *Session) sendReadyForQuery() {
@@ -497,7 +505,7 @@ func (s *Session) sendBackendParameterStatusChanges() {
 }
 
 // sendError sends an error response to the client.
-func (s *Session) sendError(severity backend.Severity, code string, message string) {
+func (s *Session) sendError(severity pgwire.Severity, code string, message string) {
 	_, file, line, _ := runtime.Caller(1)
 
 	// TODO: i hope we aren't disclosing secrets in this log message
@@ -509,9 +517,13 @@ func (s *Session) sendError(severity backend.Severity, code string, message stri
 		Code:     code,
 		Message:  message,
 		File:     file,
-		Line:     line,
+		Line:     int32(line),
 		Hint:     "pglink proxy error",
 	})
+	err := s.frontend.Flush()
+	if err != nil {
+		s.logger.Error("error flushing to client", "error", err)
+	}
 }
 
 // enableTracing enables pgproto3 protocol tracing if debug logging is enabled.
@@ -558,7 +570,7 @@ type Frontend struct {
 	ctx context.Context
 }
 
-func (f *Frontend) Receive() (pgproto3.FrontendMessage, error) {
+func (f *Frontend) Receive() (pgwire.FrontendMessage, error) {
 	if err := f.ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
@@ -570,130 +582,9 @@ func (f *Frontend) Receive() (pgproto3.FrontendMessage, error) {
 		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
-	return msg, nil
-}
-
-func IsStartupModeMessage(msg pgproto3.FrontendMessage) bool {
-	switch msg.(type) {
-	case *pgproto3.GSSEncRequest:
-	case *pgproto3.GSSResponse:
-	case *pgproto3.PasswordMessage:
-	case *pgproto3.SASLInitialResponse:
-	case *pgproto3.SASLResponse:
-	case *pgproto3.SSLRequest:
-	case *pgproto3.StartupMessage:
-		return true
-	default:
-		return false
+	if m, ok := pgwire.ToFrontendMessage(msg); ok {
+		return m, nil
 	}
-}
 
-func IsSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
-	switch msg.(type) {
-	case *pgproto3.Query:
-		// Simple query.
-		// Destroys unnamed prepared statement & portal.
-	case *pgproto3.FunctionCall:
-		// Call a function; seems to work like a simple query? Or maybe it works with both modes?
-		return true
-	}
-	return false
-}
-
-func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
-	switch msg.(type) {
-	// Extended Query flow:
-	case *pgproto3.Parse:
-		// Extended Query 1: parse text into a prepared statement.
-	case *pgproto3.Bind:
-		// Extended Query 2: Bind parameters to a prepared statement.
-	case *pgproto3.Execute:
-		// Extended Query 3: Execute a prepared statement, requesting N or all rows.
-		// May need to be called again if server replies PortalSuspended.
-		// Execute phase is always terminated by the appearance of exactly one of
-		// these messages:
-		// - PortalSuspended: execute ended before completion, call Execute again.
-		// - CommandComplete: success
-		// - ErrorResponse: failure
-		// - EmptyQueryResponse: the portal was created from an empty query string
-	case *pgproto3.Sync:
-		// Extended Query 4: Command pipeline complete.
-		//
-		// Causes the backend to close the current transaction if it's not inside a
-		// BEGIN/COMMIT transaction block (“close” meaning to commit if no error, or
-		// roll back if error).
-		// then, a ReadyForQuery response is issued.
-		//
-		// The purpose of Sync is to provide a resynchronization point for error
-		// recovery. When an error is detected while processing any extended-query
-		// message, the backend issues ErrorResponse, then reads and discards
-		// messages until a Sync is reached, then issues ReadyForQuery and returns
-		// to normal message processing. (But note that no skipping occurs if an
-		// error is detected while processing Sync — this ensures that there is
-		// one and only one ReadyForQuery sent for each Sync.)
-
-	// In addition to these fundamental, required operations, there are several
-	// optional operations that can be used with extended-query protocol.
-	case *pgproto3.Describe:
-		// Extended Query tool: Describe prepared statement or portal.
-		//
-		// The Describe message (portal variant) specifies the name of an existing
-		// portal (or an empty string for the unnamed portal). The response is a
-		// RowDescription message describing the rows that will be returned by
-		// executing the portal; or a NoData message if the portal does not
-		// contain a query that will return rows; or ErrorResponse if there is no
-		// such portal.
-		//
-		// The Describe message (statement variant) specifies the name of an
-		// existing prepared statement (or an empty string for the unnamed
-		// prepared statement). The response is a ParameterDescription message
-		// describing the parameters needed by the statement, followed by a
-		// RowDescription message describing the rows that will be returned when
-		// the statement is eventually executed (or a NoData message if the
-		// statement will not return rows). ErrorResponse is issued if there is no
-		// such prepared statement. Note that since Bind has not yet been issued,
-		// the formats to be used for returned columns are not yet known to the
-		// backend; the format code fields in the RowDescription message will be
-		// zeroes in this case.
-	case *pgproto3.Close:
-		// Close prepared statement/portal.
-		// Note that closing a prepared statement implicitly closes any open
-		// portals that were constructed from that statement.
-	case *pgproto3.Flush:
-		// The Flush message does not cause any specific output to be generated,
-		// but forces the backend to deliver any data pending in its output
-		// buffers. A Flush must be sent after any extended-query command except
-		// Sync, if the frontend wishes to examine the results of that command
-		// before issuing more commands. Without Flush, messages returned by the
-		// backend will be combined into the minimum possible number of packets to
-		// minimize network overhead.
-		return true
-	}
-	return false
-}
-
-func IsCopyModeMessage(msg pgproto3.FrontendMessage) bool {
-	switch msg.(type) {
-	case *pgproto3.CopyData:
-	case *pgproto3.CopyDone:
-	case *pgproto3.CopyFail:
-		return true
-	}
-	return false
-}
-
-func IsCancelMessage(msg pgproto3.FrontendMessage) bool {
-	switch msg.(type) {
-	case *pgproto3.CancelRequest:
-		return true
-	}
-	return false
-}
-
-func IsTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
-	switch msg.(type) {
-	case *pgproto3.Terminate:
-		return true
-	}
-	return false
+	return nil, fmt.Errorf("unknown frontend message: %T", msg)
 }

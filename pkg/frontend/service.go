@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
 
+	"github.com/justjake/pglink/pkg/backend"
 	"github.com/justjake/pglink/pkg/config"
 )
 
@@ -28,6 +29,7 @@ type Service struct {
 	tlsConfig *tls.Config
 
 	listeners []net.Listener
+	databases map[*config.DatabaseConfig]*backend.Database
 
 	// Connection tracking
 	activeConns atomic.Int32
@@ -70,7 +72,18 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 // When the service's context is cancelled, all sessions are cancelled and
 // the method waits for them to close cleanly before returning.
 func (s *Service) Listen() error {
-	// Set up all listeners first
+	// Set up all databases
+	for name, dbConfig := range s.config.Databases {
+		db, err := backend.NewDatabase(s.ctx, dbConfig, s.secrets, s.logger)
+		defer db.Close()
+		if err != nil {
+			return fmt.Errorf("failed to create database %s: %w", name, err)
+		}
+		s.logger.Info("created backend", "name", name, "config", dbConfig)
+		s.databases[dbConfig] = db
+	}
+
+	// Set up all listeners
 	for _, addr := range s.config.Listen {
 		ln, err := net.Listen("tcp", addr.String())
 		if err != nil {
