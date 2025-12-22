@@ -14,6 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testTimeout returns a context with a reasonable timeout for tests
+func testTimeout(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(context.Background(), 30*time.Second)
+}
+
 // TestMain sets up and tears down the test harness for all e2e tests.
 // This ensures docker-compose and pglink are running before any tests execute.
 var testHarness *Harness
@@ -46,7 +52,8 @@ func getHarness(t *testing.T) *Harness {
 
 func TestBasicConnect(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	pool, err := h.Connect(ctx, "alpha_uno")
 	require.NoError(t, err)
@@ -61,7 +68,8 @@ func TestBasicConnect(t *testing.T) {
 
 func TestAllDatabases(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	for _, db := range PredefinedDatabases {
 		t.Run(db.Name, func(t *testing.T) {
@@ -86,7 +94,8 @@ func TestAllDatabases(t *testing.T) {
 
 func TestAllUsers(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	users := []TestUser{
 		PredefinedUsers.App,
@@ -119,7 +128,8 @@ func TestAllUsers(t *testing.T) {
 // - The backend PID may change between transactions
 func TestTransactionPooling(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	// Create multiple client connections
 	const numClients = 5
@@ -127,7 +137,7 @@ func TestTransactionPooling(t *testing.T) {
 	for i := 0; i < numClients; i++ {
 		conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 		require.NoError(t, err)
-		defer conn.Close(ctx)
+		defer conn.Close(context.Background())
 		conns[i] = conn
 	}
 
@@ -136,10 +146,10 @@ func TestTransactionPooling(t *testing.T) {
 		clientIdx  int
 		iteration  int
 		backendPID int32
+		err        error
 	}
 
-	var results []txResult
-	var mu sync.Mutex
+	resultCh := make(chan txResult, 100)
 
 	// Run multiple iterations
 	const iterations = 10
@@ -151,24 +161,33 @@ func TestTransactionPooling(t *testing.T) {
 			go func(conn *pgx.Conn, clientIdx, iter int) {
 				defer wg.Done()
 
+				result := txResult{clientIdx: clientIdx, iteration: iter}
+
 				tx, err := conn.Begin(ctx)
-				require.NoError(t, err)
-				defer tx.Rollback(ctx)
+				if err != nil {
+					result.err = fmt.Errorf("begin: %w", err)
+					resultCh <- result
+					return
+				}
 
 				var pid int32
 				err = tx.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid)
-				require.NoError(t, err)
+				if err != nil {
+					tx.Rollback(context.Background())
+					result.err = fmt.Errorf("query: %w", err)
+					resultCh <- result
+					return
+				}
+				result.backendPID = pid
 
 				err = tx.Commit(ctx)
-				require.NoError(t, err)
+				if err != nil {
+					result.err = fmt.Errorf("commit: %w", err)
+					resultCh <- result
+					return
+				}
 
-				mu.Lock()
-				results = append(results, txResult{
-					clientIdx:  clientIdx,
-					iteration:  iter,
-					backendPID: pid,
-				})
-				mu.Unlock()
+				resultCh <- result
 			}(conns[clientIdx], clientIdx, iter)
 		}
 		// Small delay between iterations to allow connection reuse
@@ -176,6 +195,23 @@ func TestTransactionPooling(t *testing.T) {
 	}
 
 	wg.Wait()
+	close(resultCh)
+
+	// Collect results
+	var results []txResult
+	var errors []error
+	for r := range resultCh {
+		if r.err != nil {
+			errors = append(errors, r.err)
+		} else {
+			results = append(results, r)
+		}
+	}
+
+	// Report any errors
+	for _, err := range errors {
+		t.Errorf("transaction error: %v", err)
+	}
 
 	// Analyze results: in transaction pooling mode, we expect:
 	// 1. The same client may get different backend PIDs across transactions
@@ -190,7 +226,8 @@ func TestTransactionPooling(t *testing.T) {
 
 	// Log statistics
 	t.Logf("Transaction pooling results:")
-	t.Logf("  Total transactions: %d", len(results))
+	t.Logf("  Total transactions: %d (expected %d)", len(results), numClients*iterations)
+	t.Logf("  Errors: %d", len(errors))
 
 	allPIDs := make(map[int32]int)
 	for _, r := range results {
@@ -198,6 +235,9 @@ func TestTransactionPooling(t *testing.T) {
 	}
 	t.Logf("  Unique backend PIDs: %d", len(allPIDs))
 	t.Logf("  Transactions per PID: %v", allPIDs)
+
+	// All transactions should succeed
+	require.Equal(t, numClients*iterations, len(results), "all transactions should succeed")
 
 	// With pool_max_conns=10 and 5 clients doing 10 iterations each,
 	// we should see PID reuse (fewer PIDs than total transactions)
@@ -209,11 +249,12 @@ func TestTransactionPooling(t *testing.T) {
 // can change between transactions on the same client connection
 func TestBackendPIDChangesOutsideTransaction(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	// Record PIDs across multiple transactions
 	var pids []int32
@@ -255,15 +296,16 @@ func TestBackendPIDChangesOutsideTransaction(t *testing.T) {
 // are isolated until committed
 func TestTransactionIsolation(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn1, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn1.Close(ctx)
+	defer conn1.Close(context.Background())
 
 	conn2, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn2.Close(ctx)
+	defer conn2.Close(context.Background())
 
 	// Create a test table in a transaction on conn1
 	_, err = conn1.Exec(ctx, "CREATE TEMP TABLE test_isolation (id int, value text)")
@@ -272,7 +314,7 @@ func TestTransactionIsolation(t *testing.T) {
 	// Start transaction on conn1
 	tx1, err := conn1.Begin(ctx)
 	require.NoError(t, err)
-	defer tx1.Rollback(ctx)
+	defer tx1.Rollback(context.Background())
 
 	// Insert in transaction
 	_, err = tx1.Exec(ctx, "INSERT INTO test_isolation VALUES (1, 'uncommitted')")
@@ -283,7 +325,7 @@ func TestTransactionIsolation(t *testing.T) {
 	// Let's use a schema-level table for this test
 
 	// Cleanup and use a real table
-	tx1.Rollback(ctx)
+	tx1.Rollback(context.Background())
 
 	// Use a unique table name to avoid conflicts
 	tableName := fmt.Sprintf("e2e_isolation_test_%d", time.Now().UnixNano())
@@ -303,7 +345,7 @@ func TestTransactionIsolation(t *testing.T) {
 	// Start a new transaction on conn1
 	tx1, err = conn1.Begin(ctx)
 	require.NoError(t, err)
-	defer tx1.Rollback(ctx)
+	defer tx1.Rollback(context.Background())
 
 	// Insert in transaction (but don't commit yet)
 	_, err = tx1.Exec(ctx, fmt.Sprintf("INSERT INTO schema1.%s (value) VALUES ('uncommitted')", tableName))
@@ -329,16 +371,17 @@ func TestTransactionIsolation(t *testing.T) {
 // set within a transaction persist for the duration of the transaction
 func TestSessionVariablesWithinTransaction(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	// Start a transaction
 	tx, err := conn.Begin(ctx)
 	require.NoError(t, err)
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.Background())
 
 	// Set a session variable
 	_, err = tx.Exec(ctx, "SET LOCAL work_mem = '128MB'")
@@ -365,7 +408,8 @@ func TestSessionVariablesWithinTransaction(t *testing.T) {
 // TestConcurrentConnections tests many concurrent connections
 func TestConcurrentConnections(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	const numConnections = 50
 	const queriesPerConn = 10
@@ -385,7 +429,7 @@ func TestConcurrentConnections(t *testing.T) {
 				errorCount.Add(1)
 				return
 			}
-			defer conn.Close(ctx)
+			defer conn.Close(context.Background())
 
 			for j := 0; j < queriesPerConn; j++ {
 				var result int
@@ -415,7 +459,8 @@ func TestConcurrentConnections(t *testing.T) {
 // TestConcurrentTransactions tests many concurrent transactions
 func TestConcurrentTransactions(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	const numGoroutines = 20
 	const txPerGoroutine = 5
@@ -434,7 +479,7 @@ func TestConcurrentTransactions(t *testing.T) {
 				errorCount.Add(1)
 				return
 			}
-			defer conn.Close(ctx)
+			defer conn.Close(context.Background())
 
 			for j := 0; j < txPerGoroutine; j++ {
 				tx, err := conn.Begin(ctx)
@@ -447,7 +492,7 @@ func TestConcurrentTransactions(t *testing.T) {
 				var result int
 				err = tx.QueryRow(ctx, "SELECT $1::int + $2::int", goroutineID, j).Scan(&result)
 				if err != nil {
-					tx.Rollback(ctx)
+					tx.Rollback(context.Background())
 					errorCount.Add(1)
 					continue
 				}
@@ -460,7 +505,7 @@ func TestConcurrentTransactions(t *testing.T) {
 					}
 					successCount.Add(1)
 				} else {
-					tx.Rollback(ctx)
+					tx.Rollback(context.Background())
 					errorCount.Add(1)
 				}
 			}
@@ -479,7 +524,8 @@ func TestConcurrentTransactions(t *testing.T) {
 // TestConnectionPoolExhaustion tests behavior when connection pool is exhausted
 func TestConnectionPoolExhaustion(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	// The backend pool has pool_max_conns=10
 	// Try to hold more connections than the pool allows
@@ -509,7 +555,7 @@ func TestConnectionPoolExhaustion(t *testing.T) {
 		err = tx.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid)
 		if err != nil {
 			t.Logf("Query in transaction %d failed: %v", i, err)
-			tx.Rollback(ctx)
+			tx.Rollback(context.Background())
 			continue
 		}
 		t.Logf("Connection %d got backend PID %d", i, pid)
@@ -518,18 +564,18 @@ func TestConnectionPoolExhaustion(t *testing.T) {
 
 	t.Logf("Successfully acquired %d connections with transactions", len(txs))
 
-	// Cleanup
+	// Cleanup - use context.Background() to ensure cleanup completes
 	for _, tx := range txs {
-		tx.Rollback(ctx)
+		tx.Rollback(context.Background())
 	}
 	for _, conn := range conns {
-		conn.Close(ctx)
+		conn.Close(context.Background())
 	}
 
 	// The pool should be usable again after releasing
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	var result int
 	err = conn.QueryRow(ctx, "SELECT 1").Scan(&result)
@@ -544,11 +590,12 @@ func TestConnectionPoolExhaustion(t *testing.T) {
 // TestSimpleQuery tests simple (non-extended) query protocol
 func TestSimpleQuery(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	// Use Exec for simple query (no parameters)
 	tag, err := conn.Exec(ctx, "SELECT 1; SELECT 2; SELECT 3")
@@ -559,11 +606,12 @@ func TestSimpleQuery(t *testing.T) {
 // TestExtendedQuery tests extended query protocol with parameters
 func TestExtendedQuery(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	// Extended query with parameters
 	rows, err := conn.Query(ctx, "SELECT $1::int, $2::text, $3::bool", 42, "hello", true)
@@ -586,11 +634,12 @@ func TestExtendedQuery(t *testing.T) {
 // TestPreparedStatements tests prepared statement handling
 func TestPreparedStatements(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	// Prepare a statement
 	_, err = conn.Prepare(ctx, "test_stmt", "SELECT $1::int + $2::int")
@@ -612,11 +661,12 @@ func TestPreparedStatements(t *testing.T) {
 // TestLargeResultSet tests handling of large result sets
 func TestLargeResultSet(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	// Generate a large result set
 	const numRows = 10000
@@ -640,11 +690,12 @@ func TestLargeResultSet(t *testing.T) {
 // TestNullHandling tests NULL value handling
 func TestNullHandling(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	var intVal *int
 	var textVal *string
@@ -659,11 +710,12 @@ func TestNullHandling(t *testing.T) {
 // TestDataTypes tests various PostgreSQL data types
 func TestDataTypes(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	testCases := []struct {
 		name     string
@@ -713,11 +765,12 @@ func TestDataTypes(t *testing.T) {
 // TestInvalidQuery tests handling of invalid SQL
 func TestInvalidQuery(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	_, err = conn.Exec(ctx, "SELECT * FROM nonexistent_table_xyz")
 	require.Error(t, err)
@@ -733,11 +786,12 @@ func TestInvalidQuery(t *testing.T) {
 // TestTransactionRollback tests transaction rollback behavior
 func TestTransactionRollback(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	// Create test table
 	tableName := fmt.Sprintf("e2e_rollback_test_%d", time.Now().UnixNano())
@@ -775,15 +829,16 @@ func TestTransactionRollback(t *testing.T) {
 // TestErrorInTransaction tests error handling within transactions
 func TestErrorInTransaction(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	tx, err := conn.Begin(ctx)
 	require.NoError(t, err)
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.Background())
 
 	// Execute a query that will fail
 	_, err = tx.Exec(ctx, "SELECT * FROM nonexistent_xyz")
@@ -808,7 +863,8 @@ func TestErrorInTransaction(t *testing.T) {
 // TestInvalidCredentials tests authentication failure
 func TestInvalidCredentials(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	_, err := h.ConnectSingle(ctx, "alpha_uno", TestUser{
 		Username: "app",
@@ -821,7 +877,8 @@ func TestInvalidCredentials(t *testing.T) {
 // TestInvalidDatabase tests connecting to non-existent database
 func TestInvalidDatabase(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	_, err := h.ConnectSingle(ctx, "nonexistent_database", PredefinedUsers.App)
 	require.Error(t, err)
@@ -835,16 +892,17 @@ func TestInvalidDatabase(t *testing.T) {
 // TestSearchPath tests that search_path is handled correctly
 func TestSearchPath(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	// Set search_path within transaction
 	tx, err := conn.Begin(ctx)
 	require.NoError(t, err)
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.Background())
 
 	_, err = tx.Exec(ctx, "SET LOCAL search_path = schema2")
 	require.NoError(t, err)
@@ -873,15 +931,16 @@ func TestSearchPath(t *testing.T) {
 // TestTimeZone tests timezone handling
 func TestTimeZone(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	tx, err := conn.Begin(ctx)
 	require.NoError(t, err)
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.Background())
 
 	// Set timezone
 	_, err = tx.Exec(ctx, "SET LOCAL timezone = 'America/New_York'")
@@ -902,7 +961,8 @@ func TestTimeZone(t *testing.T) {
 // TestCrossBackendQueries tests queries across different backends
 func TestCrossBackendQueries(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	// Connect to all backends and verify they're independent
 	databases := []string{"alpha_uno", "bravo_uno", "charlie_uno"}
@@ -911,7 +971,7 @@ func TestCrossBackendQueries(t *testing.T) {
 	for _, db := range databases {
 		conn, err := h.ConnectSingle(ctx, db, PredefinedUsers.App)
 		require.NoError(t, err)
-		defer conn.Close(ctx)
+		defer conn.Close(context.Background())
 
 		var pid int32
 		err = conn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid)
@@ -928,16 +988,17 @@ func TestCrossBackendQueries(t *testing.T) {
 // TestSameBackendDifferentDatabases tests connections to different databases on same backend
 func TestSameBackendDifferentDatabases(t *testing.T) {
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	// alpha_uno and alpha_dos are on the same backend (alpha)
 	conn1, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn1.Close(ctx)
+	defer conn1.Close(context.Background())
 
 	conn2, err := h.ConnectSingle(ctx, "alpha_dos", PredefinedUsers.App)
 	require.NoError(t, err)
-	defer conn2.Close(ctx)
+	defer conn2.Close(context.Background())
 
 	// Verify they're connected to different databases
 	var db1, db2 string
@@ -971,7 +1032,8 @@ func TestStressConnectDisconnect(t *testing.T) {
 	}
 
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	const iterations = 100
 	const concurrency = 10
@@ -993,7 +1055,7 @@ func TestStressConnectDisconnect(t *testing.T) {
 
 				var result int
 				err = conn.QueryRow(ctx, "SELECT 1").Scan(&result)
-				conn.Close(ctx)
+				conn.Close(context.Background())
 
 				if err == nil && result == 1 {
 					successCount.Add(1)
@@ -1021,7 +1083,8 @@ func TestStressQueries(t *testing.T) {
 	}
 
 	h := getHarness(t)
-	ctx := context.Background()
+	ctx, cancel := testTimeout(t)
+	defer cancel()
 
 	pool, err := h.Connect(ctx, "alpha_uno")
 	require.NoError(t, err)

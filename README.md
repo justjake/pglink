@@ -41,12 +41,11 @@ pglink -config pglink.json -json
 | `-json` | bool | `false` | Output logs in JSON format |
 | `-help` | bool | `false` | Show full documentation |
 
-## Configuration
+## Configuration Reference
 
-pglink is configured via a JSON file (`pglink.json`). Below is the complete
-reference for all configuration options.
+pglink is configured via a JSON file (`pglink.json`).
 
-### Example Configuration
+### Example
 
 ```json
 {
@@ -81,219 +80,115 @@ reference for all configuration options.
 
 ### Config
 
-Config holds the pglink configuration.
+The pglink configuration.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `listen` | array | Yes |  |
-| `tls` | JsonTLSConfig | No |  |
-| `databases` | object | Yes |  |
-| `auth_method` | string | No | AuthMethod specifies the authentication method for client connections.
-Valid values: "plaintext", "md5_password", "scram-sha-256"
-Defaults to "scram-sha-256" if not specified. Default: `"scram-sha-256"` |
-| `scram_iterations` | integer | No | SCRAMIterations is the number of iterations for SCRAM-SHA-256 authentication.
-Higher values provide better protection against brute-force attacks but
-make authentication slower. Defaults to 4096 (PostgreSQL default). Default: `4096` |
-| `max_client_connections` | integer | No | MaxClientConnections is the maximum number of concurrent client connections
-the proxy will accept. New connections beyond this limit are immediately
-rejected with an error. If nil or 0, defaults to 1000. Default: `1000.` |
+| `listen` | array | Yes | The list of network addresses to listen on. Examples: "5432", ":5432", "127.0.0.1:5432", "0.0.0.0:5432" |
+| `tls` | JsonTLSConfig | No | TLS for incoming client connections. If not specified, a self-signed certificate is generated in memory. |
+| `databases` | object | Yes | Database names to their configurations. Clients connect by specifying a database name; the proxy routes the connection to the corresponding backend. |
+| `auth_method` | string | No | The authentication method for client connections. Valid values: "plaintext", "md5_password", "scram-sha-256" Defaults to "scram-sha-256" if not specified. Default: `"scram-sha-256"` |
+| `scram_iterations` | integer | No | The number of iterations for SCRAM-SHA-256 authentication. Higher values provide better protection against brute-force attacks but make authentication slower. Defaults to 4096 (PostgreSQL default). Default: `4096` |
+| `max_client_connections` | integer | No | The maximum number of concurrent client connections the proxy will accept. New connections beyond this limit are immediately rejected with an error. Defaults to 1000. Default: `1000.` |
 
 
 ### DatabaseConfig
 
-DatabaseConfig configures a single database that clients can connect to.
+A single database that clients can connect to.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `users` | array | Yes |  |
-| `backend` | BackendConfig | Yes |  |
-| `track_extra_parameters` | array | No |  |
+| `users` | array | Yes | The list of user credentials that can connect to this database. Each user can authenticate with their own username and password. |
+| `backend` | BackendConfig | Yes | The PostgreSQL server to proxy connections to. |
+| `track_extra_parameters` | array | No | A list of additional PostgreSQL startup parameters to track and forward to the backend. By default, only standard parameters like client_encoding and application_name are tracked. |
 
 
 ### UserConfig
 
-UserConfig configures authentication credentials for a user.
+Authentication credentials for a user.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `username` | string | Yes |  |
-| `password` | string | Yes |  |
+| `username` | SecretRef | Yes | The username for this user, loaded from a secret source. |
+| `password` | SecretRef | Yes | The password for this user, loaded from a secret source. |
 
 
 ### BackendConfig
 
-BackendConfig configures the backend PostgreSQL server to proxy to.
+The backend PostgreSQL server to proxy to.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `host` | string | Yes | Connection target |
-| `port` | integer | No |  |
-| `database` | string | Yes |  |
-| `connect_timeout` | string | No | Connection settings |
-| `sslmode` | string | No | disable, allow, prefer, require, verify-ca, verify-full |
-| `sslkey` | string | No | path to client key |
-| `sslcert` | string | No | path to client cert |
-| `sslrootcert` | string | No | path to root CA cert |
-| `sslpassword` | string | No | password for encrypted key |
-| `statement_cache_capacity` | integer | No | 0 to disable, default 512 |
-| `description_cache_capacity` | integer | No | 0 to disable, default 512 |
-| `pool_max_conns` | integer | Yes | Pool settings |
-| `pool_min_idle_conns` | integer | No |  |
-| `pool_max_conn_lifetime` | string | No | duration |
-| `pool_max_conn_lifetime_jitter` | string | No | duration |
-| `pool_max_conn_idle_time` | string | No | duration |
-| `pool_health_check_period` | string | No | duration |
-| `default_startup_parameters` | object | No | Startup parameters sent to backend on connection |
+| `host` | string | Yes | The hostname or IP address of the backend PostgreSQL server. |
+| `port` | integer | No | The port number of the backend PostgreSQL server. Defaults to 5432. Default: `5432.` |
+| `database` | string | Yes | The name of the database on the backend server. |
+| `connect_timeout` | string | No | The connection timeout in seconds (e.g., "5"). |
+| `sslmode` | string | No | SSL/TLS for backend connections. Values: disable, allow, prefer, require, verify-ca, verify-full |
+| `sslkey` | string | No | The path to the client private key file for SSL authentication. |
+| `sslcert` | string | No | The path to the client certificate file for SSL authentication. |
+| `sslrootcert` | string | No | The path to the root CA certificate file for SSL verification. |
+| `sslpassword` | string | No | The password for the encrypted client private key. |
+| `statement_cache_capacity` | integer | No | The prepared statement cache size. Set to 0 to disable caching. Defaults to 512. Default: `512.` |
+| `description_cache_capacity` | integer | No | The statement description cache size. Set to 0 to disable caching. Defaults to 512. Default: `512.` |
+| `pool_max_conns` | integer | Yes | The maximum number of connections in the pool. This is required and must be greater than 0. |
+| `pool_min_idle_conns` | integer | No | The minimum number of idle connections to maintain. The total across all users must not exceed PoolMaxConns. |
+| `pool_max_conn_lifetime` | string | No | The maximum lifetime of a connection (e.g., "1h"). Connections older than this are closed and replaced. |
+| `pool_max_conn_lifetime_jitter` | string | No | Randomness to connection lifetimes (e.g., "5m"). Prevents all connections from expiring simultaneously. |
+| `pool_max_conn_idle_time` | string | No | The maximum time a connection can be idle (e.g., "30m"). Idle connections older than this are closed. |
+| `pool_health_check_period` | string | No | The interval between health checks (e.g., "1m"). Unhealthy connections are closed and replaced. |
+| `default_startup_parameters` | object | No | PostgreSQL parameters sent when connecting. These override client-provided parameters for keys present here. |
 
 
 ### JsonTLSConfig
 
-JsonTLSConfig configures TLS for incoming client connections.
+TLS for incoming client connections.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `sslmode` | string | No | SSLMode controls whether TLS is required, preferred, or disabled.
-Valid values: "disable", "allow", "prefer", "require" |
-| `cert_path` | string | No | CertPath is the path to the TLS certificate file (PEM format). |
-| `cert_private_key_path` | string | No | CertPrivateKeyPath is the path to the TLS private key file (PEM format). |
-| `generate_cert` | boolean | No | GenerateCert, when true, generates a self-signed certificate at startup.
-If CertPath and CertPrivateKeyPath are also set, the generated cert
-will be written to those paths (if they don't already exist). |
+| `sslmode` | string | No | Whether TLS is required, preferred, or disabled. See the SSLMode type for valid values. |
+| `cert_path` | string | No | The path to the TLS certificate file in PEM format. |
+| `cert_private_key_path` | string | No | The path to the TLS private key file in PEM format. |
+| `generate_cert` | boolean | No | Automatic generation of a self-signed certificate. If CertPath and CertPrivateKeyPath are also set, the certificate is written to those paths (unless they already exist). |
 
 
 ### SecretRef
 
-SecretRef identifies a secret value from one of several sources.
+A secret value from one of several sources.
 Exactly one of AwsSecretArn, InsecureValue, or EnvVar must be set.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `aws_secret_arn` | string | No | AwsSecretArn is the ARN of an AWS Secrets Manager secret.
-Key must also be set to extract a specific field from the JSON secret. |
-| `key` | string | No |  |
-| `insecure_value` | string | No | InsecureValue is a plaintext secret value. Use only for development. |
-| `env_var` | string | No | EnvVar is the name of an environment variable containing the secret. |
+| `aws_secret_arn` | string | No | The ARN of an AWS Secrets Manager secret. When using this, Key must also be set to specify which field to extract. |
+| `key` | string | No | The JSON key to extract from an AWS Secrets Manager secret. Required when using AwsSecretArn. |
+| `insecure_value` | string | No | A plaintext secret value embedded directly in the config. Only use this for development; prefer EnvVar or AwsSecretArn for production. |
+| `env_var` | string | No | The name of an environment variable containing the secret value. |
 
-
-
-
-## Enumeration Types
 
 
 ### AuthMethod
 
-AuthMethod represents the authentication method to use for client connections.
+The authentication method to use for client connections.
 
 | Value | Description |
 |-------|-------------|
-| `md5_password` | AuthMethodMD5 uses MD5-hashed password authentication.
-TLS is strongly recommended but not required. |
-| `plaintext` | AuthMethodPlaintext uses cleartext password authentication.
-Requires TLS to be enabled. |
-| `scram-sha-256` | AuthMethodSCRAMSHA256 uses SCRAM-SHA-256 authentication.
-This is the default and most secure option.
-When TLS is available, SCRAM-SHA-256-PLUS with channel binding will be offered. |
-| `scram-sha-256-plus` | AuthMethodSCRAMSHA256Plus uses SCRAM-SHA-256 with channel binding.
-Requires TLS. This is not directly configurable; use "scram-sha-256"
-and PLUS will be offered automatically when TLS is available. |
+| `plaintext` | Cleartext password authentication. Requires TLS to be enabled. |
+| `md5_password` | MD5-hashed password authentication. TLS is strongly recommended but not required. |
+| `scram-sha-256` | SCRAM-SHA-256 authentication. This is the default and most secure option. When TLS is available, SCRAM-SHA-256-PLUS with channel binding will be offered. |
+| `scram-sha-256-plus` | SCRAM-SHA-256 with channel binding. Requires TLS. This is not directly configurable; use "scram-sha-256" and PLUS will be offered automatically when TLS is available. |
 
 
 ### SSLMode
 
-SSLMode represents the SSL mode for incoming client connections.
+The SSL mode for incoming client connections.
 These mirror PostgreSQL's sslmode settings but apply to the proxy as a server.
 
 | Value | Description |
 |-------|-------------|
-| `allow` | SSLModeAllow accepts both SSL and non-SSL connections. |
-| `disable` | SSLModeDisable disables SSL entirely. |
-| `prefer` | SSLModePrefer prefers SSL but accepts non-SSL connections. |
-| `require` | SSLModeRequire requires SSL for all connections. |
+| `disable` | TLS is disabled entirely. Only plaintext connections are accepted. |
+| `allow` | Both TLS and plaintext connections are accepted from clients. |
+| `prefer` | TLS is preferred but plaintext connections are accepted if the client doesn't support TLS. |
+| `require` | TLS is required for all connections. Plaintext connections are rejected. |
 
-
-
-
-## Secret References
-
-Secrets (usernames and passwords) can be loaded from multiple sources.
-Use exactly one of the following in a `SecretRef`:
-
-### Environment Variable
-
-```json
-{
-  "username": {"env_var": "PG_USER"},
-  "password": {"env_var": "PG_PASSWORD"}
-}
-```
-
-### AWS Secrets Manager
-
-```json
-{
-  "username": {"aws_secret_arn": "arn:aws:secretsmanager:...", "key": "username"},
-  "password": {"aws_secret_arn": "arn:aws:secretsmanager:...", "key": "password"}
-}
-```
-
-### Insecure Value (Development Only)
-
-```json
-{
-  "username": {"insecure_value": "postgres"},
-  "password": {"insecure_value": "secret"}
-}
-```
-
-## TLS Configuration
-
-By default, pglink generates a self-signed certificate in memory and accepts
-both TLS and non-TLS connections.
-
-### TLS Modes
-
-| Mode | Description |
-|------|-------------|
-| `disable` | TLS disabled, only non-TLS connections accepted |
-| `allow` | Both TLS and non-TLS connections accepted |
-| `prefer` | TLS preferred, non-TLS accepted (default behavior) |
-| `require` | TLS required for all connections |
-
-### Using Your Own Certificate
-
-```json
-{
-  "tls": {
-    "sslmode": "require",
-    "cert_path": "/path/to/server.crt",
-    "cert_private_key_path": "/path/to/server.key"
-  }
-}
-```
-
-### Generating a Certificate on Startup
-
-```json
-{
-  "tls": {
-    "sslmode": "prefer",
-    "generate_cert": true,
-    "cert_path": "pglink.crt",
-    "cert_private_key_path": "pglink.key"
-  }
-}
-```
-
-This will generate a self-signed certificate and write it to the specified paths
-if they don't already exist.
-
-## Authentication Methods
-
-| Method | Description |
-|--------|-------------|
-| `scram-sha-256` | Default. Most secure option. Channel binding (PLUS) offered when TLS available. |
-| `md5_password` | MD5-hashed password. TLS strongly recommended. |
-| `plaintext` | Cleartext password. Requires TLS to be enabled. |
 
 ## License
 

@@ -11,6 +11,7 @@ import (
 	"maps"
 	"math/rand/v2"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgerrcode"
@@ -55,10 +56,15 @@ type Session struct {
 	// The server.
 	// nil until a backend connection is acquired to run a transaction.
 	// nil once the backend connection is released.
-	backend            *backend.PooledConn
-	backendReadingChan chan backend.ReadResult[pgwire.ServerMessage]
-	backendCtx         context.Context
-	cancelBackendCtx   context.CancelFunc
+	backend              *backend.PooledConn
+	backendReadingChan   chan backend.ReadResult[pgwire.ServerMessage]
+	backendCtx           context.Context
+	cancelBackendCtx     context.CancelFunc
+	backendAcquisitionID uint64 // Incremented each time we acquire a backend
+
+	// Map from client statement name to server statement name.
+	// Used to ensure consistent naming within a backend acquisition.
+	statementNameMap map[string]string
 
 	// Message stored until the next call to Recv.
 	lastRecv pgwire.Message
@@ -293,6 +299,7 @@ func (s *Session) acquireBackend() (*slog.Logger, error) {
 		return nil, fmt.Errorf("failed to acquire backend: %w", err)
 	}
 	s.backend = be
+	s.backendAcquisitionID++ // Increment to ensure unique statement names per acquisition
 	s.backendReadingChan = make(chan backend.ReadResult[pgwire.ServerMessage])
 	s.backendCtx, s.cancelBackendCtx = context.WithCancel(s.ctx)
 	logger := s.logger.With("backend", s.backend.Name())
@@ -371,6 +378,11 @@ func (s *Session) releaseBackend() {
 
 	close(s.backendReadingChan)
 	s.backendReadingChan = nil
+
+	// Clear statement name map so new acquisition gets fresh names.
+	// The backend we just released may be used by another session,
+	// and we don't want statement name collisions.
+	s.statementNameMap = nil
 }
 
 func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
@@ -570,16 +582,28 @@ func (s *Session) clientToServerObjectName(objectType byte, name string) string 
 	}
 }
 
-func (s *Session) sessionQueryObjectPrefix() string {
-	return fmt.Sprintf("pgwire_%d_", s.state.PID)
-}
+var globalStatementCounter atomic.Uint64
 
 func (s *Session) clientToServerPreparedStatementName(name string) string {
-	return s.sessionQueryObjectPrefix() + name
+	// Check if we already have a mapping for this client name
+	if s.statementNameMap == nil {
+		s.statementNameMap = make(map[string]string)
+	}
+	if serverName, ok := s.statementNameMap[name]; ok {
+		return serverName
+	}
+
+	// Create a new unique server name using global counter
+	counter := globalStatementCounter.Add(1)
+	serverName := fmt.Sprintf("pgwire_%d_%d_%s", s.state.PID, counter, name)
+	s.statementNameMap[name] = serverName
+	return serverName
 }
 
 func (s *Session) clientToServerPortalName(name string) string {
-	return s.sessionQueryObjectPrefix() + name
+	// Portals are per-transaction and don't need global uniqueness like statements.
+	// Just use the PID and acquisition ID as prefix.
+	return fmt.Sprintf("pgwire_%d_%d_%s", s.state.PID, s.backendAcquisitionID, name)
 }
 
 // handleStartup processes the initial connection: TLS negotiation and startup message.

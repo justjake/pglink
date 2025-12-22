@@ -18,9 +18,17 @@ type DatabaseConfig struct {
 	// This is set from the map key in the parent Config, not from JSON.
 	Database string `json:"-"`
 
-	Users                []UserConfig  `json:"users"`
-	Backend              BackendConfig `json:"backend"`
-	TrackExtraParameters []string      `json:"track_extra_parameters,omitzero"`
+	// Users is the list of user credentials that can connect to this database.
+	// Each user can authenticate with their own username and password.
+	Users []UserConfig `json:"users"`
+
+	// Backend configures the PostgreSQL server to proxy connections to.
+	Backend BackendConfig `json:"backend"`
+
+	// TrackExtraParameters is a list of additional PostgreSQL startup parameters
+	// to track and forward to the backend. By default, only standard parameters
+	// like client_encoding and application_name are tracked.
+	TrackExtraParameters []string `json:"track_extra_parameters,omitzero"`
 }
 
 // Validate checks that the database configuration is valid.
@@ -69,7 +77,10 @@ func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) err
 
 // UserConfig configures authentication credentials for a user.
 type UserConfig struct {
+	// Username is the username for this user, loaded from a secret source.
 	Username SecretRef `json:"username"`
+
+	// Password is the password for this user, loaded from a secret source.
 	Password SecretRef `json:"password"`
 }
 
@@ -91,30 +102,68 @@ func (u UserConfig) String() string {
 
 // BackendConfig configures the backend PostgreSQL server to proxy to.
 type BackendConfig struct {
-	// Connection target
-	Host     string  `json:"host"`
-	Port     *uint16 `json:"port,omitempty"`
-	Database string  `json:"database"`
+	// Host is the hostname or IP address of the backend PostgreSQL server.
+	Host string `json:"host"`
 
-	// Connection settings
-	ConnectTimeout           *string `json:"connect_timeout,omitempty"`            // seconds, e.g. "5"
-	SSLMode                  *string `json:"sslmode,omitempty"`                    // disable, allow, prefer, require, verify-ca, verify-full
-	SSLKey                   *string `json:"sslkey,omitempty"`                     // path to client key
-	SSLCert                  *string `json:"sslcert,omitempty"`                    // path to client cert
-	SSLRootCert              *string `json:"sslrootcert,omitempty"`                // path to root CA cert
-	SSLPassword              *string `json:"sslpassword,omitempty"`                // password for encrypted key
-	StatementCacheCapacity   *int32  `json:"statement_cache_capacity,omitempty"`   // 0 to disable, default 512
-	DescriptionCacheCapacity *int32  `json:"description_cache_capacity,omitempty"` // 0 to disable, default 512
+	// Port is the port number of the backend PostgreSQL server. Defaults to 5432.
+	Port *uint16 `json:"port,omitempty"`
 
-	// Pool settings
-	PoolMaxConns              int32   `json:"pool_max_conns"`
-	PoolMinIdleConns          *int32  `json:"pool_min_idle_conns,omitempty"`
-	PoolMaxConnLifetime       *string `json:"pool_max_conn_lifetime,omitempty"`        // duration
-	PoolMaxConnLifetimeJitter *string `json:"pool_max_conn_lifetime_jitter,omitempty"` // duration
-	PoolMaxConnIdleTime       *string `json:"pool_max_conn_idle_time,omitempty"`       // duration
-	PoolHealthCheckPeriod     *string `json:"pool_health_check_period,omitempty"`      // duration
+	// Database is the name of the database on the backend server.
+	Database string `json:"database"`
 
-	// Startup parameters sent to backend on connection
+	// ConnectTimeout is the connection timeout in seconds (e.g., "5").
+	ConnectTimeout *string `json:"connect_timeout,omitempty"`
+
+	// SSLMode controls SSL/TLS for backend connections.
+	// Values: disable, allow, prefer, require, verify-ca, verify-full
+	SSLMode *string `json:"sslmode,omitempty"`
+
+	// SSLKey is the path to the client private key file for SSL authentication.
+	SSLKey *string `json:"sslkey,omitempty"`
+
+	// SSLCert is the path to the client certificate file for SSL authentication.
+	SSLCert *string `json:"sslcert,omitempty"`
+
+	// SSLRootCert is the path to the root CA certificate file for SSL verification.
+	SSLRootCert *string `json:"sslrootcert,omitempty"`
+
+	// SSLPassword is the password for the encrypted client private key.
+	SSLPassword *string `json:"sslpassword,omitempty"`
+
+	// StatementCacheCapacity is the prepared statement cache size.
+	// Set to 0 to disable caching. Defaults to 512.
+	StatementCacheCapacity *int32 `json:"statement_cache_capacity,omitempty"`
+
+	// DescriptionCacheCapacity is the statement description cache size.
+	// Set to 0 to disable caching. Defaults to 512.
+	DescriptionCacheCapacity *int32 `json:"description_cache_capacity,omitempty"`
+
+	// PoolMaxConns is the maximum number of connections in the pool.
+	// This is required and must be greater than 0.
+	PoolMaxConns int32 `json:"pool_max_conns"`
+
+	// PoolMinIdleConns is the minimum number of idle connections to maintain.
+	// The total across all users must not exceed PoolMaxConns.
+	PoolMinIdleConns *int32 `json:"pool_min_idle_conns,omitempty"`
+
+	// PoolMaxConnLifetime is the maximum lifetime of a connection (e.g., "1h").
+	// Connections older than this are closed and replaced.
+	PoolMaxConnLifetime *string `json:"pool_max_conn_lifetime,omitempty"`
+
+	// PoolMaxConnLifetimeJitter adds randomness to connection lifetimes (e.g., "5m").
+	// Prevents all connections from expiring simultaneously.
+	PoolMaxConnLifetimeJitter *string `json:"pool_max_conn_lifetime_jitter,omitempty"`
+
+	// PoolMaxConnIdleTime is the maximum time a connection can be idle (e.g., "30m").
+	// Idle connections older than this are closed.
+	PoolMaxConnIdleTime *string `json:"pool_max_conn_idle_time,omitempty"`
+
+	// PoolHealthCheckPeriod is the interval between health checks (e.g., "1m").
+	// Unhealthy connections are closed and replaced.
+	PoolHealthCheckPeriod *string `json:"pool_health_check_period,omitempty"`
+
+	// DefaultStartupParameters are PostgreSQL parameters sent when connecting.
+	// These override client-provided parameters for keys present here.
 	DefaultStartupParameters PgStartupParameters `json:"default_startup_parameters,omitempty"`
 }
 

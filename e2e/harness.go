@@ -394,16 +394,20 @@ func (h *Harness) ConnectWithUser(ctx context.Context, database string, user Tes
 	poolConfig.MaxConns = 10
 	poolConfig.MinConns = 1
 
+	// Disable statement caching for transaction pooling compatibility.
+	// In transaction pooling mode, the proxy changes statement name prefixes
+	// each time a backend is acquired, so cached statements don't work.
+	poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
+	poolConfig.ConnConfig.StatementCacheCapacity = 0
+	poolConfig.ConnConfig.DescriptionCacheCapacity = 0
+
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool: %w", err)
 	}
 
-	// Verify connection works
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("failed to ping: %w", err)
-	}
+	// Don't ping - it creates backend acquisition that can interfere with
+	// the test's expected acquisition patterns.
 
 	return pool, nil
 }
@@ -423,7 +427,19 @@ func (h *Harness) ConnectSingle(ctx context.Context, database string, user TestU
 		database,
 	)
 
-	conn, err := pgx.Connect(ctx, connStr)
+	config, err := pgx.ParseConfig(connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Disable statement caching for transaction pooling compatibility.
+	// In transaction pooling mode, the proxy changes statement name prefixes
+	// each time a backend is acquired, so cached statements don't work.
+	config.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
+	config.StatementCacheCapacity = 0
+	config.DescriptionCacheCapacity = 0
+
+	conn, err := pgx.ConnectConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}

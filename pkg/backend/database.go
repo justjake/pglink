@@ -169,12 +169,10 @@ func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*Pooled
 
 	// Acquire with retry loop for handling connection limit
 	for {
-		// Wait for fair turn if at capacity
-		if err := d.connMgr.waitForTurn(ctx, user); err != nil {
-			return nil, err
-		}
-
-		// Try to acquire from the user's pool
+		// Try to acquire from the user's pool first.
+		// This will succeed immediately if there's an idle connection available.
+		// Only if the pool needs to create a NEW connection will BeforeConnect
+		// be called, which may return ErrConnectionLimitReached.
 		conn, err := pool.Acquire(ctx)
 		if err == nil {
 			session, err := GetOrCreateSession(conn.Conn().PgConn(), d, user)
@@ -201,7 +199,8 @@ func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*Pooled
 			}, nil
 		}
 
-		// Check if we hit the global connection limit
+		// Check if we hit the global connection limit (no idle connections,
+		// and can't create new ones because we're at the limit)
 		if errors.Is(err, ErrConnectionLimitReached) {
 			// Try to steal an idle connection from another pool
 			if d.tryStealIdleConnection(user) {
@@ -209,13 +208,15 @@ func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*Pooled
 				continue
 			}
 
-			// Couldn't steal, wait for a connection to be released
-			// Use a short timeout to avoid blocking forever
+			// No idle connections available and at the global limit.
+			// Poll for an idle connection to become available.
+			// In transaction pooling mode, connections are released back to the pool
+			// (not closed), so we can't rely on waitForTurn which only wakes on close.
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(10 * time.Millisecond):
-				// Retry
+			case <-time.After(5 * time.Millisecond):
+				// Retry - an idle connection may have been released
 				continue
 			}
 		}

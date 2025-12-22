@@ -45,8 +45,17 @@ func (m AuthMethod) Valid() bool {
 
 // Config holds the pglink configuration.
 type Config struct {
-	Listen    []ListenAddr               `json:"listen"`
-	TLS       *JsonTLSConfig             `json:"tls,omitzero"`
+	// Listen is the list of network addresses to listen on.
+	// Examples: "5432", ":5432", "127.0.0.1:5432", "0.0.0.0:5432"
+	Listen []ListenAddr `json:"listen"`
+
+	// TLS configures TLS for incoming client connections.
+	// If not specified, a self-signed certificate is generated in memory.
+	TLS *JsonTLSConfig `json:"tls,omitzero"`
+
+	// Databases maps database names to their configurations.
+	// Clients connect by specifying a database name; the proxy routes
+	// the connection to the corresponding backend.
 	Databases map[string]*DatabaseConfig `json:"databases"`
 
 	// AuthMethod specifies the authentication method for client connections.
@@ -61,7 +70,7 @@ type Config struct {
 
 	// MaxClientConnections is the maximum number of concurrent client connections
 	// the proxy will accept. New connections beyond this limit are immediately
-	// rejected with an error. If nil or 0, defaults to 1000.
+	// rejected with an error. Defaults to 1000.
 	MaxClientConnections *int32 `json:"max_client_connections,omitzero"`
 
 	// filePath is the path to the config file on disk (not serialized).

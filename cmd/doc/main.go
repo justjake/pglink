@@ -12,7 +12,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -24,25 +23,33 @@ import (
 type FieldDoc struct {
 	Name        string // JSON field name
 	GoName      string // Go field name
-	Type        string // JSON/Go type
+	Type        string // Go type
+	JSONType    string // JSON type for display
 	Required    bool   // Whether the field is required
 	Default     string // Default value, if any
-	Description string // Description from doc comment
+	Description string // Description from doc comment (cleaned)
 	Nested      string // Name of nested type, if applicable
 }
 
 // TypeDoc describes a configuration type.
 type TypeDoc struct {
 	Name        string     // Type name (e.g., "Config", "BackendConfig")
+	DisplayName string     // Display name for docs (may differ from Name)
 	Description string     // Type description from doc comment
 	Fields      []FieldDoc // Fields in the type
 }
 
+// EnumValue describes a single enum value.
+type EnumValue struct {
+	Value       string // The string value
+	Description string // Description from doc comment
+}
+
 // EnumDoc describes an enumeration type.
 type EnumDoc struct {
-	Name        string            // Type name
-	Description string            // Type description
-	Values      map[string]string // Value -> description
+	Name        string      // Type name
+	Description string      // Type description
+	Values      []EnumValue // Values in declaration order
 }
 
 // ConfigDocs holds all extracted documentation.
@@ -133,36 +140,31 @@ func templateFuncs() template.FuncMap {
 			}
 			return strings.Join(lines, "\n")
 		},
-		"lower": strings.ToLower,
+		"lower":      strings.ToLower,
+		"trimPrefix": strings.TrimPrefix,
 		"typeAnchor": func(name string) string {
 			return strings.ToLower(name)
 		},
-		"jsonType": func(goType string) string {
-			switch goType {
-			case "string", "*string", "AuthMethod", "SSLMode", "ListenAddr", "SecretRef":
-				return "string"
-			case "int32", "*int32", "int", "*int":
-				return "integer"
-			case "*uint16", "uint16":
-				return "integer"
-			case "bool", "*bool":
-				return "boolean"
-			case "[]string":
-				return "array"
-			case "[]ListenAddr":
-				return "array"
-			case "[]UserConfig":
-				return "array"
-			case "map[string]*DatabaseConfig":
-				return "object"
-			case "PgStartupParameters":
-				return "object"
-			default:
-				if strings.HasPrefix(goType, "*") {
-					return strings.TrimPrefix(goType, "*")
+		"getType": func(types []TypeDoc, name string) *TypeDoc {
+			for i := range types {
+				if types[i].Name == name {
+					return &types[i]
 				}
-				return goType
 			}
+			return nil
+		},
+		"getEnum": func(enums []EnumDoc, name string) *EnumDoc {
+			for i := range enums {
+				if enums[i].Name == name {
+					return &enums[i]
+				}
+			}
+			return nil
+		},
+		"oneline": func(s string) string {
+			// Replace newlines with spaces and collapse multiple spaces
+			s = strings.ReplaceAll(s, "\n", " ")
+			return strings.Join(strings.Fields(s), " ")
 		},
 	}
 }
@@ -229,21 +231,21 @@ func parseConfigPackage(pkgPath string) (ConfigDocs, error) {
 		}
 	}
 
-	// Sort types by importance
-	typeOrder := map[string]int{
-		"Config":         0,
-		"DatabaseConfig": 1,
-		"UserConfig":     2,
-		"BackendConfig":  3,
-		"JsonTLSConfig":  4,
-		"SecretRef":      5,
+	// Sort types in depth-first pre-order based on field references
+	// Start with Config, then follow nested type references
+	docs.Types = sortTypesDepthFirst(docs.Types)
+
+	// Sort enums by importance
+	enumOrder := map[string]int{
+		"AuthMethod": 0,
+		"SSLMode":    1,
 	}
-	sort.Slice(docs.Types, func(i, j int) bool {
-		oi, ok := typeOrder[docs.Types[i].Name]
+	sort.Slice(docs.Enums, func(i, j int) bool {
+		oi, ok := enumOrder[docs.Enums[i].Name]
 		if !ok {
 			oi = 100
 		}
-		oj, ok := typeOrder[docs.Types[j].Name]
+		oj, ok := enumOrder[docs.Enums[j].Name]
 		if !ok {
 			oj = 100
 		}
@@ -251,6 +253,70 @@ func parseConfigPackage(pkgPath string) (ConfigDocs, error) {
 	})
 
 	return docs, nil
+}
+
+// sortTypesDepthFirst sorts types in depth-first pre-order based on field references.
+// Starting from Config, when we encounter a field that references another type,
+// we output that type immediately after before continuing with other fields.
+func sortTypesDepthFirst(types []TypeDoc) []TypeDoc {
+	// Build a map for quick lookup
+	typeMap := make(map[string]*TypeDoc)
+	for i := range types {
+		typeMap[types[i].Name] = &types[i]
+	}
+
+	var result []TypeDoc
+	visited := make(map[string]bool)
+
+	// Helper to get referenced type name from a field
+	getNestedType := func(field FieldDoc) string {
+		switch field.Type {
+		case "*JsonTLSConfig":
+			return "JsonTLSConfig"
+		case "map[string]*DatabaseConfig":
+			return "DatabaseConfig"
+		case "BackendConfig":
+			return "BackendConfig"
+		case "[]UserConfig":
+			return "UserConfig"
+		case "SecretRef":
+			return "SecretRef"
+		}
+		return ""
+	}
+
+	// Depth-first traversal
+	var visit func(name string)
+	visit = func(name string) {
+		if visited[name] {
+			return
+		}
+		t, ok := typeMap[name]
+		if !ok {
+			return
+		}
+		visited[name] = true
+		result = append(result, *t)
+
+		// Visit nested types in field order
+		for _, field := range t.Fields {
+			if nested := getNestedType(field); nested != "" {
+				visit(nested)
+			}
+		}
+	}
+
+	// Start with Config
+	visit("Config")
+
+	// Add any remaining types that weren't reachable from Config
+	for _, t := range types {
+		if !visited[t.Name] {
+			result = append(result, t)
+		}
+	}
+
+	return result
 }
 
 func extractTypeDoc(t *doc.Type) *TypeDoc {
@@ -287,9 +353,29 @@ func extractTypeDoc(t *doc.Type) *TypeDoc {
 			continue
 		}
 
+		// Extract display name and description from doc comment
+		docText := strings.TrimSpace(t.Doc)
+		displayName := ts.Name.Name
+		description := docText
+
+		// Check for @docname annotation
+		if idx := strings.Index(docText, "@docname "); idx != -1 {
+			// Extract the display name
+			rest := docText[idx+len("@docname "):]
+			if endIdx := strings.IndexAny(rest, " \n\t"); endIdx != -1 {
+				displayName = rest[:endIdx]
+				// Remove the @docname line from description
+				description = strings.TrimSpace(docText[:idx] + rest[endIdx:])
+			} else {
+				displayName = rest
+				description = strings.TrimSpace(docText[:idx])
+			}
+		}
+
 		typeDoc := &TypeDoc{
 			Name:        ts.Name.Name,
-			Description: strings.TrimSpace(t.Doc),
+			DisplayName: displayName,
+			Description: cleanTypeDescription(displayName, description),
 		}
 
 		// Extract fields with their docs
@@ -306,6 +392,29 @@ func extractTypeDoc(t *doc.Type) *TypeDoc {
 	}
 
 	return nil
+}
+
+// cleanTypeDescription removes redundant "TypeName ..." prefix from type descriptions.
+func cleanTypeDescription(typeName, desc string) string {
+	// Remove patterns like "TypeName holds..." or "TypeName configures..."
+	prefixes := []string{
+		typeName + " holds ",
+		typeName + " configures ",
+		typeName + " represents ",
+		typeName + " identifies ",
+		typeName + " is ",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(desc, prefix) {
+			desc = strings.TrimPrefix(desc, prefix)
+			// Capitalize first letter
+			if len(desc) > 0 {
+				desc = strings.ToUpper(desc[:1]) + desc[1:]
+			}
+			break
+		}
+	}
+	return desc
 }
 
 func extractFieldDoc(field *ast.Field) *FieldDoc {
@@ -351,8 +460,14 @@ func extractFieldDoc(field *ast.Field) *FieldDoc {
 		docComment = strings.TrimSpace(field.Comment.Text())
 	}
 
+	// Clean up the doc comment
+	docComment = cleanFieldDescription(goName, docComment)
+
 	// Extract default value from doc if present
 	defaultVal := extractDefault(docComment)
+
+	// Determine JSON type for display
+	jsonType := goTypeToJSONType(goType)
 
 	// Determine if this is a nested type
 	nested := ""
@@ -373,10 +488,80 @@ func extractFieldDoc(field *ast.Field) *FieldDoc {
 		Name:        jsonName,
 		GoName:      goName,
 		Type:        goType,
+		JSONType:    jsonType,
 		Required:    !isOptional,
 		Default:     defaultVal,
 		Description: docComment,
 		Nested:      nested,
+	}
+}
+
+// cleanFieldDescription removes redundant "FieldName is/are" prefix from field descriptions.
+func cleanFieldDescription(fieldName, desc string) string {
+	if desc == "" {
+		return ""
+	}
+
+	// Remove patterns like "FieldName is..." or "FieldName specifies..."
+	prefixes := []string{
+		fieldName + " is ",
+		fieldName + " are ",
+		fieldName + " specifies ",
+		fieldName + " controls ",
+		fieldName + " configures ",
+		fieldName + " enables ",
+		fieldName + " adds ",
+		fieldName + " maps ",
+		fieldName + ", when ",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(desc, prefix) {
+			desc = strings.TrimPrefix(desc, prefix)
+			// Capitalize first letter
+			if len(desc) > 0 {
+				desc = strings.ToUpper(desc[:1]) + desc[1:]
+			}
+			break
+		}
+	}
+	return desc
+}
+
+func goTypeToJSONType(goType string) string {
+	switch goType {
+	case "string", "*string", "AuthMethod", "SSLMode", "ListenAddr":
+		return "string"
+	case "SecretRef":
+		return "[SecretRef](#secretref)"
+	case "int32", "*int32", "int", "*int":
+		return "integer"
+	case "*uint16", "uint16":
+		return "integer"
+	case "bool", "*bool":
+		return "boolean"
+	case "[]string":
+		return "[]string"
+	case "[]ListenAddr":
+		return "[]string"
+	case "[]UserConfig":
+		return "[][UserConfig](#userconfig)"
+	case "map[string]*DatabaseConfig":
+		return "map[string][DatabaseConfig](#databaseconfig)"
+	case "PgStartupParameters":
+		return "map[string]string"
+	case "*JsonTLSConfig":
+		return "[TLSConfig](#tlsconfig)"
+	case "BackendConfig":
+		return "[BackendConfig](#backendconfig)"
+	default:
+		if strings.HasPrefix(goType, "*") {
+			return goTypeToJSONType(strings.TrimPrefix(goType, "*"))
+		}
+		if strings.HasPrefix(goType, "[]") {
+			inner := goTypeToJSONType(strings.TrimPrefix(goType, "[]"))
+			return "[]" + inner
+		}
+		return goType
 	}
 }
 
@@ -441,8 +626,8 @@ func extractEnumDoc(t *doc.Type) *EnumDoc {
 
 		enumDoc := &EnumDoc{
 			Name:        ts.Name.Name,
-			Description: strings.TrimSpace(t.Doc),
-			Values:      make(map[string]string),
+			Description: cleanTypeDescription(ts.Name.Name, strings.TrimSpace(t.Doc)),
+			Values:      []EnumValue{},
 		}
 
 		for _, c := range t.Consts {
@@ -452,7 +637,7 @@ func extractEnumDoc(t *doc.Type) *EnumDoc {
 					continue
 				}
 
-				// Get the string value
+				// Get the string value and doc for each const
 				for i, val := range vs.Values {
 					if lit, ok := val.(*ast.BasicLit); ok && lit.Kind == token.STRING {
 						constName := ""
@@ -469,9 +654,13 @@ func extractEnumDoc(t *doc.Type) *EnumDoc {
 							constDoc = strings.TrimSpace(vs.Comment.Text())
 						}
 
-						// Use const name as key for lookup, but store the string value
-						_ = constName // avoid unused variable
-						enumDoc.Values[strVal] = constDoc
+						// Clean up the const doc - remove the const name prefix
+						constDoc = cleanEnumValueDescription(constName, constDoc)
+
+						enumDoc.Values = append(enumDoc.Values, EnumValue{
+							Value:       strVal,
+							Description: constDoc,
+						})
 					}
 				}
 			}
@@ -485,43 +674,32 @@ func extractEnumDoc(t *doc.Type) *EnumDoc {
 	return nil
 }
 
-// Generate compact help text
-func GenerateCompactHelp() string {
-	return `pglink - PostgreSQL wire protocol proxy
-
-Usage: pglink -config <path> [options]
-
-Options:
-  -config string   Path to pglink.json config file (required)
-  -json            Output logs in JSON format
-  -help            Show full documentation
-
-Example:
-  pglink -config /etc/pglink/pglink.json
-
-Run 'pglink -help' for full configuration documentation.`
-}
-
-// GetDocMarkdownPath returns the path to the generated README.md
-func GetDocMarkdownPath() string {
-	// Try to find README.md relative to the executable
-	execPath, err := os.Executable()
-	if err != nil {
+// cleanEnumValueDescription removes the const name prefix from enum value descriptions.
+func cleanEnumValueDescription(constName, desc string) string {
+	if desc == "" {
 		return ""
 	}
 
-	// Check common locations
-	candidates := []string{
-		filepath.Join(filepath.Dir(execPath), "..", "README.md"),
-		filepath.Join(filepath.Dir(execPath), "README.md"),
-		"README.md",
+	// Remove patterns like "ConstName uses..." or "ConstName is..."
+	prefixes := []string{
+		constName + " uses ",
+		constName + " is ",
+		constName + " means ",
+		constName + " represents ",
+		constName + " requires ",
+		constName + " disables ",
+		constName + " accepts ",
+		constName + " prefers ",
 	}
-
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			return path
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(desc, prefix) {
+			desc = strings.TrimPrefix(desc, prefix)
+			// Capitalize first letter
+			if len(desc) > 0 {
+				desc = strings.ToUpper(desc[:1]) + desc[1:]
+			}
+			break
 		}
 	}
-
-	return ""
+	return desc
 }

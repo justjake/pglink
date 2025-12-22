@@ -22,31 +22,31 @@ import (
 type SSLMode string
 
 const (
-	// SSLModeDisable disables SSL entirely.
+	// SSLModeDisable means TLS is disabled entirely. Only plaintext connections are accepted.
 	SSLModeDisable SSLMode = "disable"
-	// SSLModeAllow accepts both SSL and non-SSL connections.
+	// SSLModeAllow means both TLS and plaintext connections are accepted from clients.
 	SSLModeAllow SSLMode = "allow"
-	// SSLModePrefer prefers SSL but accepts non-SSL connections.
+	// SSLModePrefer means TLS is preferred but plaintext connections are accepted if the client doesn't support TLS.
 	SSLModePrefer SSLMode = "prefer"
-	// SSLModeRequire requires SSL for all connections.
+	// SSLModeRequire means TLS is required for all connections. Plaintext connections are rejected.
 	SSLModeRequire SSLMode = "require"
 )
 
 // JsonTLSConfig configures TLS for incoming client connections.
 type JsonTLSConfig struct {
 	// SSLMode controls whether TLS is required, preferred, or disabled.
-	// Valid values: "disable", "allow", "prefer", "require"
+	// See the SSLMode type for valid values.
 	SSLMode SSLMode `json:"sslmode,omitzero"`
 
-	// CertPath is the path to the TLS certificate file (PEM format).
+	// CertPath is the path to the TLS certificate file in PEM format.
 	CertPath string `json:"cert_path,omitzero"`
 
-	// CertPrivateKeyPath is the path to the TLS private key file (PEM format).
+	// CertPrivateKeyPath is the path to the TLS private key file in PEM format.
 	CertPrivateKeyPath string `json:"cert_private_key_path,omitzero"`
 
-	// GenerateCert, when true, generates a self-signed certificate at startup.
-	// If CertPath and CertPrivateKeyPath are also set, the generated cert
-	// will be written to those paths (if they don't already exist).
+	// GenerateCert enables automatic generation of a self-signed certificate.
+	// If CertPath and CertPrivateKeyPath are also set, the certificate is
+	// written to those paths (unless they already exist).
 	GenerateCert bool `json:"generate_cert,omitzero"`
 }
 
