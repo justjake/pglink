@@ -63,6 +63,7 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 		secrets:   secrets,
 		tlsConfig: tlsResult.Config,
 		listeners: make([]net.Listener, 0, len(cfg.Listen)),
+		databases: make(map[*config.DatabaseConfig]*backend.Database),
 		sessions:  make(map[*Session]struct{}),
 	}, nil
 }
