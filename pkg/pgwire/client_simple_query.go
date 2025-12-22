@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -43,4 +45,37 @@ func ToClientSimpleQuery(msg pgproto3.FrontendMessage) (ClientSimpleQuery, bool)
 		return ClientSimpleQueryFunctionCall{m}, true
 	}
 	return nil, false
+}
+
+// ClientSimpleQueryHandlers provides type-safe handlers for each ClientSimpleQuery variant.
+type ClientSimpleQueryHandlers[T any] struct {
+	Query        func(msg ClientSimpleQueryQuery) (T, error)
+	FunctionCall func(msg ClientSimpleQueryFunctionCall) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ClientSimpleQueryHandlers[T]) HandleDefault(msg ClientSimpleQuery, defaultHandler func(msg ClientSimpleQuery) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ClientSimpleQueryQuery:
+		if h.Query != nil {
+			return h.Query(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientSimpleQueryFunctionCall:
+		if h.FunctionCall != nil {
+			return h.FunctionCall(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown client simplequery message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ClientSimpleQueryHandlers[T]) Handle(msg ClientSimpleQuery) (T, error) {
+	return h.HandleDefault(msg, func(msg ClientSimpleQuery) (T, error) {
+		panic(fmt.Sprintf("no handler defined for client simplequery message: %T", msg))
+	})
 }

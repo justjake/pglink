@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -113,4 +115,86 @@ func ToServerStartup(msg pgproto3.BackendMessage) (ServerStartup, bool) {
 		return ServerStartupBackendKeyData{m}, true
 	}
 	return nil, false
+}
+
+// ServerStartupHandlers provides type-safe handlers for each ServerStartup variant.
+type ServerStartupHandlers[T any] struct {
+	AuthenticationCleartextPassword func(msg ServerStartupAuthenticationCleartextPassword) (T, error)
+	AuthenticationGSS               func(msg ServerStartupAuthenticationGSS) (T, error)
+	AuthenticationGSSContinue       func(msg ServerStartupAuthenticationGSSContinue) (T, error)
+	AuthenticationMD5Password       func(msg ServerStartupAuthenticationMD5Password) (T, error)
+	AuthenticationOk                func(msg ServerStartupAuthenticationOk) (T, error)
+	AuthenticationSASL              func(msg ServerStartupAuthenticationSASL) (T, error)
+	AuthenticationSASLContinue      func(msg ServerStartupAuthenticationSASLContinue) (T, error)
+	AuthenticationSASLFinal         func(msg ServerStartupAuthenticationSASLFinal) (T, error)
+	BackendKeyData                  func(msg ServerStartupBackendKeyData) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ServerStartupHandlers[T]) HandleDefault(msg ServerStartup, defaultHandler func(msg ServerStartup) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ServerStartupAuthenticationCleartextPassword:
+		if h.AuthenticationCleartextPassword != nil {
+			return h.AuthenticationCleartextPassword(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerStartupAuthenticationGSS:
+		if h.AuthenticationGSS != nil {
+			return h.AuthenticationGSS(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerStartupAuthenticationGSSContinue:
+		if h.AuthenticationGSSContinue != nil {
+			return h.AuthenticationGSSContinue(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerStartupAuthenticationMD5Password:
+		if h.AuthenticationMD5Password != nil {
+			return h.AuthenticationMD5Password(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerStartupAuthenticationOk:
+		if h.AuthenticationOk != nil {
+			return h.AuthenticationOk(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerStartupAuthenticationSASL:
+		if h.AuthenticationSASL != nil {
+			return h.AuthenticationSASL(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerStartupAuthenticationSASLContinue:
+		if h.AuthenticationSASLContinue != nil {
+			return h.AuthenticationSASLContinue(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerStartupAuthenticationSASLFinal:
+		if h.AuthenticationSASLFinal != nil {
+			return h.AuthenticationSASLFinal(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerStartupBackendKeyData:
+		if h.BackendKeyData != nil {
+			return h.BackendKeyData(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown server startup message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ServerStartupHandlers[T]) Handle(msg ServerStartup) (T, error) {
+	return h.HandleDefault(msg, func(msg ServerStartup) (T, error) {
+		panic(fmt.Sprintf("no handler defined for server startup message: %T", msg))
+	})
 }

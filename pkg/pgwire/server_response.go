@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -84,4 +86,65 @@ func ToServerResponse(msg pgproto3.BackendMessage) (ServerResponse, bool) {
 		return ServerResponseFunctionCallResponse{m}, true
 	}
 	return nil, false
+}
+
+// ServerResponseHandlers provides type-safe handlers for each ServerResponse variant.
+type ServerResponseHandlers[T any] struct {
+	ReadyForQuery        func(msg ServerResponseReadyForQuery) (T, error)
+	CommandComplete      func(msg ServerResponseCommandComplete) (T, error)
+	DataRow              func(msg ServerResponseDataRow) (T, error)
+	EmptyQueryResponse   func(msg ServerResponseEmptyQueryResponse) (T, error)
+	ErrorResponse        func(msg ServerResponseErrorResponse) (T, error)
+	FunctionCallResponse func(msg ServerResponseFunctionCallResponse) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ServerResponseHandlers[T]) HandleDefault(msg ServerResponse, defaultHandler func(msg ServerResponse) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ServerResponseReadyForQuery:
+		if h.ReadyForQuery != nil {
+			return h.ReadyForQuery(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerResponseCommandComplete:
+		if h.CommandComplete != nil {
+			return h.CommandComplete(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerResponseDataRow:
+		if h.DataRow != nil {
+			return h.DataRow(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerResponseEmptyQueryResponse:
+		if h.EmptyQueryResponse != nil {
+			return h.EmptyQueryResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerResponseErrorResponse:
+		if h.ErrorResponse != nil {
+			return h.ErrorResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerResponseFunctionCallResponse:
+		if h.FunctionCallResponse != nil {
+			return h.FunctionCallResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown server response message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ServerResponseHandlers[T]) Handle(msg ServerResponse) (T, error) {
+	return h.HandleDefault(msg, func(msg ServerResponse) (T, error) {
+		panic(fmt.Sprintf("no handler defined for server response message: %T", msg))
+	})
 }

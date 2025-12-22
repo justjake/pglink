@@ -275,13 +275,12 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	fmt.Fprintf(&buf, "package %s\n\n", pkgName)
 
 	// Imports
-	if len(imports) > 0 {
-		buf.WriteString("import (\n")
-		for _, imp := range imports {
-			fmt.Fprintf(&buf, "\t%s\n", imp)
-		}
-		buf.WriteString(")\n\n")
+	buf.WriteString("import (\n")
+	buf.WriteString("\t\"fmt\"\n\n")
+	for _, imp := range imports {
+		fmt.Fprintf(&buf, "\t%s\n", imp)
 	}
+	buf.WriteString(")\n\n")
 
 	// Build set of methods with return values (to avoid generating void versions)
 	returnMethodNames := make(map[string]bool)
@@ -367,6 +366,42 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	}
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn nil, false\n")
+	buf.WriteString("}\n\n")
+
+	// Handler struct: <From><Prefix>Handlers[T any]
+	handlersName := from + prefix + "Handlers"
+	fmt.Fprintf(&buf, "// %s provides type-safe handlers for each %s variant.\n", handlersName, interfaceName)
+	fmt.Fprintf(&buf, "type %s[T any] struct {\n", handlersName)
+	for _, ti := range types {
+		newTypeName := from + prefix + ti.shortName
+		fmt.Fprintf(&buf, "\t%s func(msg %s) (T, error)\n", ti.shortName, newTypeName)
+	}
+	buf.WriteString("}\n\n")
+
+	// HandleDefault method
+	fmt.Fprintf(&buf, "// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.\n")
+	fmt.Fprintf(&buf, "func (h %s[T]) HandleDefault(msg %s, defaultHandler func(msg %s) (T, error)) (r T, err error) {\n", handlersName, interfaceName, interfaceName)
+	buf.WriteString("\tswitch msg := msg.(type) {\n")
+	for _, ti := range types {
+		newTypeName := from + prefix + ti.shortName
+		fmt.Fprintf(&buf, "\tcase %s:\n", newTypeName)
+		fmt.Fprintf(&buf, "\t\tif h.%s != nil {\n", ti.shortName)
+		fmt.Fprintf(&buf, "\t\t\treturn h.%s(msg)\n", ti.shortName)
+		buf.WriteString("\t\t} else {\n")
+		buf.WriteString("\t\t\treturn defaultHandler(msg)\n")
+		buf.WriteString("\t\t}\n")
+	}
+	buf.WriteString("\t}\n")
+	fmt.Fprintf(&buf, "\terr = fmt.Errorf(\"unknown %s message: %%T\", msg)\n", strings.ToLower(from+" "+prefix))
+	buf.WriteString("\treturn\n")
+	buf.WriteString("}\n\n")
+
+	// Handle method (panics on unhandled)
+	fmt.Fprintf(&buf, "// Handle dispatches to the appropriate handler, or panics if the handler is nil.\n")
+	fmt.Fprintf(&buf, "func (h %s[T]) Handle(msg %s) (T, error) {\n", handlersName, interfaceName)
+	fmt.Fprintf(&buf, "\treturn h.HandleDefault(msg, func(msg %s) (T, error) {\n", interfaceName)
+	fmt.Fprintf(&buf, "\t\tpanic(fmt.Sprintf(\"no handler defined for %s message: %%T\", msg))\n", strings.ToLower(from+" "+prefix))
+	buf.WriteString("\t})\n")
 	buf.WriteString("}\n")
 
 	// Format the code

@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -52,4 +54,44 @@ func ToServerAsync(msg pgproto3.BackendMessage) (ServerAsync, bool) {
 		return ServerAsyncParameterStatus{m}, true
 	}
 	return nil, false
+}
+
+// ServerAsyncHandlers provides type-safe handlers for each ServerAsync variant.
+type ServerAsyncHandlers[T any] struct {
+	NoticeResponse       func(msg ServerAsyncNoticeResponse) (T, error)
+	NotificationResponse func(msg ServerAsyncNotificationResponse) (T, error)
+	ParameterStatus      func(msg ServerAsyncParameterStatus) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ServerAsyncHandlers[T]) HandleDefault(msg ServerAsync, defaultHandler func(msg ServerAsync) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ServerAsyncNoticeResponse:
+		if h.NoticeResponse != nil {
+			return h.NoticeResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerAsyncNotificationResponse:
+		if h.NotificationResponse != nil {
+			return h.NotificationResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerAsyncParameterStatus:
+		if h.ParameterStatus != nil {
+			return h.ParameterStatus(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown server async message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ServerAsyncHandlers[T]) Handle(msg ServerAsync) (T, error) {
+	return h.HandleDefault(msg, func(msg ServerAsync) (T, error) {
+		panic(fmt.Sprintf("no handler defined for server async message: %T", msg))
+	})
 }

@@ -442,3 +442,8 @@ func (h MessageHandlers[T]) Handle(msg Message) (r T, err error) {
 		panic(fmt.Sprintf("no handler defined for message: %T", msg))
 	})
 }
+
+const (
+	ObjectTypePreparedStatement = 'S'
+	ObjectTypePortal            = 'P'
+)

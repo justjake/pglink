@@ -11,6 +11,7 @@ import (
 	"maps"
 	"math/rand/v2"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgerrcode"
@@ -212,6 +213,11 @@ func (s *Session) Run() {
 	// command cycle.
 	s.sendReadyForQuery()
 
+	if err := s.flush(); err != nil {
+		s.sendError(err)
+		return
+	}
+
 	// Idle client state.
 	// When true, transition to backend connected state to handle the query.
 	// When false, close the client connection.
@@ -331,15 +337,23 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		Client: pgwire.ClientMessageHandlers[bool]{
 			SimpleQuery:   s.runSimpleQueryWithBackend,
 			ExtendedQuery: s.runExtendedQueryWithBackend,
+			Copy: func(msg pgwire.ClientCopy) (bool, error) {
+				if s.state.CopyMode == pgwire.CopyNone {
+					return false, pgwire.NewProtocolViolation(fmt.Errorf("copy request without active copy session"), msg)
+				}
+				if err := s.backend.Send(msg.Client()); err != nil {
+					return false, err
+				}
+				return true, nil
+			},
+
 			TerminateConn: func(msg pgwire.ClientTerminateConn) (bool, error) {
 				s.logger.Info("client terminated connection")
 				return false, nil
 			},
+
 			Cancel: func(msg pgwire.ClientCancel) (bool, error) {
 				return false, pgwire.NewProtocolViolation(fmt.Errorf("cancel request on normal connection"), msg)
-			},
-			Copy: func(msg pgwire.ClientCopy) (bool, error) {
-				return false, pgwire.NewProtocolViolation(fmt.Errorf("copy request without active copy session"), msg)
 			},
 			Startup: func(msg pgwire.ClientStartup) (bool, error) {
 				return false, pgwire.NewProtocolViolation(fmt.Errorf("startup completed already"), msg)
@@ -351,7 +365,9 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			ExtendedQuery: s.handleServerExtendedQuery,
 			Response:      s.handleServerResponse,
 			Startup: func(msg pgwire.ServerStartup) (bool, error) {
-				return false, pgwire.NewProtocolViolation(fmt.Errorf("backend sent startup message to active client session"), msg)
+				err := pgwire.NewProtocolViolation(fmt.Errorf("backend sent startup message to active client session"), msg)
+				s.backend.Kill(s.ctx, err)
+				return false, err
 			},
 		},
 	}
@@ -379,14 +395,140 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 }
 
 func (s *Session) runSimpleQueryWithBackend(msg pgwire.ClientSimpleQuery) (bool, error) {
-	switch msg := msg.(type) {
-	case pgwire.ClientSimpleQueryFunctionCall:
-	case pgwire.ClientSimpleQueryQuery:
-		s.beginTransation()
-		s.backend.Send(msg.T)
-	default:
-		panic(fmt.Sprintf("unexpected pgwire.ClientSimpleQuery: %#v", msg))
+	// todo: change state to indicate transaction is active?
+	if err := s.backend.Send(msg.Client()); err != nil {
+		return false, err
 	}
+	return true, nil
+}
+
+func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (continueWithBackend bool, err error) {
+	continueWithBackend = true
+
+	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
+		Bind: func(msg pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
+			return &pgproto3.Bind{
+				PreparedStatement:    s.clientToServerPreparedStatementName(msg.T.PreparedStatement),
+				DestinationPortal:    s.clientToServerPortalName(msg.T.DestinationPortal),
+				ParameterFormatCodes: msg.T.ParameterFormatCodes,
+				Parameters:           msg.T.Parameters,
+				ResultFormatCodes:    msg.T.ResultFormatCodes,
+			}, nil
+		},
+		Parse: func(msg pgwire.ClientExtendedQueryParse) (pgproto3.FrontendMessage, error) {
+			return &pgproto3.Parse{
+				Name:          s.clientToServerPreparedStatementName(msg.T.Name),
+				Query:         msg.T.Query,
+				ParameterOIDs: msg.T.ParameterOIDs,
+			}, nil
+		},
+		Execute: func(msg pgwire.ClientExtendedQueryExecute) (pgproto3.FrontendMessage, error) {
+			return &pgproto3.Execute{
+				Portal:  s.clientToServerPortalName(msg.T.Portal),
+				MaxRows: msg.T.MaxRows,
+			}, nil
+		},
+		Describe: func(msg pgwire.ClientExtendedQueryDescribe) (pgproto3.FrontendMessage, error) {
+			return &pgproto3.Describe{
+				ObjectType: msg.T.ObjectType,
+				Name:       s.clientToServerObjectName(msg.T.ObjectType, msg.T.Name),
+			}, nil
+		},
+		Close: func(msg pgwire.ClientExtendedQueryClose) (pgproto3.FrontendMessage, error) {
+			return &pgproto3.Close{
+				ObjectType: msg.T.ObjectType,
+				Name:       s.clientToServerObjectName(msg.T.ObjectType, msg.T.Name),
+			}, nil
+		},
+		Sync: func(msg pgwire.ClientExtendedQuerySync) (pgproto3.FrontendMessage, error) {
+			return msg.T, nil
+		},
+		Flush: func(msg pgwire.ClientExtendedQueryFlush) (pgproto3.FrontendMessage, error) {
+			return msg.T, nil
+		},
+	}
+
+	rewritten, err := extendedQueryRewriter.Handle(msg)
+	if err != nil {
+		return false, err
+	}
+	if err := s.backend.Send(rewritten); err != nil {
+		return false, err
+	}
+
+	s.state.UpdateForExtendedQueryMessage(msg)
+	return true, nil
+}
+
+func (s *Session) handleServerResponse(msg pgwire.ServerResponse) (bool, error) {
+	continueWithBackend := true
+	s.state.UpdateForServerResponseMessage(msg)
+	if _, ok := msg.(pgwire.ServerResponseReadyForQuery); ok {
+		// We may have missed a status update message, double check.
+		s.sendBackendParameterStatusChanges()
+		// Once the transaction ends, we're done with the backend.
+		// TODO: should we also release the backend if s.state.TxStatus == error ?
+		if s.state.TxStatus == pgwire.TxIdle {
+			continueWithBackend = false
+			s.logger.Info("transaction ended, releasing backend")
+		}
+	}
+
+	s.frontend.Send(msg.Server())
+	return continueWithBackend, nil
+}
+
+func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery) (bool, error) {
+	s.state.UpdateForServerExtendedQueryMessage(msg)
+	s.frontend.Send(msg.Server())
+	return true, nil
+}
+
+func (s *Session) handleServerAsync(msg pgwire.ServerAsync) (bool, error) {
+	s.frontend.Send(msg.Server())
+	return true, nil
+}
+
+func (s *Session) handleServerCopy(msg pgwire.ServerCopy) (bool, error) {
+	s.state.UpdateForServerCopyMessage(msg)
+	s.frontend.Send(msg.Server())
+	return true, nil
+}
+
+func (s *Session) clientToServerObjectName(objectType byte, name string) string {
+	if objectType == pgwire.ObjectTypePreparedStatement {
+		return s.clientToServerPreparedStatementName(name)
+	} else {
+		return s.clientToServerPortalName(name)
+	}
+}
+
+func (s *Session) sessionQueryObjectPrefix() string {
+	return fmt.Sprintf("pgwire_%d_", s.state.PID)
+}
+
+func (s *Session) clientToServerPreparedStatementName(name string) string {
+	return s.sessionQueryObjectPrefix() + name
+}
+
+func (s *Session) clientToServerPortalName(name string) string {
+	return s.sessionQueryObjectPrefix() + name
+}
+
+func (s *Session) serverToClientObjectName(objectType byte, name string) string {
+	if objectType == pgwire.ObjectTypePreparedStatement {
+		return s.serverToClientPreparedStatementName(name)
+	} else {
+		return s.serverToClientPortalName(name)
+	}
+}
+
+func (s *Session) serverToClientPreparedStatementName(name string) string {
+	return strings.TrimPrefix(name, s.sessionQueryObjectPrefix())
+}
+
+func (s *Session) serverToClientPortalName(name string) string {
+	return strings.TrimPrefix(name, s.sessionQueryObjectPrefix())
 }
 
 // handleStartup processes the initial connection: TLS negotiation and startup message.
@@ -424,8 +566,9 @@ func (s *Session) handleStartup() error {
 
 	// Reject non-SSL connections if SSL is required
 	if s.config.TLSRequired() && s.tlsState == nil {
-		s.sendError("FATAL", pgerrcode.ProtocolViolation, "SSL/TLS required")
-		return errors.New("SSL/TLS required but client did not request SSL")
+		err := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, "SSL/TLS required", nil)
+		s.sendError(err)
+		return err
 	}
 
 	// Process startup message
@@ -440,7 +583,8 @@ func (s *Session) handleStartup() error {
 	s.databaseName = startup.Parameters["database"]
 
 	if s.userName == "" {
-		s.sendError("FATAL", pgerrcode.InvalidAuthorizationSpecification, "no user specified")
+		err := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidAuthorizationSpecification, "no user specified", nil)
+		s.sendError(err)
 		return errors.New("no user specified in startup message")
 	}
 
@@ -452,8 +596,9 @@ func (s *Session) handleStartup() error {
 	// Look up database config
 	dbConfig, ok := s.config.Databases[s.databaseName]
 	if !ok {
-		s.sendError("FATAL", pgerrcode.InvalidCatalogName, fmt.Sprintf("database \"%s\" does not exist", s.databaseName))
-		return fmt.Errorf("unknown database: %s", s.databaseName)
+		err := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidCatalogName, fmt.Sprintf("database \"%s\" does not exist", s.databaseName), nil)
+		s.sendError(err)
+		return err
 	}
 	s.dbConfig = dbConfig
 	s.database = s.service.databases[dbConfig]
@@ -461,7 +606,8 @@ func (s *Session) handleStartup() error {
 	// Find matching user config
 	userConfig, err := s.findUserConfig(dbConfig)
 	if err != nil {
-		s.sendError("FATAL", pgerrcode.InvalidAuthorizationSpecification, fmt.Sprintf("user \"%s\" does not exist", s.userName))
+		err := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidAuthorizationSpecification, fmt.Sprintf("user \"%s\" does not exist", s.userName), nil)
+		s.sendError(err)
 		return err
 	}
 	s.userConfig = userConfig
@@ -551,12 +697,6 @@ func (s *Session) initSessionProcessState() {
 	s.state.ParameterStatuses = maps.Collect(s.dbConfig.Backend.DefaultStartupParameters.All())
 	maps.Copy(s.state.ParameterStatuses, s.startupParameters)
 	s.state.TxStatus = pgwire.TxIdle
-	if len(s.dbConfig.TrackExtraParameters) > 0 {
-		s.trackedParameters = append(s.trackedParameters, pgwire.BaseTrackedParameters...)
-		s.trackedParameters = append(s.trackedParameters, s.dbConfig.TrackExtraParameters...)
-	} else {
-		s.trackedParameters = pgwire.BaseTrackedParameters
-	}
 	// TODO: channels?
 }
 
@@ -585,7 +725,7 @@ func (s *Session) sendBackendParameterStatusChanges() {
 	if s.backend == nil {
 		return
 	}
-	diff := s.backend.ParameterStatusChanges(s.trackedParameters, s.state.ParameterStatuses)
+	diff := s.backend.ParameterStatusChanges(s.backend.TrackedParameters(), s.state.ParameterStatuses)
 	if diff == nil {
 		return
 	}
@@ -597,11 +737,12 @@ func (s *Session) sendBackendParameterStatusChanges() {
 		} else {
 			str = *value
 			s.state.ParameterStatuses[key] = str
+
+			s.frontend.Send(&pgproto3.ParameterStatus{
+				Name:  key,
+				Value: str,
+			})
 		}
-		s.frontend.Send(&pgproto3.ParameterStatus{
-			Name:  key,
-			Value: str,
-		})
 	}
 }
 
@@ -706,9 +847,20 @@ func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
 	return nil, fmt.Errorf("unknown frontend message: %T", msg)
 }
 
+func (f *Frontend) receiveBackgroundThread() (*pgwire.ClientMessage, error) {
+	msg, err := f.Receive()
+	if err != nil {
+		return nil, err
+	}
+	if msg == nil {
+		return nil, nil
+	}
+	return &msg, nil
+}
+
 func (f *Frontend) Reader() *backend.ChanReader[pgwire.ClientMessage] {
 	if f.reader == nil {
-		f.reader = backend.NewChanReader(f.Receive)
+		f.reader = backend.NewChanReader(f.receiveBackgroundThread)
 	}
 	return f.reader
 }

@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -76,4 +78,58 @@ func ToServerCopy(msg pgproto3.BackendMessage) (ServerCopy, bool) {
 		return ServerCopyCopyDone{m}, true
 	}
 	return nil, false
+}
+
+// ServerCopyHandlers provides type-safe handlers for each ServerCopy variant.
+type ServerCopyHandlers[T any] struct {
+	CopyInResponse   func(msg ServerCopyCopyInResponse) (T, error)
+	CopyOutResponse  func(msg ServerCopyCopyOutResponse) (T, error)
+	CopyBothResponse func(msg ServerCopyCopyBothResponse) (T, error)
+	CopyData         func(msg ServerCopyCopyData) (T, error)
+	CopyDone         func(msg ServerCopyCopyDone) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ServerCopyHandlers[T]) HandleDefault(msg ServerCopy, defaultHandler func(msg ServerCopy) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ServerCopyCopyInResponse:
+		if h.CopyInResponse != nil {
+			return h.CopyInResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerCopyCopyOutResponse:
+		if h.CopyOutResponse != nil {
+			return h.CopyOutResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerCopyCopyBothResponse:
+		if h.CopyBothResponse != nil {
+			return h.CopyBothResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerCopyCopyData:
+		if h.CopyData != nil {
+			return h.CopyData(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerCopyCopyDone:
+		if h.CopyDone != nil {
+			return h.CopyDone(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown server copy message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ServerCopyHandlers[T]) Handle(msg ServerCopy) (T, error) {
+	return h.HandleDefault(msg, func(msg ServerCopy) (T, error) {
+		panic(fmt.Sprintf("no handler defined for server copy message: %T", msg))
+	})
 }

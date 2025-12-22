@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -32,4 +34,30 @@ func ToClientCancel(msg pgproto3.FrontendMessage) (ClientCancel, bool) {
 		return ClientCancelCancelRequest{m}, true
 	}
 	return nil, false
+}
+
+// ClientCancelHandlers provides type-safe handlers for each ClientCancel variant.
+type ClientCancelHandlers[T any] struct {
+	CancelRequest func(msg ClientCancelCancelRequest) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ClientCancelHandlers[T]) HandleDefault(msg ClientCancel, defaultHandler func(msg ClientCancel) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ClientCancelCancelRequest:
+		if h.CancelRequest != nil {
+			return h.CancelRequest(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown client cancel message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ClientCancelHandlers[T]) Handle(msg ClientCancel) (T, error) {
+	return h.HandleDefault(msg, func(msg ClientCancel) (T, error) {
+		panic(fmt.Sprintf("no handler defined for client cancel message: %T", msg))
+	})
 }

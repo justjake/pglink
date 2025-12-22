@@ -19,13 +19,13 @@ const (
 )
 
 type ChanReader[T any] struct {
-	read       func() (T, error)
+	read       func() (*T, error)
 	outCh      chan ReadResult[T]
 	continueCh chan bool
 	state      atomic.Uint32
 }
 
-func NewChanReader[T any](read func() (T, error)) *ChanReader[T] {
+func NewChanReader[T any](read func() (*T, error)) *ChanReader[T] {
 	return &ChanReader[T]{
 		read:       read,
 		outCh:      make(chan ReadResult[T]),
@@ -77,11 +77,19 @@ func (r *ChanReader[T]) readerLoop() {
 	for {
 		r.state.Store(ChanReaderReading)
 		value, err := r.read()
-		r.state.Store(ChanReaderSendingResult)
-		r.outCh <- ReadResult[T]{Value: value, Error: err}
-		if err != nil {
+		if value == nil && err == nil {
+			// EOF
 			return
 		}
+
+		r.state.Store(ChanReaderSendingResult)
+		r.outCh <- ReadResult[T]{Value: *value, Error: err}
+
+		if err != nil {
+			// Other error
+			return
+		}
+
 		r.state.Store(ChanReaderWaitingForContinue)
 		select {
 		case shouldReadAgain := <-r.continueCh:

@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -92,4 +94,72 @@ func ToClientStartup(msg pgproto3.FrontendMessage) (ClientStartup, bool) {
 		return ClientStartupStartupMessage{m}, true
 	}
 	return nil, false
+}
+
+// ClientStartupHandlers provides type-safe handlers for each ClientStartup variant.
+type ClientStartupHandlers[T any] struct {
+	GSSEncRequest       func(msg ClientStartupGSSEncRequest) (T, error)
+	GSSResponse         func(msg ClientStartupGSSResponse) (T, error)
+	PasswordMessage     func(msg ClientStartupPasswordMessage) (T, error)
+	SASLInitialResponse func(msg ClientStartupSASLInitialResponse) (T, error)
+	SASLResponse        func(msg ClientStartupSASLResponse) (T, error)
+	SSLRequest          func(msg ClientStartupSSLRequest) (T, error)
+	StartupMessage      func(msg ClientStartupStartupMessage) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ClientStartupHandlers[T]) HandleDefault(msg ClientStartup, defaultHandler func(msg ClientStartup) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ClientStartupGSSEncRequest:
+		if h.GSSEncRequest != nil {
+			return h.GSSEncRequest(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientStartupGSSResponse:
+		if h.GSSResponse != nil {
+			return h.GSSResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientStartupPasswordMessage:
+		if h.PasswordMessage != nil {
+			return h.PasswordMessage(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientStartupSASLInitialResponse:
+		if h.SASLInitialResponse != nil {
+			return h.SASLInitialResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientStartupSASLResponse:
+		if h.SASLResponse != nil {
+			return h.SASLResponse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientStartupSSLRequest:
+		if h.SSLRequest != nil {
+			return h.SSLRequest(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientStartupStartupMessage:
+		if h.StartupMessage != nil {
+			return h.StartupMessage(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown client startup message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ClientStartupHandlers[T]) Handle(msg ClientStartup) (T, error) {
+	return h.HandleDefault(msg, func(msg ClientStartup) (T, error) {
+		panic(fmt.Sprintf("no handler defined for client startup message: %T", msg))
+	})
 }

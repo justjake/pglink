@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -93,4 +95,72 @@ func ToServerExtendedQuery(msg pgproto3.BackendMessage) (ServerExtendedQuery, bo
 		return ServerExtendedQueryCloseComplete{m}, true
 	}
 	return nil, false
+}
+
+// ServerExtendedQueryHandlers provides type-safe handlers for each ServerExtendedQuery variant.
+type ServerExtendedQueryHandlers[T any] struct {
+	ParseComplete        func(msg ServerExtendedQueryParseComplete) (T, error)
+	BindComplete         func(msg ServerExtendedQueryBindComplete) (T, error)
+	ParameterDescription func(msg ServerExtendedQueryParameterDescription) (T, error)
+	RowDescription       func(msg ServerExtendedQueryRowDescription) (T, error)
+	NoData               func(msg ServerExtendedQueryNoData) (T, error)
+	PortalSuspended      func(msg ServerExtendedQueryPortalSuspended) (T, error)
+	CloseComplete        func(msg ServerExtendedQueryCloseComplete) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ServerExtendedQueryHandlers[T]) HandleDefault(msg ServerExtendedQuery, defaultHandler func(msg ServerExtendedQuery) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ServerExtendedQueryParseComplete:
+		if h.ParseComplete != nil {
+			return h.ParseComplete(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerExtendedQueryBindComplete:
+		if h.BindComplete != nil {
+			return h.BindComplete(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerExtendedQueryParameterDescription:
+		if h.ParameterDescription != nil {
+			return h.ParameterDescription(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerExtendedQueryRowDescription:
+		if h.RowDescription != nil {
+			return h.RowDescription(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerExtendedQueryNoData:
+		if h.NoData != nil {
+			return h.NoData(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerExtendedQueryPortalSuspended:
+		if h.PortalSuspended != nil {
+			return h.PortalSuspended(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ServerExtendedQueryCloseComplete:
+		if h.CloseComplete != nil {
+			return h.CloseComplete(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown server extendedquery message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ServerExtendedQueryHandlers[T]) Handle(msg ServerExtendedQuery) (T, error) {
+	return h.HandleDefault(msg, func(msg ServerExtendedQuery) (T, error) {
+		panic(fmt.Sprintf("no handler defined for server extendedquery message: %T", msg))
+	})
 }

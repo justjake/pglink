@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -52,4 +54,44 @@ func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 		return ClientCopyCopyFail{m}, true
 	}
 	return nil, false
+}
+
+// ClientCopyHandlers provides type-safe handlers for each ClientCopy variant.
+type ClientCopyHandlers[T any] struct {
+	CopyData func(msg ClientCopyCopyData) (T, error)
+	CopyDone func(msg ClientCopyCopyDone) (T, error)
+	CopyFail func(msg ClientCopyCopyFail) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ClientCopyHandlers[T]) HandleDefault(msg ClientCopy, defaultHandler func(msg ClientCopy) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ClientCopyCopyData:
+		if h.CopyData != nil {
+			return h.CopyData(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientCopyCopyDone:
+		if h.CopyDone != nil {
+			return h.CopyDone(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientCopyCopyFail:
+		if h.CopyFail != nil {
+			return h.CopyFail(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown client copy message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ClientCopyHandlers[T]) Handle(msg ClientCopy) (T, error) {
+	return h.HandleDefault(msg, func(msg ClientCopy) (T, error) {
+		panic(fmt.Sprintf("no handler defined for client copy message: %T", msg))
+	})
 }

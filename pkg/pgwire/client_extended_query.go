@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -141,4 +143,72 @@ func ToClientExtendedQuery(msg pgproto3.FrontendMessage) (ClientExtendedQuery, b
 		return ClientExtendedQueryFlush{m}, true
 	}
 	return nil, false
+}
+
+// ClientExtendedQueryHandlers provides type-safe handlers for each ClientExtendedQuery variant.
+type ClientExtendedQueryHandlers[T any] struct {
+	Parse    func(msg ClientExtendedQueryParse) (T, error)
+	Bind     func(msg ClientExtendedQueryBind) (T, error)
+	Execute  func(msg ClientExtendedQueryExecute) (T, error)
+	Sync     func(msg ClientExtendedQuerySync) (T, error)
+	Describe func(msg ClientExtendedQueryDescribe) (T, error)
+	Close    func(msg ClientExtendedQueryClose) (T, error)
+	Flush    func(msg ClientExtendedQueryFlush) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ClientExtendedQueryHandlers[T]) HandleDefault(msg ClientExtendedQuery, defaultHandler func(msg ClientExtendedQuery) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ClientExtendedQueryParse:
+		if h.Parse != nil {
+			return h.Parse(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientExtendedQueryBind:
+		if h.Bind != nil {
+			return h.Bind(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientExtendedQueryExecute:
+		if h.Execute != nil {
+			return h.Execute(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientExtendedQuerySync:
+		if h.Sync != nil {
+			return h.Sync(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientExtendedQueryDescribe:
+		if h.Describe != nil {
+			return h.Describe(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientExtendedQueryClose:
+		if h.Close != nil {
+			return h.Close(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	case ClientExtendedQueryFlush:
+		if h.Flush != nil {
+			return h.Flush(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown client extendedquery message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ClientExtendedQueryHandlers[T]) Handle(msg ClientExtendedQuery) (T, error) {
+	return h.HandleDefault(msg, func(msg ClientExtendedQuery) (T, error) {
+		panic(fmt.Sprintf("no handler defined for client extendedquery message: %T", msg))
+	})
 }

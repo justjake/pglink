@@ -3,6 +3,8 @@
 package pgwire
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -32,4 +34,30 @@ func ToClientTerminateConn(msg pgproto3.FrontendMessage) (ClientTerminateConn, b
 		return ClientTerminateConnTerminate{m}, true
 	}
 	return nil, false
+}
+
+// ClientTerminateConnHandlers provides type-safe handlers for each ClientTerminateConn variant.
+type ClientTerminateConnHandlers[T any] struct {
+	Terminate func(msg ClientTerminateConnTerminate) (T, error)
+}
+
+// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
+func (h ClientTerminateConnHandlers[T]) HandleDefault(msg ClientTerminateConn, defaultHandler func(msg ClientTerminateConn) (T, error)) (r T, err error) {
+	switch msg := msg.(type) {
+	case ClientTerminateConnTerminate:
+		if h.Terminate != nil {
+			return h.Terminate(msg)
+		} else {
+			return defaultHandler(msg)
+		}
+	}
+	err = fmt.Errorf("unknown client terminateconn message: %T", msg)
+	return
+}
+
+// Handle dispatches to the appropriate handler, or panics if the handler is nil.
+func (h ClientTerminateConnHandlers[T]) Handle(msg ClientTerminateConn) (T, error) {
+	return h.HandleDefault(msg, func(msg ClientTerminateConn) (T, error) {
+		panic(fmt.Sprintf("no handler defined for client terminateconn message: %T", msg))
+	})
 }

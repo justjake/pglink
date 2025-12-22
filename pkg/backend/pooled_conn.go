@@ -1,9 +1,11 @@
 package backend
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
@@ -43,9 +45,23 @@ func (c *PooledConn) Continue() {
 	c.session.reader.Continue()
 }
 
-func (c *PooledConn) Send(msg pgwire.ServerMessage) error {
+func (c *PooledConn) Send(msg pgproto3.FrontendMessage) error {
 	c.panicIfReleased()
 	return c.session.Send(msg)
+}
+
+func (c *PooledConn) ParameterStatusChanges(keys []string, since pgwire.ParameterStatuses) pgwire.ParameterStatusDiff {
+	c.panicIfReleased()
+	return c.session.ParameterStatusChanges(keys, since)
+}
+
+func (c *PooledConn) Kill(ctx context.Context, err error) {
+	c.panicIfReleased()
+	c.session.logger.Error("killing connection", "error", err)
+	if closeErr := c.conn.Hijack().Close(ctx); closeErr != nil {
+		c.session.logger.Error("failed to kill connection", "error", closeErr)
+	}
+	// c.session.Kill(err)
 }
 
 // Release returns the connection to the pool.
@@ -55,7 +71,8 @@ func (c *PooledConn) Release() {
 		return
 	}
 	c.released = true
-	c.Conn.Release()
+	c.conn.Release()
+	c.session.Release()
 	// Note: We don't release dbConns here because the connection goes back
 	// to the pool as idle. dbConns is only decremented in BeforeClose when
 	// the connection is actually closed.

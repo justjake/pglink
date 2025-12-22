@@ -177,9 +177,20 @@ func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*Pooled
 		// Try to acquire from the user's pool
 		conn, err := pool.Acquire(ctx)
 		if err == nil {
+			session, err := GetOrCreateSession(conn.Conn().PgConn(), d, user)
+			if err != nil {
+				// Drop the connection from the pool.
+				d.logger.Error("failed to create session, dropping connection", "error", err, "pid", conn.Conn().PgConn().PID())
+				closeErr := conn.Hijack().Close(context.Background())
+				if closeErr != nil {
+					err = errors.Join(err, closeErr)
+				}
+				return nil, err
+			}
+
 			return &PooledConn{
-				Conn:    conn,
-				session: GetOrCreateSession(conn.Conn().PgConn(), d, user),
+				conn:    conn,
+				session: session,
 			}, nil
 		}
 
