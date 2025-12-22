@@ -75,10 +75,10 @@ func (s *Service) Listen() error {
 	// Set up all databases
 	for name, dbConfig := range s.config.Databases {
 		db, err := backend.NewDatabase(s.ctx, dbConfig, s.secrets, s.logger)
-		defer db.Close()
 		if err != nil {
 			return fmt.Errorf("failed to create database %s: %w", name, err)
 		}
+		defer db.Close()
 		s.logger.Info("created backend", "name", name, "config", dbConfig)
 		s.databases[dbConfig] = db
 	}

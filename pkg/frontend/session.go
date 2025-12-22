@@ -11,7 +11,6 @@ import (
 	"maps"
 	"math/rand/v2"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgerrcode"
@@ -273,7 +272,8 @@ func (s *Session) Run() {
 }
 
 func (s *Session) acquireBackend() (*slog.Logger, error) {
-	ctx, _ := context.WithTimeout(s.ctx, time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, time.Second)
+	defer cancel()
 	be, err := s.database.Acquire(ctx, *s.userConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to acquire backend: %w", err)
@@ -323,7 +323,7 @@ func (s *Session) releaseBackend() {
 func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	logger, err := s.acquireBackend()
 	if err != nil {
-		pgErr := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.CannotConnectNow, fmt.Sprintf("failed to acquire backend"), err)
+		pgErr := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.CannotConnectNow, "failed to acquire backend", err)
 		pgErr.Detail = fmt.Sprintf("while handling message %T", firstMsg)
 		return pgErr
 	}
@@ -391,6 +391,9 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		// Read next message from client or backend,
 		// and continue the loop to handle it.
 		msg, err = s.RecvAny()
+		if err != nil {
+			return err
+		}
 	}
 }
 
@@ -402,9 +405,7 @@ func (s *Session) runSimpleQueryWithBackend(msg pgwire.ClientSimpleQuery) (bool,
 	return true, nil
 }
 
-func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (continueWithBackend bool, err error) {
-	continueWithBackend = true
-
+func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (bool, error) {
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
 		Bind: func(msg pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
 			return &pgproto3.Bind{
@@ -513,22 +514,6 @@ func (s *Session) clientToServerPreparedStatementName(name string) string {
 
 func (s *Session) clientToServerPortalName(name string) string {
 	return s.sessionQueryObjectPrefix() + name
-}
-
-func (s *Session) serverToClientObjectName(objectType byte, name string) string {
-	if objectType == pgwire.ObjectTypePreparedStatement {
-		return s.serverToClientPreparedStatementName(name)
-	} else {
-		return s.serverToClientPortalName(name)
-	}
-}
-
-func (s *Session) serverToClientPreparedStatementName(name string) string {
-	return strings.TrimPrefix(name, s.sessionQueryObjectPrefix())
-}
-
-func (s *Session) serverToClientPortalName(name string) string {
-	return strings.TrimPrefix(name, s.sessionQueryObjectPrefix())
 }
 
 // handleStartup processes the initial connection: TLS negotiation and startup message.
@@ -790,6 +775,7 @@ func (s *Session) flush() error {
 	if len(errs) > 0 {
 		return fmt.Errorf("error flushing: %w", errors.Join(errs...))
 	}
+	return nil
 }
 
 // slogTraceWriter implements io.Writer to convert pgproto3 trace output to slog debug calls.

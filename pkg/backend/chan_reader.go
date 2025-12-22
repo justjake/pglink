@@ -91,11 +91,9 @@ func (r *ChanReader[T]) readerLoop() {
 		}
 
 		r.state.Store(ChanReaderWaitingForContinue)
-		select {
-		case shouldReadAgain := <-r.continueCh:
-			if !shouldReadAgain {
-				return
-			}
+		shouldReadAgain := <-r.continueCh
+		if !shouldReadAgain {
+			return
 		}
 	}
 }

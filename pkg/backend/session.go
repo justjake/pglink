@@ -169,7 +169,7 @@ func (s *Session) readBackendMessage() (*pgwire.ServerMessage, error) {
 		defer s.stateMu.Unlock()
 
 		// IMPORTANT: THIS IS WHERE WE TRACK THE SERVER'S STATE.
-		s.State.UpdateForServerMessage(msg)
+		s.State.UpdateForServerMessage(m)
 
 		return &m, nil
 	}

@@ -1,7 +1,6 @@
 package frontend
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
@@ -18,7 +17,6 @@ import (
 
 // AuthSession manages client authentication using the PostgreSQL protocol.
 type AuthSession struct {
-	ctx         context.Context
 	frontend    *Frontend
 	credentials UserSecretData
 	method      config.AuthMethod
@@ -102,7 +100,7 @@ func (s *AuthSession) runPlainAuth() error {
 		return fmt.Errorf("failed to receive password: %w", err)
 	}
 
-	pwMsg, ok := msg.(*pgproto3.PasswordMessage)
+	pwMsg, ok := msg.Client().(*pgproto3.PasswordMessage)
 	if !ok {
 		return s.authError(fmt.Errorf("expected PasswordMessage, got %T", msg))
 	}
@@ -126,7 +124,7 @@ func (s *AuthSession) runMD5Auth() error {
 		return fmt.Errorf("failed to receive password: %w", err)
 	}
 
-	pwMsg, ok := msg.(*pgproto3.PasswordMessage)
+	pwMsg, ok := msg.Client().(*pgproto3.PasswordMessage)
 	if !ok {
 		return s.authError(fmt.Errorf("expected PasswordMessage, got %T", msg))
 	}
@@ -164,7 +162,7 @@ func (s *AuthSession) runSCRAMAuth() error {
 		return fmt.Errorf("failed to receive SASL initial response: %w", err)
 	}
 
-	initMsg, ok := msg.(*pgproto3.SASLInitialResponse)
+	initMsg, ok := msg.Client().(*pgproto3.SASLInitialResponse)
 	if !ok {
 		return s.authError(fmt.Errorf("expected SASLInitialResponse, got %T", msg))
 	}
@@ -225,7 +223,7 @@ func (s *AuthSession) runSCRAMAuth() error {
 		return fmt.Errorf("failed to receive SASL response: %w", err)
 	}
 
-	respMsg, ok := msg.(*pgproto3.SASLResponse)
+	respMsg, ok := msg.Client().(*pgproto3.SASLResponse)
 	if !ok {
 		return s.authError(fmt.Errorf("expected SASLResponse, got %T", msg))
 	}

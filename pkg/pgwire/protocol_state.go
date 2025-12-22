@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgproto3"
-	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // State of a session in the PostgreSQL wire protocol.
@@ -54,14 +53,14 @@ func (s *ProtocolState) UpdateForFrontentMessage(msg pgproto3.FrontendMessage) {
 	}
 }
 
-func (s *ProtocolState) UpdateForServerMessage(msg pgwire.ServerMessage) {
+func (s *ProtocolState) UpdateForServerMessage(msg ServerMessage) {
 	handlers := ServerMessageHandlers[struct{}]{
 		Async:         wrapVoid(s.UpdateForServerAsyncMessage),
 		Copy:          wrapVoid(s.UpdateForServerCopyMessage),
 		ExtendedQuery: wrapVoid(s.UpdateForServerExtendedQueryMessage),
 		Response:      wrapVoid(s.UpdateForServerResponseMessage),
 	}
-	handlers.HandleDefault(msg, func(msg pgwire.ServerMessage) (struct{}, error) { return struct{}{}, nil })
+	_, _ = handlers.HandleDefault(msg, func(msg ServerMessage) (struct{}, error) { return struct{}{}, nil })
 }
 
 func (s *ProtocolState) UpdateForExtendedQueryMessage(msg ClientExtendedQuery) {
