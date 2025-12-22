@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+eval "$(mise activate bash --shims)"
+
+go run ./cmd/doc "$@"
+
+# Copy README.md to cmd/pglink for embedding
+cp README.md cmd/pglink/README.md
+echo "Copied README.md to cmd/pglink/README.md for embedding"

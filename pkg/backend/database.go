@@ -188,6 +188,13 @@ func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*Pooled
 				return nil, err
 			}
 
+			// Acquire the session so it can be used for reading/writing
+			if err := session.Acquire(); err != nil {
+				d.logger.Error("failed to acquire session", "error", err)
+				conn.Release()
+				return nil, err
+			}
+
 			return &PooledConn{
 				conn:    conn,
 				session: session,

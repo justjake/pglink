@@ -97,8 +97,9 @@ func computeMD5Password(creds UserSecretData, salt [4]byte) string {
 
 // LookupCredential implements auth.CredentialStore for SCRAM authentication.
 func (u *UserSecretData) LookupCredential(q auth.Query) (auth.Credential, bool, error) {
-	// Verify username matches
-	if q.Username() != u.Username() {
+	// Verify username matches (per RFC 5802, empty username means "use the one from startup")
+	queryUser := q.Username()
+	if queryUser != "" && queryUser != u.Username() {
 		return nil, false, nil
 	}
 

@@ -92,15 +92,23 @@ type Harness struct {
 func NewHarness(t *testing.T) *Harness {
 	t.Helper()
 
+	h := NewHarnessForMain()
+	h.t = t
+	return h
+}
+
+// NewHarnessForMain creates a harness for use in TestMain (without a *testing.T).
+// Errors will cause a panic instead of t.Fatalf.
+func NewHarnessForMain() *Harness {
 	// Find project root (directory containing docker-compose.yaml)
 	projectDir, err := findProjectRoot()
 	if err != nil {
-		t.Fatalf("failed to find project root: %v", err)
+		panic(fmt.Sprintf("failed to find project root: %v", err))
 	}
 
 	configPath := filepath.Join(projectDir, "pglink.json")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		t.Fatalf("pglink.json not found at %s", configPath)
+		panic(fmt.Sprintf("pglink.json not found at %s", configPath))
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -108,7 +116,7 @@ func NewHarness(t *testing.T) *Harness {
 	}))
 
 	return &Harness{
-		t:          t,
+		t:          nil,
 		projectDir: projectDir,
 		configPath: configPath,
 		logger:     logger,
@@ -144,7 +152,9 @@ func findProjectRoot() (string, error) {
 // 2. Waits for all backend databases to be healthy
 // 3. Starts the pglink service
 func (h *Harness) Start(ctx context.Context) {
-	h.t.Helper()
+	if h.t != nil {
+		h.t.Helper()
+	}
 
 	h.logger.Info("starting e2e test harness", "projectDir", h.projectDir)
 
@@ -165,8 +175,6 @@ func (h *Harness) Start(ctx context.Context) {
 
 // Stop shuts down the test infrastructure gracefully
 func (h *Harness) Stop() {
-	h.t.Helper()
-
 	h.logger.Info("stopping e2e test harness")
 
 	// Shutdown service
@@ -181,10 +189,17 @@ func (h *Harness) Stop() {
 	// Docker-compose containers are left running for efficiency.
 }
 
+// fatalf reports a fatal error, using t.Fatalf if available or panicking otherwise
+func (h *Harness) fatalf(format string, args ...any) {
+	if h.t != nil {
+		h.t.Fatalf(format, args...)
+	} else {
+		panic(fmt.Sprintf(format, args...))
+	}
+}
+
 // ensureDockerCompose starts docker-compose if not already running
 func (h *Harness) ensureDockerCompose(ctx context.Context) {
-	h.t.Helper()
-
 	// Check if containers are already running
 	if h.isDockerComposeRunning(ctx) {
 		h.logger.Info("docker-compose already running")
@@ -200,7 +215,7 @@ func (h *Harness) ensureDockerCompose(ctx context.Context) {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		h.t.Fatalf("failed to start docker-compose: %v", err)
+		h.fatalf("failed to start docker-compose: %v", err)
 	}
 
 	h.logger.Info("docker-compose started")
@@ -230,8 +245,6 @@ func (h *Harness) isDockerComposeRunning(ctx context.Context) bool {
 
 // waitForBackends waits for all backend databases to accept connections
 func (h *Harness) waitForBackends(ctx context.Context) {
-	h.t.Helper()
-
 	ctx, cancel := context.WithTimeout(ctx, DockerComposeStartTimeout)
 	defer cancel()
 
@@ -265,7 +278,7 @@ func (h *Harness) waitForBackends(ctx context.Context) {
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
-		h.t.Fatalf("failed to connect to backends: %v", errs)
+		h.fatalf("failed to connect to backends: %v", errs)
 	}
 
 	h.logger.Info("all backends healthy")
@@ -284,7 +297,7 @@ func (h *Harness) waitForBackend(ctx context.Context, name string, port int) err
 
 		conn, err := pgx.Connect(ctx, connStr)
 		if err == nil {
-			conn.Close(ctx)
+			_ = conn.Close(ctx)
 			h.logger.Info("backend ready", "name", name, "port", port)
 			return nil
 		}
@@ -296,22 +309,20 @@ func (h *Harness) waitForBackend(ctx context.Context, name string, port int) err
 
 // startService starts the pglink service
 func (h *Harness) startService(ctx context.Context) {
-	h.t.Helper()
-
 	cfg, err := config.ReadConfigFile(h.configPath)
 	if err != nil {
-		h.t.Fatalf("failed to read config: %v", err)
+		h.fatalf("failed to read config: %v", err)
 	}
 
 	secrets, err := config.NewSecretCacheFromEnv(ctx)
 	if err != nil {
-		h.t.Fatalf("failed to create secrets cache: %v", err)
+		h.fatalf("failed to create secrets cache: %v", err)
 	}
 
 	fsys := os.DirFS(cfg.Dir())
 
 	if err := cfg.Validate(ctx, fsys, secrets, h.logger); err != nil {
-		h.t.Fatalf("config validation failed: %v", err)
+		h.fatalf("config validation failed: %v", err)
 	}
 
 	// Create a cancellable context for the service that won't be cancelled
@@ -322,7 +333,7 @@ func (h *Harness) startService(ctx context.Context) {
 
 	svc, err := frontend.NewService(svcCtx, cfg, fsys, secrets, h.logger)
 	if err != nil {
-		h.t.Fatalf("failed to create service: %v", err)
+		h.fatalf("failed to create service: %v", err)
 	}
 	h.service = svc
 
@@ -340,8 +351,6 @@ func (h *Harness) startService(ctx context.Context) {
 
 // waitForService waits for pglink to accept connections
 func (h *Harness) waitForService(ctx context.Context) {
-	h.t.Helper()
-
 	ctx, cancel := context.WithTimeout(ctx, ServiceStartTimeout)
 	defer cancel()
 
@@ -350,13 +359,13 @@ func (h *Harness) waitForService(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			h.t.Fatalf("pglink service did not start in time")
+			h.fatalf("pglink service did not start in time")
 		default:
 		}
 
 		conn, err := net.DialTimeout("tcp", addr, time.Second)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			h.logger.Info("pglink service ready", "addr", addr)
 			return
 		}

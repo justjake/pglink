@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,31 +16,27 @@ import (
 
 // TestMain sets up and tears down the test harness for all e2e tests.
 // This ensures docker-compose and pglink are running before any tests execute.
-var (
-	testHarness *Harness
-	setupOnce   sync.Once
-	setupErr    error
-)
+var testHarness *Harness
+
+func TestMain(m *testing.M) {
+	// Create harness with a nil testing.T since we're in TestMain
+	testHarness = NewHarnessForMain()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	testHarness.Start(ctx)
+	cancel()
+
+	// Run tests
+	code := m.Run()
+
+	// Cleanup
+	testHarness.Stop()
+
+	os.Exit(code)
+}
 
 func getHarness(t *testing.T) *Harness {
 	t.Helper()
-
-	setupOnce.Do(func() {
-		testHarness = NewHarness(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		defer cancel()
-		testHarness.Start(ctx)
-
-		// Register cleanup
-		t.Cleanup(func() {
-			testHarness.Stop()
-		})
-	})
-
-	if setupErr != nil {
-		t.Fatalf("harness setup failed: %v", setupErr)
-	}
-
 	return testHarness
 }
 

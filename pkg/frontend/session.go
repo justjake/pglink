@@ -71,37 +71,51 @@ func (s *Session) Context() context.Context {
 
 // Select over reading from frontend, reading from backend, or receiving a context cancellation.
 func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
+	s.logger.Debug("RecvFrontend: freeing lastRecv", "lastRecv", fmt.Sprintf("%T", s.lastRecv))
 	s.freeLastRecvAndContinueSender()
+	s.logger.Debug("RecvFrontend: waiting for frontend message")
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
 	case msg := <-s.frontend.Reader().ReadingChan():
+		s.logger.Debug("RecvFrontend: received", "msg", fmt.Sprintf("%T", msg.Value))
+		s.lastRecv = msg.Value
 		return msg.Value, msg.Error
 	}
 }
 
 func (s *Session) RecvAny() (pgwire.Message, error) {
 	s.freeLastRecvAndContinueSender()
+	s.logger.Debug("RecvAny: waiting")
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
 	case msg := <-s.frontend.Reader().ReadingChan():
+		s.lastRecv = msg.Value
+		s.logger.Debug("RecvAny: received from frontend", "msg", fmt.Sprintf("%T", msg.Value))
 		return msg.Value, msg.Error
-	case msg := <-s.backend.ReadingChan():
+	case msg := <-s.backendReadingChan:
+		s.lastRecv = msg.Value
+		s.logger.Debug("RecvAny: received from backend", "msg", fmt.Sprintf("%T", msg.Value))
 		return msg.Value, msg.Error
 	}
 }
 
 func (s *Session) freeLastRecvAndContinueSender() {
 	if s.lastRecv == nil {
+		s.logger.Debug("freeLastRecvAndContinueSender: lastRecv is nil, no-op")
 		return
 	}
 
 	if _, ok := s.lastRecv.(pgwire.ServerMessage); ok {
 		if s.backend != nil {
+			s.logger.Debug("freeLastRecvAndContinueSender: calling backend.Continue()")
 			s.backend.Continue()
+		} else {
+			s.logger.Debug("freeLastRecvAndContinueSender: lastRecv is ServerMessage but backend is nil, skipping Continue()")
 		}
 	} else {
+		s.logger.Debug("freeLastRecvAndContinueSender: calling frontend.Reader().Continue()")
 		s.frontend.Reader().Continue()
 	}
 
@@ -283,20 +297,51 @@ func (s *Session) acquireBackend() (*slog.Logger, error) {
 	s.backendCtx, s.cancelBackendCtx = context.WithCancel(s.ctx)
 	logger := s.logger.With("backend", s.backend.Name())
 
+	// Debug: check if context is already done
+	logger.Debug("acquireBackend: created backendCtx", "ctxPtr", fmt.Sprintf("%p", s.backendCtx), "cancelPtr", fmt.Sprintf("%p", s.cancelBackendCtx))
+	if s.backendCtx.Err() != nil {
+		logger.Error("acquireBackend: backendCtx is already done!", "err", s.backendCtx.Err())
+	}
+	if s.ctx.Err() != nil {
+		logger.Error("acquireBackend: session ctx is done!", "err", s.ctx.Err())
+	}
+
+	// Get the reading channel once before starting the loop to avoid
+	// race conditions when the backend is released.
+	// Also capture the context locally to avoid race with releaseBackend setting it to nil.
+	backendCh := s.backend.ReadingChan()
+	backendCtx := s.backendCtx
+	backendReadingChan := s.backendReadingChan
+	logger.Debug("acquireBackend: captured backendCtx", "ctxPtr", fmt.Sprintf("%p", backendCtx))
 	go func() {
-		defer logger.Debug("backend reader exited")
+		defer logger.Debug("backend reader goroutine exited")
+		// Debug: check if context is already done at start
+		logger.Debug("backend reader: goroutine starting", "ctxPtr", fmt.Sprintf("%p", backendCtx), "ctxErr", backendCtx.Err())
+		if backendCtx.Err() != nil {
+			logger.Error("backend reader: context already done at start!", "err", backendCtx.Err(), "ctxPtr", fmt.Sprintf("%p", backendCtx))
+			return
+		}
 		for {
+			logger.Debug("backend reader: waiting for message from backend")
 			select {
-			case <-s.backendCtx.Done():
+			case <-backendCtx.Done():
+				logger.Debug("backend reader: context done")
 				return
-			case msg := <-s.backend.ReadingChan():
-				// there's so many smells that im doing it wrong.
-				select {
-				case <-s.ctx.Done():
-					logger.Error("backend reader exited before forwarding last message")
+			case msg, ok := <-backendCh:
+				if !ok {
+					// Channel closed
+					logger.Debug("backend reader: channel closed")
 					return
-				case s.backendReadingChan <- msg:
-					continue
+				}
+				logger.Debug("backend reader: received message, forwarding", "msg", fmt.Sprintf("%T", msg.Value))
+				select {
+				case <-backendCtx.Done():
+					logger.Debug("backend reader: context done while forwarding")
+					return
+				case backendReadingChan <- msg:
+					logger.Debug("backend reader: forwarded message")
+					// Continue() is called by freeLastRecvAndContinueSender when
+					// the message is processed
 				}
 			}
 		}
@@ -307,14 +352,22 @@ func (s *Session) acquireBackend() (*slog.Logger, error) {
 
 func (s *Session) releaseBackend() {
 	if s.backend == nil {
+		s.logger.Debug("releaseBackend: backend is nil, nothing to release")
 		return
 	}
-	s.backend.Release()
-	s.backend = nil
 
+	s.logger.Debug("releaseBackend: releasing", "ctxPtr", fmt.Sprintf("%p", s.backendCtx), "cancelPtr", fmt.Sprintf("%p", s.cancelBackendCtx))
+
+	// Cancel the backend context FIRST to stop the reader goroutine,
+	// before releasing the backend connection (which sets reader to nil)
 	s.cancelBackendCtx()
+	s.logger.Debug("releaseBackend: canceled context")
 	s.backendCtx = nil
 	s.cancelBackendCtx = nil
+
+	// Now it's safe to release the backend and close the channel
+	s.backend.Release()
+	s.backend = nil
 
 	close(s.backendReadingChan)
 	s.backendReadingChan = nil
@@ -374,9 +427,15 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 
 	var msg pgwire.Message = firstMsg
 	for {
+		s.logger.Debug("runWithBackend: handling message", "msgType", fmt.Sprintf("%T", msg))
 		continueWithBackend, err := backendAcquiredState.Handle(msg)
+		s.logger.Debug("runWithBackend: handler returned", "continueWithBackend", continueWithBackend, "err", err)
 		if !continueWithBackend || err != nil {
-			// Transition out to idle client state
+			// Transition out to idle client state.
+			// Ensure we flush any pending messages (like ReadyForQuery) before returning.
+			if flushErr := s.flush(); flushErr != nil {
+				s.logger.Error("error flushing before releasing backend", "error", flushErr)
+			}
 			if err != nil {
 				return err
 			}
@@ -398,14 +457,16 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 }
 
 func (s *Session) runSimpleQueryWithBackend(msg pgwire.ClientSimpleQuery) (bool, error) {
-	// todo: change state to indicate transaction is active?
+	s.logger.Debug("runSimpleQueryWithBackend: sending to backend")
 	if err := s.backend.Send(msg.Client()); err != nil {
 		return false, err
 	}
+	s.logger.Debug("runSimpleQueryWithBackend: sent")
 	return true, nil
 }
 
 func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (bool, error) {
+	s.logger.Debug("runExtendedQueryWithBackend: start", "msgType", fmt.Sprintf("%T", msg))
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
 		Bind: func(msg pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
 			return &pgproto3.Bind{
@@ -449,15 +510,20 @@ func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (b
 		},
 	}
 
+	s.logger.Debug("runExtendedQueryWithBackend: calling Handle")
 	rewritten, err := extendedQueryRewriter.Handle(msg)
+	s.logger.Debug("runExtendedQueryWithBackend: Handle returned", "rewritten", fmt.Sprintf("%T", rewritten), "err", err)
 	if err != nil {
 		return false, err
 	}
+	s.logger.Debug("runExtendedQueryWithBackend: sending to backend")
 	if err := s.backend.Send(rewritten); err != nil {
 		return false, err
 	}
 
+	s.logger.Debug("runExtendedQueryWithBackend: updating state")
 	s.state.UpdateForExtendedQueryMessage(msg)
+	s.logger.Debug("runExtendedQueryWithBackend: done")
 	return true, nil
 }
 
@@ -682,7 +748,16 @@ func (s *Session) initSessionProcessState() {
 	s.state.ParameterStatuses = maps.Collect(s.dbConfig.Backend.DefaultStartupParameters.All())
 	maps.Copy(s.state.ParameterStatuses, s.startupParameters)
 	s.state.TxStatus = pgwire.TxIdle
-	// TODO: channels?
+	s.state.PreparedStatements = pgwire.NamedObjectState[bool]{
+		Alive:         make(map[string]bool),
+		PendingCreate: make(map[string]bool),
+		PendingClose:  make(map[string]bool),
+	}
+	s.state.Portals = pgwire.NamedObjectState[bool]{
+		Alive:         make(map[string]bool),
+		PendingCreate: make(map[string]bool),
+		PendingClose:  make(map[string]bool),
+	}
 }
 
 func (s *Session) sendReadyForQuery() {

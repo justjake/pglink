@@ -2,17 +2,23 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/frontend"
 	"github.com/lucasb-eyer/go-colorful"
+	"golang.org/x/term"
 )
+
+//go:embed README.md
+var readmeMarkdown string
 
 var bannerLines = []string{
 	`                  __ _         __   `,
@@ -77,6 +83,9 @@ func printUsage() {
 	fmt.Println(titleStyle.Render("Usage:"))
 	fmt.Print("  pglink ")
 	flag.VisitAll(func(f *flag.Flag) {
+		if f.Name == "help" {
+			return
+		}
 		fmt.Printf("%s ", flagStyle.Render("-"+f.Name+" <"+f.Name+">"))
 	})
 	fmt.Println()
@@ -99,15 +108,57 @@ func printUsage() {
 	fmt.Println(titleStyle.Render("Example:"))
 	fmt.Println(exampleStyle.Render("  pglink -config /etc/pglink/pglink.json"))
 	fmt.Println()
+
+	fmt.Println(descStyle.Render("Run 'pglink -help' for full configuration documentation."))
+	fmt.Println()
+}
+
+func printFullDocs() {
+	// Get terminal width, default to 80 if not a terminal
+	width := 80
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		width = w
+	}
+
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		// Fallback to raw markdown
+		fmt.Println(readmeMarkdown)
+		return
+	}
+
+	out, err := renderer.Render(readmeMarkdown)
+	if err != nil {
+		// Fallback to raw markdown
+		fmt.Println(readmeMarkdown)
+		return
+	}
+
+	fmt.Print(out)
 }
 
 func main() {
-	printBanner()
-
 	configPath := flag.String("config", "", "path to pglink.json config file")
 	jsonLogs := flag.Bool("json", false, "output logs in JSON format")
+	showHelp := flag.Bool("help", false, "show full documentation")
 	flag.Usage = printUsage
 	flag.Parse()
+
+	// Show full docs with -help
+	if *showHelp {
+		printFullDocs()
+		os.Exit(0)
+	}
+
+	// Show compact usage when no config provided
+	if *configPath == "" {
+		printBanner()
+		printUsage()
+		os.Exit(1)
+	}
 
 	// Set up logger
 	var handler slog.Handler
@@ -118,11 +169,6 @@ func main() {
 	}
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
-
-	if *configPath == "" {
-		printUsage()
-		os.Exit(1)
-	}
 
 	cfg, err := config.ReadConfigFile(*configPath)
 	if err != nil {

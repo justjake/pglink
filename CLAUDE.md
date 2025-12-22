@@ -18,6 +18,7 @@ When adding or modifying scripts in `bin/`, update this list.
 | Script | Description |
 |--------|-------------|
 | `bin/build` | Build the pglink binary to `out/pglink` |
+| `bin/doc` | Generate README.md from README.in.md and config types |
 | `bin/format` | Format Go code with `go fmt` |
 | `bin/go` | Proxy to `go` command with mise environment (prefer `bin/build` for building) |
 | `bin/lint` | Run golangci-lint |

@@ -83,7 +83,12 @@ func (r *ChanReader[T]) readerLoop() {
 		}
 
 		r.state.Store(ChanReaderSendingResult)
-		r.outCh <- ReadResult[T]{Value: *value, Error: err}
+		var result ReadResult[T]
+		result.Error = err
+		if value != nil {
+			result.Value = *value
+		}
+		r.outCh <- result
 
 		if err != nil {
 			// Other error

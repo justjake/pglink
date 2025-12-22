@@ -280,6 +280,8 @@ func ToClientMessage(msg pgproto3.FrontendMessage) (ClientMessage, bool) {
 		return m, true
 	} else if m, ok := ToClientTerminateConn(msg); ok {
 		return m, true
+	} else if m, ok := ToClientStartup(msg); ok {
+		return m, true
 	}
 	return nil, false
 }

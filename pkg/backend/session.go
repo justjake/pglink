@@ -84,6 +84,16 @@ func GetOrCreateSession(conn *pgconn.PgConn, db *Database, user config.UserConfi
 			SecretCancelKey:   conn.SecretKey(),
 			TxStatus:          pgwire.TxStatus(conn.TxStatus()),
 			ParameterStatuses: pgwire.ParameterStatuses{},
+			PreparedStatements: pgwire.NamedObjectState[bool]{
+				Alive:         make(map[string]bool),
+				PendingCreate: make(map[string]bool),
+				PendingClose:  make(map[string]bool),
+			},
+			Portals: pgwire.NamedObjectState[bool]{
+				Alive:         make(map[string]bool),
+				PendingCreate: make(map[string]bool),
+				PendingClose:  make(map[string]bool),
+			},
 		},
 		TrackedParameters: tracked,
 	}
@@ -122,9 +132,15 @@ func (s *Session) Acquire() error {
 func (s *Session) Release() {
 	// TODO: do some things to normalize state?
 	// Run Sync, etc, before releasing? / releasing to the pool?
-	s.cancelAcquiredContext(ErrBackendSessionReleased)
-	s.reader.Cancel()
-	s.reader = nil
+	if s.cancelAcquiredContext != nil {
+		s.cancelAcquiredContext(ErrBackendSessionReleased)
+	}
+	if s.reader != nil {
+		s.reader.Cancel()
+		s.reader = nil
+	}
+	s.acquiredContext = nil
+	s.cancelAcquiredContext = nil
 }
 
 func (s *Session) ReadingChan() <-chan ReadResult[pgwire.ServerMessage] {
@@ -160,7 +176,9 @@ func (s *Session) updateState() {
 }
 
 func (s *Session) readBackendMessage() (*pgwire.ServerMessage, error) {
+	s.logger.Debug("readBackendMessage: waiting for message")
 	msg, err := s.Conn.ReceiveMessage(s.acquiredContext)
+	s.logger.Debug("readBackendMessage: received", "msg", fmt.Sprintf("%T", msg), "err", err)
 	if err != nil {
 		return nil, nil
 	}
