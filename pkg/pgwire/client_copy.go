@@ -8,9 +8,9 @@ import (
 
 // ClientCopy is implemented by all Client Copy message wrapper types.
 type ClientCopy interface {
-	Client()
 	Copy()
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
+	Client() pgproto3.FrontendMessage
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -23,23 +23,23 @@ var (
 // ClientCopyCopyData wraps *pgproto3.CopyData from the client.
 type ClientCopyCopyData FromClient[*pgproto3.CopyData]
 
-func (ClientCopyCopyData) Client()        {}
-func (ClientCopyCopyData) Copy()          {}
-func (ClientCopyCopyData) PgwireMessage() {}
+func (ClientCopyCopyData) Copy()                              {}
+func (t ClientCopyCopyData) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientCopyCopyData) Client() pgproto3.FrontendMessage { return t.T }
 
 // ClientCopyCopyDone wraps *pgproto3.CopyDone from the client.
 type ClientCopyCopyDone FromClient[*pgproto3.CopyDone]
 
-func (ClientCopyCopyDone) Client()        {}
-func (ClientCopyCopyDone) Copy()          {}
-func (ClientCopyCopyDone) PgwireMessage() {}
+func (ClientCopyCopyDone) Copy()                              {}
+func (t ClientCopyCopyDone) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientCopyCopyDone) Client() pgproto3.FrontendMessage { return t.T }
 
 // ClientCopyCopyFail wraps *pgproto3.CopyFail from the client.
 type ClientCopyCopyFail FromClient[*pgproto3.CopyFail]
 
-func (ClientCopyCopyFail) Client()        {}
-func (ClientCopyCopyFail) Copy()          {}
-func (ClientCopyCopyFail) PgwireMessage() {}
+func (ClientCopyCopyFail) Copy()                              {}
+func (t ClientCopyCopyFail) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientCopyCopyFail) Client() pgproto3.FrontendMessage { return t.T }
 
 // ToClientCopy converts a pgproto3.FrontendMessage to a ClientCopy if it matches one of the known types.
 func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {

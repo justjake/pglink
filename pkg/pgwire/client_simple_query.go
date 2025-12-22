@@ -8,9 +8,9 @@ import (
 
 // ClientSimpleQuery is implemented by all Client SimpleQuery message wrapper types.
 type ClientSimpleQuery interface {
-	Client()
 	SimpleQuery()
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
+	Client() pgproto3.FrontendMessage
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -23,16 +23,16 @@ var (
 // Destroys unnamed prepared statement & portal.
 type ClientSimpleQueryQuery FromClient[*pgproto3.Query]
 
-func (ClientSimpleQueryQuery) Client()        {}
-func (ClientSimpleQueryQuery) SimpleQuery()   {}
-func (ClientSimpleQueryQuery) PgwireMessage() {}
+func (ClientSimpleQueryQuery) SimpleQuery()                       {}
+func (t ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage { return t.T }
 
 // Call a function; seems to work like a simple query? Or maybe it works with both modes?
 type ClientSimpleQueryFunctionCall FromClient[*pgproto3.FunctionCall]
 
-func (ClientSimpleQueryFunctionCall) Client()        {}
-func (ClientSimpleQueryFunctionCall) SimpleQuery()   {}
-func (ClientSimpleQueryFunctionCall) PgwireMessage() {}
+func (ClientSimpleQueryFunctionCall) SimpleQuery()                       {}
+func (t ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage { return t.T }
 
 // ToClientSimpleQuery converts a pgproto3.FrontendMessage to a ClientSimpleQuery if it matches one of the known types.
 func ToClientSimpleQuery(msg pgproto3.FrontendMessage) (ClientSimpleQuery, bool) {

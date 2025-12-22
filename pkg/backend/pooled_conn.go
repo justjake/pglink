@@ -10,7 +10,7 @@ import (
 
 // PooledConn wraps a pgxpool connection with automatic release tracking.
 type PooledConn struct {
-	*pgxpool.Conn
+	conn     *pgxpool.Conn
 	session  *Session
 	released bool
 }
@@ -21,7 +21,7 @@ func (c *PooledConn) TrackedParameters() []string {
 
 func (c *PooledConn) PgConn() *pgconn.PgConn {
 	c.panicIfReleased()
-	return c.Conn.Conn().PgConn()
+	return c.conn.Conn().PgConn()
 }
 
 func (c *PooledConn) Name() string {
@@ -31,6 +31,21 @@ func (c *PooledConn) Name() string {
 func (c *PooledConn) ReadingChan() <-chan ReadResult[pgwire.ServerMessage] {
 	c.panicIfReleased()
 	return c.session.reader.ReadingChan()
+}
+
+func (c *PooledConn) Flush() error {
+	c.panicIfReleased()
+	return c.session.Flush()
+}
+
+func (c *PooledConn) Continue() {
+	c.panicIfReleased()
+	c.session.reader.Continue()
+}
+
+func (c *PooledConn) Send(msg pgwire.ServerMessage) error {
+	c.panicIfReleased()
+	return c.session.Send(msg)
 }
 
 // Release returns the connection to the pool.

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
@@ -82,7 +82,6 @@ type Session struct {
 	State             pgwire.ProtocolState
 	TrackedParameters []string
 
-	mu     sync.Mutex
 	reader *ChanReader[pgwire.ServerMessage]
 	logger *slog.Logger
 }
@@ -92,9 +91,17 @@ func (s *Session) Name() string {
 }
 
 func (s *Session) ParameterStatusChanges(keys []string, since pgwire.ParameterStatuses) pgwire.ParameterStatusDiff {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return since.DiffToTip(s.updateParameterStatuses(keys))
+}
+
+func (s *Session) Flush() error {
+	return s.Conn.Frontend().Flush()
+}
+
+// We have error signature because it's likely we'll want one in the future.
+func (s *Session) Send(msg pgproto3.FrontendMessage) error {
+	s.Conn.Frontend().Send(msg)
+	return nil
 }
 
 func (s *Session) updateParameterStatuses(keys []string) pgwire.ParameterStatuses {

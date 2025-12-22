@@ -8,9 +8,9 @@ import (
 
 // ServerCopy is implemented by all Server Copy message wrapper types.
 type ServerCopy interface {
-	Server()
 	Copy()
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
+	Server() pgproto3.BackendMessage
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -27,39 +27,39 @@ var (
 // Starts CopyIn mode.
 type ServerCopyCopyInResponse FromServer[*pgproto3.CopyInResponse]
 
-func (ServerCopyCopyInResponse) Server()        {}
-func (ServerCopyCopyInResponse) Copy()          {}
-func (ServerCopyCopyInResponse) PgwireMessage() {}
+func (ServerCopyCopyInResponse) Copy()                             {}
+func (t ServerCopyCopyInResponse) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerCopyCopyInResponse) Server() pgproto3.BackendMessage { return t.T }
 
 // Response to COPY TO STDOUT.
 // Backend ready to copy data from server to client.
 // Starts CopyOut mode.
 type ServerCopyCopyOutResponse FromServer[*pgproto3.CopyOutResponse]
 
-func (ServerCopyCopyOutResponse) Server()        {}
-func (ServerCopyCopyOutResponse) Copy()          {}
-func (ServerCopyCopyOutResponse) PgwireMessage() {}
+func (ServerCopyCopyOutResponse) Copy()                             {}
+func (t ServerCopyCopyOutResponse) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerCopyCopyOutResponse) Server() pgproto3.BackendMessage { return t.T }
 
 // Response to Replication.
 type ServerCopyCopyBothResponse FromServer[*pgproto3.CopyBothResponse]
 
-func (ServerCopyCopyBothResponse) Server()        {}
-func (ServerCopyCopyBothResponse) Copy()          {}
-func (ServerCopyCopyBothResponse) PgwireMessage() {}
+func (ServerCopyCopyBothResponse) Copy()                             {}
+func (t ServerCopyCopyBothResponse) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerCopyCopyBothResponse) Server() pgproto3.BackendMessage { return t.T }
 
 // Copy Mode: data row.
 type ServerCopyCopyData FromServer[*pgproto3.CopyData]
 
-func (ServerCopyCopyData) Server()        {}
-func (ServerCopyCopyData) Copy()          {}
-func (ServerCopyCopyData) PgwireMessage() {}
+func (ServerCopyCopyData) Copy()                             {}
+func (t ServerCopyCopyData) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerCopyCopyData) Server() pgproto3.BackendMessage { return t.T }
 
 // Copy Mode: copy completed.
 type ServerCopyCopyDone FromServer[*pgproto3.CopyDone]
 
-func (ServerCopyCopyDone) Server()        {}
-func (ServerCopyCopyDone) Copy()          {}
-func (ServerCopyCopyDone) PgwireMessage() {}
+func (ServerCopyCopyDone) Copy()                             {}
+func (t ServerCopyCopyDone) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerCopyCopyDone) Server() pgproto3.BackendMessage { return t.T }
 
 // ToServerCopy converts a pgproto3.BackendMessage to a ServerCopy if it matches one of the known types.
 func ToServerCopy(msg pgproto3.BackendMessage) (ServerCopy, bool) {

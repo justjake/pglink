@@ -8,9 +8,9 @@ import (
 
 // ClientTerminateConn is implemented by all Client TerminateConn message wrapper types.
 type ClientTerminateConn interface {
-	Client()
 	TerminateConn()
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
+	Client() pgproto3.FrontendMessage
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -21,9 +21,9 @@ var (
 // ClientTerminateConnTerminate wraps *pgproto3.Terminate from the client.
 type ClientTerminateConnTerminate FromClient[*pgproto3.Terminate]
 
-func (ClientTerminateConnTerminate) Client()        {}
-func (ClientTerminateConnTerminate) TerminateConn() {}
-func (ClientTerminateConnTerminate) PgwireMessage() {}
+func (ClientTerminateConnTerminate) TerminateConn()                     {}
+func (t ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage { return t.T }
 
 // ToClientTerminateConn converts a pgproto3.FrontendMessage to a ClientTerminateConn if it matches one of the known types.
 func ToClientTerminateConn(msg pgproto3.FrontendMessage) (ClientTerminateConn, bool) {

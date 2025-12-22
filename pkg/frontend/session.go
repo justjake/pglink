@@ -11,7 +11,6 @@ import (
 	"maps"
 	"math/rand/v2"
 	"net"
-	"runtime"
 	"time"
 
 	"github.com/jackc/pgerrcode"
@@ -53,10 +52,6 @@ type Session struct {
 	// nil until a backend connection is acquired at least once
 	// handles forwarding NOTIFY messages to the appropriate client.
 
-	// Established client connection.
-	frontendNextMsg    chan pgproto3.FrontendMessage
-	frontendDisposeMsg chan pgproto3.FrontendMessage
-
 	// The server.
 	// nil until a backend connection is acquired to run a transaction.
 	// nil once the backend connection is released.
@@ -64,6 +59,9 @@ type Session struct {
 	backendReadingChan chan backend.ReadResult[pgwire.ServerMessage]
 	backendCtx         context.Context
 	cancelBackendCtx   context.CancelFunc
+
+	// Message stored until the next call to Recv.
+	lastRecv pgwire.Message
 }
 
 // Context returns the session's context, which is canceled when Close is called.
@@ -73,6 +71,7 @@ func (s *Session) Context() context.Context {
 
 // Select over reading from frontend, reading from backend, or receiving a context cancellation.
 func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
+	s.freeLastRecvAndContinueSender()
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
@@ -82,6 +81,7 @@ func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
 }
 
 func (s *Session) RecvAny() (pgwire.Message, error) {
+	s.freeLastRecvAndContinueSender()
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
@@ -92,27 +92,43 @@ func (s *Session) RecvAny() (pgwire.Message, error) {
 	}
 }
 
+func (s *Session) freeLastRecvAndContinueSender() {
+	if s.lastRecv == nil {
+		return
+	}
+
+	if _, ok := s.lastRecv.(pgwire.ServerMessage); ok {
+		if s.backend != nil {
+			s.backend.Continue()
+		}
+	} else {
+		s.frontend.Reader().Continue()
+	}
+
+	s.lastRecv = nil
+}
+
 // Close cancels the session's context and releases associated resources.
 func (s *Session) Close() {
+	if flushError := s.flush(); flushError != nil {
+		s.logger.Error("session close: error flushing to client", "error", flushError)
+	}
+
 	s.cancel()
+
 	s.releaseBackend()
-	if s.frontendNextMsg != nil {
-		close(s.frontendNextMsg)
-	}
-	if s.frontendDisposeMsg != nil {
-		close(s.frontendDisposeMsg)
-	}
-	if s.backendNextMsg != nil {
-		close(s.backendNextMsg)
-	}
-	if s.backendDisposeMsg != nil {
-		close(s.backendDisposeMsg)
-	}
+
 	if s.conn != nil {
 		closeErr := s.conn.Close()
 		if closeErr != nil {
-			s.logger.Error("error closing client", "error", closeErr)
+			s.logger.Error("session close: error closing client connection", "error", closeErr)
 		}
+	}
+
+	if s.logger.Enabled(s.ctx, slog.LevelDebug) {
+		s.logger.Debug("session closed", "state", s.state)
+	} else {
+		s.logger.Info("session closed")
 	}
 }
 
@@ -196,44 +212,57 @@ func (s *Session) Run() {
 	// command cycle.
 	s.sendReadyForQuery()
 
+	// Idle client state.
+	// When true, transition to backend connected state to handle the query.
+	// When false, close the client connection.
+	idleClientState := pgwire.ClientMessageHandlers[bool]{
+		SimpleQuery: func(msg pgwire.ClientSimpleQuery) (bool, error) {
+			return true, nil
+		},
+		ExtendedQuery: func(msg pgwire.ClientExtendedQuery) (bool, error) {
+			return true, nil
+		},
+
+		TerminateConn: func(msg pgwire.ClientTerminateConn) (bool, error) {
+			s.logger.Info("client terminated connection")
+			return false, nil
+		},
+
+		// These messages don't make any sense in the idle state.
+		Cancel: func(msg pgwire.ClientCancel) (bool, error) {
+			return false, pgwire.NewProtocolViolation(fmt.Errorf("cancel request received on normal connection"), msg)
+		},
+		Copy: func(msg pgwire.ClientCopy) (bool, error) {
+			return false, pgwire.NewProtocolViolation(fmt.Errorf("idle client not in copy mode"), msg)
+		},
+		Startup: func(msg pgwire.ClientStartup) (bool, error) {
+			return false, pgwire.NewProtocolViolation(fmt.Errorf("startup completed already"), msg)
+		},
+	}
+
 	for {
 		// Initial state: no backend connection, so only receive from frontend.
 		msg, err := s.RecvFrontend()
 		if err != nil {
-			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving client message: %v", err))
+			s.sendError(pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.ConnectionException, "error receiving client message", err))
+			return
+		}
+		s.logger.Debug("recv client message", "type", fmt.Sprintf("%T", msg))
+
+		if transitionToBackend, err := idleClientState.Handle(msg); err != nil || !transitionToBackend {
+			if err != nil {
+				s.sendError(err)
+			}
 			return
 		}
 
-		s.logger.Debug("recv client message", "type", fmt.Sprintf("%T", msg))
-
-		if _, ok := msg.(pgwire.ClientTerminateConn); ok {
-			// Messages that close the connection.
-			s.logger.Info("client terminated connection")
-			return
-		} else if _, ok := msg.(pgwire.ClientCancel); ok {
-			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("cancel request received on normal connection: %T", msg))
-			return
-		} else if _, ok := msg.(pgwire.ClientStartup); ok {
-			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("startup completed already: %T", msg))
-			return
-		} else if _, ok := msg.(pgwire.ClientCopy); ok {
-			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("idle client not in copy mode: %T", msg))
-			return
-		} else if _, ok := msg.(pgwire.ClientSimpleQuery); ok {
-			// Enter state where we have a backend connection.
-			if err := s.runWithBackend(msg); err != nil {
-				return
-			}
-		} else if _, ok := msg.(pgwire.ClientExtendedQuery); ok {
-			if err := s.runWithBackend(msg); err != nil {
-				return
-			}
-		} else {
-			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("unknown client message: %T", msg))
+		if err := s.runWithBackend(msg); err != nil {
+			s.sendError(err)
 			return
 		}
 
 		// We have returned from having a backend to being idle.
+		// Wait for next client message that needs a backend.
 	}
 }
 
@@ -255,6 +284,7 @@ func (s *Session) acquireBackend() (*slog.Logger, error) {
 			case <-s.backendCtx.Done():
 				return
 			case msg := <-s.backend.ReadingChan():
+				// there's so many smells that im doing it wrong.
 				select {
 				case <-s.ctx.Done():
 					logger.Error("backend reader exited before forwarding last message")
@@ -287,8 +317,9 @@ func (s *Session) releaseBackend() {
 func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	logger, err := s.acquireBackend()
 	if err != nil {
-		s.sendError(pgwire.ErrorFatal, pgerrcode.CannotConnectNow, fmt.Sprintf("failed to acquire backend: %v", err))
-		return err
+		pgErr := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.CannotConnectNow, fmt.Sprintf("failed to acquire backend"), err)
+		pgErr.Detail = fmt.Sprintf("while handling message %T", firstMsg)
+		return pgErr
 	}
 	defer s.releaseBackend()
 
@@ -296,23 +327,65 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	s.logger = logger
 	defer func() { s.logger = oldLogger }()
 
-	var msg pgwire.Message
-	msg = firstMsg
+	backendAcquiredState := pgwire.MessageHandlers[bool]{
+		Client: pgwire.ClientMessageHandlers[bool]{
+			SimpleQuery:   s.runSimpleQueryWithBackend,
+			ExtendedQuery: s.runExtendedQueryWithBackend,
+			TerminateConn: func(msg pgwire.ClientTerminateConn) (bool, error) {
+				s.logger.Info("client terminated connection")
+				return false, nil
+			},
+			Cancel: func(msg pgwire.ClientCancel) (bool, error) {
+				return false, pgwire.NewProtocolViolation(fmt.Errorf("cancel request on normal connection"), msg)
+			},
+			Copy: func(msg pgwire.ClientCopy) (bool, error) {
+				return false, pgwire.NewProtocolViolation(fmt.Errorf("copy request without active copy session"), msg)
+			},
+			Startup: func(msg pgwire.ClientStartup) (bool, error) {
+				return false, pgwire.NewProtocolViolation(fmt.Errorf("startup completed already"), msg)
+			},
+		},
+		Server: pgwire.ServerMessageHandlers[bool]{
+			Async:         s.handleServerAsync,
+			Copy:          s.handleServerCopy,
+			ExtendedQuery: s.handleServerExtendedQuery,
+			Response:      s.handleServerResponse,
+			Startup: func(msg pgwire.ServerStartup) (bool, error) {
+				return false, pgwire.NewProtocolViolation(fmt.Errorf("backend sent startup message to active client session"), msg)
+			},
+		},
+	}
 
+	var msg pgwire.Message = firstMsg
 	for {
-		if pgwire.IsSimpleQueryModeMessage(msg) {
-			if err := s.runSimpleQuery(msg); err != nil {
+		continueWithBackend, err := backendAcquiredState.Handle(msg)
+		if !continueWithBackend || err != nil {
+			// Transition out to idle client state
+			if err != nil {
 				return err
 			}
-		} else if pgwire.IsExtendedQueryModeMessage(msg) {
-			clientMsg
+			return nil
 		}
 
-		msg, err = s.RecvAny()
-		if err != nil {
-			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving message: %v", err))
+		// Ensure we've sent any pending messages
+		if err := s.flush(); err != nil {
 			return err
 		}
+
+		// Read next message from client or backend,
+		// and continue the loop to handle it.
+		msg, err = s.RecvAny()
+	}
+}
+
+func (s *Session) runSimpleQueryWithBackend(msg pgwire.ClientSimpleQuery) (bool, error) {
+	switch msg := msg.(type) {
+	case pgwire.ClientSimpleQueryFunctionCall:
+	case pgwire.ClientSimpleQueryQuery:
+		s.beginTransation()
+		s.backend.Send(msg.T)
+	default:
+		panic(fmt.Sprintf("unexpected pgwire.ClientSimpleQuery: %#v", msg))
 	}
 }
 
@@ -533,24 +606,23 @@ func (s *Session) sendBackendParameterStatusChanges() {
 }
 
 // sendError sends an error response to the client.
-func (s *Session) sendError(severity pgwire.Severity, code string, message string) {
-	_, file, line, _ := runtime.Caller(1)
+func (s *Session) sendError(err error) {
+	var pgErr *pgwire.Err
+	if !errors.As(err, &pgErr) {
+		pgErr = pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InternalError, "unexpected error", err)
+	}
+	s.logger.Error("session error",
+		"severity", pgErr.Severity,
+		"code", pgErr.Code,
+		"message", pgErr.Message,
+		"file", pgErr.File,
+		"line", pgErr.Line,
+	)
 
-	// TODO: i hope we aren't disclosing secrets in this log message
-	s.logger.Warn("sent error to client", "severity", severity, "code", code, "message", message, "file", file, "line", line)
-
-	// This we definitely want to do
-	s.frontend.Send(&pgproto3.ErrorResponse{
-		Severity: string(severity),
-		Code:     code,
-		Message:  message,
-		File:     file,
-		Line:     int32(line),
-		Hint:     "pglink proxy error",
-	})
-	err := s.frontend.Flush()
-	if err != nil {
-		s.logger.Error("error flushing to client", "error", err)
+	s.frontend.Send(pgErr)
+	flushErr := s.frontend.Flush()
+	if flushErr != nil {
+		s.logger.Error("session error: error flushing to client", "error", err)
 	}
 }
 
@@ -560,6 +632,22 @@ func (s *Session) enableTracing() {
 		s.frontend.Trace(&slogTraceWriter{session: s}, pgproto3.TracerOptions{
 			SuppressTimestamps: true,
 		})
+	}
+}
+
+func (s *Session) flush() error {
+	var errs []error
+	if flushErr := s.frontend.Flush(); flushErr != nil {
+		errs = append(errs, flushErr)
+	}
+	if s.backend != nil {
+		flushErr := s.backend.Flush()
+		if flushErr != nil {
+			errs = append(errs, flushErr)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("error flushing: %w", errors.Join(errs...))
 	}
 }
 

@@ -22,6 +22,41 @@ var typePrefix = flag.String("type", "", "the type prefix for generated types")
 var fn = flag.String("fn", "", "the function name containing the type switch")
 var methods = flag.String("methods", "", "comma-separated list of additional no-arg methods to generate")
 
+// returnFlags collects multiple -return flags
+var returnFlags returnFlagList
+
+// returnSpec defines a method that returns a value
+type returnSpec struct {
+	name       string // method name
+	returnType string // return type
+	expr       string // expression to return (use 't' for the receiver)
+}
+
+// returnFlagList implements flag.Value for collecting multiple -return flags
+type returnFlagList []returnSpec
+
+func (r *returnFlagList) String() string {
+	return fmt.Sprintf("%v", *r)
+}
+
+func (r *returnFlagList) Set(value string) error {
+	// Parse: name=returnType=expr
+	parts := strings.SplitN(value, "=", 3)
+	if len(parts) != 3 {
+		return fmt.Errorf("invalid -return format: expected name=returnType=expr, got %q", value)
+	}
+	*r = append(*r, returnSpec{
+		name:       parts[0],
+		returnType: parts[1],
+		expr:       parts[2],
+	})
+	return nil
+}
+
+func init() {
+	flag.Var(&returnFlags, "return", "method with return value: name=returnType=expr (can be specified multiple times)")
+}
+
 func main() {
 	flag.Parse()
 
@@ -138,7 +173,7 @@ func main() {
 	}
 
 	// Generate the output
-	output := generateCode(pkgName, imports, *from, *typePrefix, inputType, extraMethods, types)
+	output := generateCode(pkgName, imports, *from, *typePrefix, inputType, extraMethods, returnFlags, types)
 
 	// Write to output file
 	outFile := toSnakeCase(*from) + "_" + toSnakeCase(*typePrefix) + ".go"
@@ -175,7 +210,12 @@ func extractImports(fset *token.FileSet, file *ast.File) []string {
 	for _, imp := range file.Imports {
 		var buf bytes.Buffer
 		printer.Fprint(&buf, fset, imp)
-		imports = append(imports, buf.String())
+		impStr := buf.String()
+		// Only include imports that are likely used in the generated code
+		// (imports containing pgproto3 which defines the message types)
+		if strings.Contains(impStr, "pgproto3") {
+			imports = append(imports, impStr)
+		}
 	}
 	return imports
 }
@@ -227,7 +267,7 @@ func extractTypeInfo(expr ast.Expr) typeInfo {
 	return ti
 }
 
-func generateCode(pkgName string, imports []string, from, prefix, inputType string, extraMethods []string, types []typeInfo) []byte {
+func generateCode(pkgName string, imports []string, from, prefix, inputType string, extraMethods []string, returnMethods []returnSpec, types []typeInfo) []byte {
 	var buf bytes.Buffer
 
 	// Header
@@ -243,14 +283,30 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 		buf.WriteString(")\n\n")
 	}
 
+	// Build set of methods with return values (to avoid generating void versions)
+	returnMethodNames := make(map[string]bool)
+	for _, rm := range returnMethods {
+		returnMethodNames[rm.name] = true
+	}
+
 	// Interface
 	interfaceName := from + prefix
 	fmt.Fprintf(&buf, "// %s is implemented by all %s %s message wrapper types.\n", interfaceName, from, prefix)
 	fmt.Fprintf(&buf, "type %s interface {\n", interfaceName)
-	fmt.Fprintf(&buf, "\t%s()\n", from)
-	fmt.Fprintf(&buf, "\t%s()\n", prefix)
+	// Only generate void method if not overridden by a return method
+	if !returnMethodNames[from] {
+		fmt.Fprintf(&buf, "\t%s()\n", from)
+	}
+	if !returnMethodNames[prefix] {
+		fmt.Fprintf(&buf, "\t%s()\n", prefix)
+	}
 	for _, method := range extraMethods {
-		fmt.Fprintf(&buf, "\t%s()\n", method)
+		if !returnMethodNames[method] {
+			fmt.Fprintf(&buf, "\t%s()\n", method)
+		}
+	}
+	for _, rm := range returnMethods {
+		fmt.Fprintf(&buf, "\t%s() %s\n", rm.name, rm.returnType)
 	}
 	buf.WriteString("}\n\n")
 
@@ -280,11 +336,21 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 		// Type definition (defined type, not alias, so we can add methods)
 		fmt.Fprintf(&buf, "type %s From%s[%s]\n\n", newTypeName, from, ti.qualified)
 
-		// Marker methods for interface satisfaction
-		fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, from)
-		fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, prefix)
+		// Marker methods for interface satisfaction (skip if overridden by return method)
+		if !returnMethodNames[from] {
+			fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, from)
+		}
+		if !returnMethodNames[prefix] {
+			fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, prefix)
+		}
 		for _, method := range extraMethods {
-			fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, method)
+			if !returnMethodNames[method] {
+				fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, method)
+			}
+		}
+		// Methods with return values
+		for _, rm := range returnMethods {
+			fmt.Fprintf(&buf, "func (t %s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, rm.expr)
 		}
 		buf.WriteString("\n")
 	}

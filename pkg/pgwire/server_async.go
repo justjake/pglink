@@ -8,9 +8,9 @@ import (
 
 // ServerAsync is implemented by all Server Async message wrapper types.
 type ServerAsync interface {
-	Server()
 	Async()
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
+	Server() pgproto3.BackendMessage
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -23,23 +23,23 @@ var (
 // Warning message.
 type ServerAsyncNoticeResponse FromServer[*pgproto3.NoticeResponse]
 
-func (ServerAsyncNoticeResponse) Server()        {}
-func (ServerAsyncNoticeResponse) Async()         {}
-func (ServerAsyncNoticeResponse) PgwireMessage() {}
+func (ServerAsyncNoticeResponse) Async()                            {}
+func (t ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage { return t.T }
 
 // LISTEN/NOTIFY notification.
 type ServerAsyncNotificationResponse FromServer[*pgproto3.NotificationResponse]
 
-func (ServerAsyncNotificationResponse) Server()        {}
-func (ServerAsyncNotificationResponse) Async()         {}
-func (ServerAsyncNotificationResponse) PgwireMessage() {}
+func (ServerAsyncNotificationResponse) Async()                            {}
+func (t ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage { return t.T }
 
 // Informs client that runtime parameter value changed.
 type ServerAsyncParameterStatus FromServer[*pgproto3.ParameterStatus]
 
-func (ServerAsyncParameterStatus) Server()        {}
-func (ServerAsyncParameterStatus) Async()         {}
-func (ServerAsyncParameterStatus) PgwireMessage() {}
+func (ServerAsyncParameterStatus) Async()                            {}
+func (t ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerAsyncParameterStatus) Server() pgproto3.BackendMessage { return t.T }
 
 // ToServerAsync converts a pgproto3.BackendMessage to a ServerAsync if it matches one of the known types.
 func ToServerAsync(msg pgproto3.BackendMessage) (ServerAsync, bool) {

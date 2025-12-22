@@ -7,7 +7,7 @@ import (
 )
 
 type Message interface {
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
 }
 
 // FromFrontend wraps a message that came from the frontend.
@@ -18,7 +18,7 @@ type FromClient[T pgproto3.FrontendMessage] struct {
 
 type ClientMessage interface {
 	Message
-	Client()
+	Client() pgproto3.FrontendMessage
 }
 
 // FromBackend wraps a message that came from the backend.
@@ -29,10 +29,10 @@ type FromServer[T pgproto3.BackendMessage] struct {
 
 type ServerMessage interface {
 	Message
-	Server()
+	Server() pgproto3.BackendMessage
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsStartupModeMessage -from=Client -type=Startup
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsStartupModeMessage -from=Client -type=Startup -return=Client=pgproto3.FrontendMessage=t.T
 func IsStartupModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.GSSEncRequest:
@@ -47,7 +47,7 @@ func IsStartupModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsSimpleQueryModeMessage -from=Client -type=SimpleQuery
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsSimpleQueryModeMessage -from=Client -type=SimpleQuery -return=Client=pgproto3.FrontendMessage=t.T
 func IsSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.Query:
@@ -60,7 +60,7 @@ func IsSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsExtendedQueryModeMessage -from=Client -type=ExtendedQuery
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsExtendedQueryModeMessage -from=Client -type=ExtendedQuery -return=Client=pgproto3.FrontendMessage=t.T
 func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	// Extended Query flow:
@@ -133,7 +133,7 @@ func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsCopyModeMessage -from=Client -type=Copy
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsCopyModeMessage -from=Client -type=Copy -return=Client=pgproto3.FrontendMessage=t.T
 func IsCopyModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CopyData:
@@ -144,7 +144,7 @@ func IsCopyModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsCancelMessage -from=Client -type=Cancel
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsCancelMessage -from=Client -type=Cancel -return=Client=pgproto3.FrontendMessage=t.T
 func IsCancelMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CancelRequest:
@@ -153,7 +153,7 @@ func IsCancelMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn=IsTerminateConnMessage -from=Client -type=TerminateConn
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn=IsTerminateConnMessage -from=Client -type=TerminateConn -return=Client=pgproto3.FrontendMessage=t.T
 func IsTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.Terminate:
@@ -164,7 +164,7 @@ func IsTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
 
 // Backend Messages
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsBackendStartupModeMessage -from=Server -type=Startup
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsBackendStartupModeMessage -from=Server -type=Startup -return=Server=pgproto3.BackendMessage=t.T
 func IsBackendStartupModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.AuthenticationCleartextPassword:
@@ -184,7 +184,7 @@ func IsBackendStartupModeMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsBackendExtendedQueryModeMessage -from=Server -type=ExtendedQuery
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsBackendExtendedQueryModeMessage -from=Server -type=ExtendedQuery -return=Server=pgproto3.BackendMessage=t.T
 func IsBackendExtendedQueryModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	// Extended Query mode:
@@ -208,7 +208,7 @@ func IsBackendExtendedQueryModeMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsBackendCopyModeMessage -from=Server -type=Copy
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsBackendCopyModeMessage -from=Server -type=Copy -return=Server=pgproto3.BackendMessage=t.T
 func IsBackendCopyModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CopyInResponse:
@@ -233,7 +233,7 @@ func IsBackendCopyModeMessage(msg pgproto3.BackendMessage) bool {
 // Applies to both query modes.
 // Not really sure what to call this.
 //
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsBackendResponseMessage -from=Server -type=Response
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsBackendResponseMessage -from=Server -type=Response -return=Server=pgproto3.BackendMessage=t.T
 func IsBackendResponseMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.ReadyForQuery:
@@ -255,7 +255,7 @@ func IsBackendResponseMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -methods=PgwireMessage -fn IsBackendAsyncMessage -from=Server -type=Async
+//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn IsBackendAsyncMessage -from=Server -type=Async -return=Server=pgproto3.BackendMessage=t.T
 func IsBackendAsyncMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.NoticeResponse:
@@ -318,23 +318,53 @@ type ClientMessageHandlers[T any] struct {
 	TerminateConn func(msg ClientTerminateConn) (T, error)
 }
 
-func (h ClientMessageHandlers[T]) Handle(msg ClientMessage) (r T, err error) {
+func (h ClientMessageHandlers[T]) HandleDefault(msg ClientMessage, defaultHandler func(msg ClientMessage) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
 	case ClientCancel:
-		return h.Cancel(msg)
+		if h.Cancel != nil {
+			return h.Cancel(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ClientCopy:
-		return h.Copy(msg)
+		if h.Copy != nil {
+			return h.Copy(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ClientExtendedQuery:
-		return h.ExtendedQuery(msg)
+		if h.ExtendedQuery != nil {
+			return h.ExtendedQuery(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ClientSimpleQuery:
-		return h.SimpleQuery(msg)
+		if h.SimpleQuery != nil {
+			return h.SimpleQuery(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ClientStartup:
-		return h.Startup(msg)
+		if h.Startup != nil {
+			return h.Startup(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ClientTerminateConn:
-		return h.TerminateConn(msg)
+		if h.TerminateConn != nil {
+			return h.TerminateConn(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	}
 	err = fmt.Errorf("unknown client message: %T", msg)
 	return
+}
+
+func (h ClientMessageHandlers[T]) Handle(msg ClientMessage) (r T, err error) {
+	return h.HandleDefault(msg, func(msg ClientMessage) (T, error) {
+		panic(fmt.Sprintf("no handler defined for client message: %T", msg))
+	})
 }
 
 type ServerMessageHandlers[T any] struct {
@@ -345,21 +375,47 @@ type ServerMessageHandlers[T any] struct {
 	Startup       func(msg ServerStartup) (T, error)
 }
 
-func (h ServerMessageHandlers[T]) Handle(msg ServerMessage) (r T, err error) {
+func (h ServerMessageHandlers[T]) HandleDefault(msg ServerMessage, defaultHandler func(msg ServerMessage) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
 	case ServerAsync:
-		return h.Async(msg)
+		if h.Async != nil {
+			return h.Async(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ServerCopy:
-		return h.Copy(msg)
+		if h.Copy != nil {
+			return h.Copy(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ServerExtendedQuery:
-		return h.ExtendedQuery(msg)
+		if h.ExtendedQuery != nil {
+			return h.ExtendedQuery(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ServerResponse:
-		return h.Response(msg)
+		if h.Response != nil {
+			return h.Response(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	case ServerStartup:
-		return h.Startup(msg)
+		if h.Startup != nil {
+			return h.Startup(msg)
+		} else {
+			return defaultHandler(msg)
+		}
 	}
 	err = fmt.Errorf("unknown server message: %T", msg)
 	return
+}
+
+func (h ServerMessageHandlers[T]) Handle(msg ServerMessage) (r T, err error) {
+	return h.HandleDefault(msg, func(msg ServerMessage) (T, error) {
+		panic(fmt.Sprintf("no handler defined for server message: %T", msg))
+	})
 }
 
 type MessageHandlers[T any] struct {
@@ -367,12 +423,22 @@ type MessageHandlers[T any] struct {
 	Server ServerMessageHandlers[T]
 }
 
-func (h MessageHandlers[T]) Handle(msg Message) (r T, err error) {
+func (h MessageHandlers[T]) HandleDefault(msg Message, defaultHandler func(msg Message) (T, error)) (r T, err error) {
 	if m, ok := msg.(ClientMessage); ok {
-		return h.Client.Handle(m)
+		return h.Client.HandleDefault(m, func(msg ClientMessage) (T, error) {
+			return defaultHandler(msg)
+		})
 	} else if m, ok := msg.(ServerMessage); ok {
-		return h.Server.Handle(m)
+		return h.Server.HandleDefault(m, func(msg ServerMessage) (T, error) {
+			return defaultHandler(msg)
+		})
 	}
 	err = fmt.Errorf("unknown message (neither client nor server): %T", msg)
 	return
+}
+
+func (h MessageHandlers[T]) Handle(msg Message) (r T, err error) {
+	return h.HandleDefault(msg, func(msg Message) (T, error) {
+		panic(fmt.Sprintf("no handler defined for message: %T", msg))
+	})
 }

@@ -8,9 +8,9 @@ import (
 
 // ClientStartup is implemented by all Client Startup message wrapper types.
 type ClientStartup interface {
-	Client()
 	Startup()
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
+	Client() pgproto3.FrontendMessage
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -27,51 +27,51 @@ var (
 // ClientStartupGSSEncRequest wraps *pgproto3.GSSEncRequest from the client.
 type ClientStartupGSSEncRequest FromClient[*pgproto3.GSSEncRequest]
 
-func (ClientStartupGSSEncRequest) Client()        {}
-func (ClientStartupGSSEncRequest) Startup()       {}
-func (ClientStartupGSSEncRequest) PgwireMessage() {}
+func (ClientStartupGSSEncRequest) Startup()                           {}
+func (t ClientStartupGSSEncRequest) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientStartupGSSEncRequest) Client() pgproto3.FrontendMessage { return t.T }
 
 // ClientStartupGSSResponse wraps *pgproto3.GSSResponse from the client.
 type ClientStartupGSSResponse FromClient[*pgproto3.GSSResponse]
 
-func (ClientStartupGSSResponse) Client()        {}
-func (ClientStartupGSSResponse) Startup()       {}
-func (ClientStartupGSSResponse) PgwireMessage() {}
+func (ClientStartupGSSResponse) Startup()                           {}
+func (t ClientStartupGSSResponse) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientStartupGSSResponse) Client() pgproto3.FrontendMessage { return t.T }
 
 // ClientStartupPasswordMessage wraps *pgproto3.PasswordMessage from the client.
 type ClientStartupPasswordMessage FromClient[*pgproto3.PasswordMessage]
 
-func (ClientStartupPasswordMessage) Client()        {}
-func (ClientStartupPasswordMessage) Startup()       {}
-func (ClientStartupPasswordMessage) PgwireMessage() {}
+func (ClientStartupPasswordMessage) Startup()                           {}
+func (t ClientStartupPasswordMessage) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientStartupPasswordMessage) Client() pgproto3.FrontendMessage { return t.T }
 
 // ClientStartupSASLInitialResponse wraps *pgproto3.SASLInitialResponse from the client.
 type ClientStartupSASLInitialResponse FromClient[*pgproto3.SASLInitialResponse]
 
-func (ClientStartupSASLInitialResponse) Client()        {}
-func (ClientStartupSASLInitialResponse) Startup()       {}
-func (ClientStartupSASLInitialResponse) PgwireMessage() {}
+func (ClientStartupSASLInitialResponse) Startup()                           {}
+func (t ClientStartupSASLInitialResponse) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientStartupSASLInitialResponse) Client() pgproto3.FrontendMessage { return t.T }
 
 // ClientStartupSASLResponse wraps *pgproto3.SASLResponse from the client.
 type ClientStartupSASLResponse FromClient[*pgproto3.SASLResponse]
 
-func (ClientStartupSASLResponse) Client()        {}
-func (ClientStartupSASLResponse) Startup()       {}
-func (ClientStartupSASLResponse) PgwireMessage() {}
+func (ClientStartupSASLResponse) Startup()                           {}
+func (t ClientStartupSASLResponse) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientStartupSASLResponse) Client() pgproto3.FrontendMessage { return t.T }
 
 // ClientStartupSSLRequest wraps *pgproto3.SSLRequest from the client.
 type ClientStartupSSLRequest FromClient[*pgproto3.SSLRequest]
 
-func (ClientStartupSSLRequest) Client()        {}
-func (ClientStartupSSLRequest) Startup()       {}
-func (ClientStartupSSLRequest) PgwireMessage() {}
+func (ClientStartupSSLRequest) Startup()                           {}
+func (t ClientStartupSSLRequest) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientStartupSSLRequest) Client() pgproto3.FrontendMessage { return t.T }
 
 // ClientStartupStartupMessage wraps *pgproto3.StartupMessage from the client.
 type ClientStartupStartupMessage FromClient[*pgproto3.StartupMessage]
 
-func (ClientStartupStartupMessage) Client()        {}
-func (ClientStartupStartupMessage) Startup()       {}
-func (ClientStartupStartupMessage) PgwireMessage() {}
+func (ClientStartupStartupMessage) Startup()                           {}
+func (t ClientStartupStartupMessage) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientStartupStartupMessage) Client() pgproto3.FrontendMessage { return t.T }
 
 // ToClientStartup converts a pgproto3.FrontendMessage to a ClientStartup if it matches one of the known types.
 func ToClientStartup(msg pgproto3.FrontendMessage) (ClientStartup, bool) {

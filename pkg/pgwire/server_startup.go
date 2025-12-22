@@ -8,9 +8,9 @@ import (
 
 // ServerStartup is implemented by all Server Startup message wrapper types.
 type ServerStartup interface {
-	Server()
 	Startup()
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
+	Server() pgproto3.BackendMessage
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -29,66 +29,66 @@ var (
 // ServerStartupAuthenticationCleartextPassword wraps *pgproto3.AuthenticationCleartextPassword from the server.
 type ServerStartupAuthenticationCleartextPassword FromServer[*pgproto3.AuthenticationCleartextPassword]
 
-func (ServerStartupAuthenticationCleartextPassword) Server()        {}
-func (ServerStartupAuthenticationCleartextPassword) Startup()       {}
-func (ServerStartupAuthenticationCleartextPassword) PgwireMessage() {}
+func (ServerStartupAuthenticationCleartextPassword) Startup()                          {}
+func (t ServerStartupAuthenticationCleartextPassword) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupAuthenticationCleartextPassword) Server() pgproto3.BackendMessage { return t.T }
 
 // ServerStartupAuthenticationGSS wraps *pgproto3.AuthenticationGSS from the server.
 type ServerStartupAuthenticationGSS FromServer[*pgproto3.AuthenticationGSS]
 
-func (ServerStartupAuthenticationGSS) Server()        {}
-func (ServerStartupAuthenticationGSS) Startup()       {}
-func (ServerStartupAuthenticationGSS) PgwireMessage() {}
+func (ServerStartupAuthenticationGSS) Startup()                          {}
+func (t ServerStartupAuthenticationGSS) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupAuthenticationGSS) Server() pgproto3.BackendMessage { return t.T }
 
 // ServerStartupAuthenticationGSSContinue wraps *pgproto3.AuthenticationGSSContinue from the server.
 type ServerStartupAuthenticationGSSContinue FromServer[*pgproto3.AuthenticationGSSContinue]
 
-func (ServerStartupAuthenticationGSSContinue) Server()        {}
-func (ServerStartupAuthenticationGSSContinue) Startup()       {}
-func (ServerStartupAuthenticationGSSContinue) PgwireMessage() {}
+func (ServerStartupAuthenticationGSSContinue) Startup()                          {}
+func (t ServerStartupAuthenticationGSSContinue) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupAuthenticationGSSContinue) Server() pgproto3.BackendMessage { return t.T }
 
 // ServerStartupAuthenticationMD5Password wraps *pgproto3.AuthenticationMD5Password from the server.
 type ServerStartupAuthenticationMD5Password FromServer[*pgproto3.AuthenticationMD5Password]
 
-func (ServerStartupAuthenticationMD5Password) Server()        {}
-func (ServerStartupAuthenticationMD5Password) Startup()       {}
-func (ServerStartupAuthenticationMD5Password) PgwireMessage() {}
+func (ServerStartupAuthenticationMD5Password) Startup()                          {}
+func (t ServerStartupAuthenticationMD5Password) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupAuthenticationMD5Password) Server() pgproto3.BackendMessage { return t.T }
 
 // ServerStartupAuthenticationOk wraps *pgproto3.AuthenticationOk from the server.
 type ServerStartupAuthenticationOk FromServer[*pgproto3.AuthenticationOk]
 
-func (ServerStartupAuthenticationOk) Server()        {}
-func (ServerStartupAuthenticationOk) Startup()       {}
-func (ServerStartupAuthenticationOk) PgwireMessage() {}
+func (ServerStartupAuthenticationOk) Startup()                          {}
+func (t ServerStartupAuthenticationOk) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupAuthenticationOk) Server() pgproto3.BackendMessage { return t.T }
 
 // ServerStartupAuthenticationSASL wraps *pgproto3.AuthenticationSASL from the server.
 type ServerStartupAuthenticationSASL FromServer[*pgproto3.AuthenticationSASL]
 
-func (ServerStartupAuthenticationSASL) Server()        {}
-func (ServerStartupAuthenticationSASL) Startup()       {}
-func (ServerStartupAuthenticationSASL) PgwireMessage() {}
+func (ServerStartupAuthenticationSASL) Startup()                          {}
+func (t ServerStartupAuthenticationSASL) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupAuthenticationSASL) Server() pgproto3.BackendMessage { return t.T }
 
 // ServerStartupAuthenticationSASLContinue wraps *pgproto3.AuthenticationSASLContinue from the server.
 type ServerStartupAuthenticationSASLContinue FromServer[*pgproto3.AuthenticationSASLContinue]
 
-func (ServerStartupAuthenticationSASLContinue) Server()        {}
-func (ServerStartupAuthenticationSASLContinue) Startup()       {}
-func (ServerStartupAuthenticationSASLContinue) PgwireMessage() {}
+func (ServerStartupAuthenticationSASLContinue) Startup()                          {}
+func (t ServerStartupAuthenticationSASLContinue) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupAuthenticationSASLContinue) Server() pgproto3.BackendMessage { return t.T }
 
 // ServerStartupAuthenticationSASLFinal wraps *pgproto3.AuthenticationSASLFinal from the server.
 type ServerStartupAuthenticationSASLFinal FromServer[*pgproto3.AuthenticationSASLFinal]
 
-func (ServerStartupAuthenticationSASLFinal) Server()        {}
-func (ServerStartupAuthenticationSASLFinal) Startup()       {}
-func (ServerStartupAuthenticationSASLFinal) PgwireMessage() {}
+func (ServerStartupAuthenticationSASLFinal) Startup()                          {}
+func (t ServerStartupAuthenticationSASLFinal) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupAuthenticationSASLFinal) Server() pgproto3.BackendMessage { return t.T }
 
 // Secret key data for cancel requests.
 // This should be already captured when we establish the connection.
 type ServerStartupBackendKeyData FromServer[*pgproto3.BackendKeyData]
 
-func (ServerStartupBackendKeyData) Server()        {}
-func (ServerStartupBackendKeyData) Startup()       {}
-func (ServerStartupBackendKeyData) PgwireMessage() {}
+func (ServerStartupBackendKeyData) Startup()                          {}
+func (t ServerStartupBackendKeyData) PgwireMessage() pgproto3.Message { return t.T }
+func (t ServerStartupBackendKeyData) Server() pgproto3.BackendMessage { return t.T }
 
 // ToServerStartup converts a pgproto3.BackendMessage to a ServerStartup if it matches one of the known types.
 func ToServerStartup(msg pgproto3.BackendMessage) (ServerStartup, bool) {

@@ -11,7 +11,6 @@ require (
 	github.com/jackc/pgmock v0.0.0-20210724152146-4ad1a8207f65
 	github.com/jackc/pgproto3/v2 v2.1.1
 	github.com/jackc/pgx/v5 v5.7.7-0.20251214134032-4c1308c14b2e
-	github.com/jackc/puddle/v2 v2.2.2
 	github.com/lucasb-eyer/go-colorful v1.2.0
 	github.com/stretchr/testify v1.11.1
 )
@@ -41,6 +40,7 @@ require (
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect

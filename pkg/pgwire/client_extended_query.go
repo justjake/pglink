@@ -8,9 +8,9 @@ import (
 
 // ClientExtendedQuery is implemented by all Client ExtendedQuery message wrapper types.
 type ClientExtendedQuery interface {
-	Client()
 	ExtendedQuery()
-	PgwireMessage()
+	PgwireMessage() pgproto3.Message
+	Client() pgproto3.FrontendMessage
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -27,16 +27,16 @@ var (
 // Extended Query 1: parse text into a prepared statement.
 type ClientExtendedQueryParse FromClient[*pgproto3.Parse]
 
-func (ClientExtendedQueryParse) Client()        {}
-func (ClientExtendedQueryParse) ExtendedQuery() {}
-func (ClientExtendedQueryParse) PgwireMessage() {}
+func (ClientExtendedQueryParse) ExtendedQuery()                     {}
+func (t ClientExtendedQueryParse) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientExtendedQueryParse) Client() pgproto3.FrontendMessage { return t.T }
 
 // Extended Query 2: Bind parameters to a prepared statement.
 type ClientExtendedQueryBind FromClient[*pgproto3.Bind]
 
-func (ClientExtendedQueryBind) Client()        {}
-func (ClientExtendedQueryBind) ExtendedQuery() {}
-func (ClientExtendedQueryBind) PgwireMessage() {}
+func (ClientExtendedQueryBind) ExtendedQuery()                     {}
+func (t ClientExtendedQueryBind) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientExtendedQueryBind) Client() pgproto3.FrontendMessage { return t.T }
 
 // Extended Query 3: Execute a prepared statement, requesting N or all rows.
 // May need to be called again if server replies PortalSuspended.
@@ -48,9 +48,9 @@ func (ClientExtendedQueryBind) PgwireMessage() {}
 // - EmptyQueryResponse: the portal was created from an empty query string
 type ClientExtendedQueryExecute FromClient[*pgproto3.Execute]
 
-func (ClientExtendedQueryExecute) Client()        {}
-func (ClientExtendedQueryExecute) ExtendedQuery() {}
-func (ClientExtendedQueryExecute) PgwireMessage() {}
+func (ClientExtendedQueryExecute) ExtendedQuery()                     {}
+func (t ClientExtendedQueryExecute) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage { return t.T }
 
 // Extended Query 4: Command pipeline complete.
 //
@@ -70,9 +70,9 @@ func (ClientExtendedQueryExecute) PgwireMessage() {}
 // optional operations that can be used with extended-query protocol.
 type ClientExtendedQuerySync FromClient[*pgproto3.Sync]
 
-func (ClientExtendedQuerySync) Client()        {}
-func (ClientExtendedQuerySync) ExtendedQuery() {}
-func (ClientExtendedQuerySync) PgwireMessage() {}
+func (ClientExtendedQuerySync) ExtendedQuery()                     {}
+func (t ClientExtendedQuerySync) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientExtendedQuerySync) Client() pgproto3.FrontendMessage { return t.T }
 
 // Extended Query tool: Describe prepared statement or portal.
 //
@@ -96,18 +96,18 @@ func (ClientExtendedQuerySync) PgwireMessage() {}
 // zeroes in this case.
 type ClientExtendedQueryDescribe FromClient[*pgproto3.Describe]
 
-func (ClientExtendedQueryDescribe) Client()        {}
-func (ClientExtendedQueryDescribe) ExtendedQuery() {}
-func (ClientExtendedQueryDescribe) PgwireMessage() {}
+func (ClientExtendedQueryDescribe) ExtendedQuery()                     {}
+func (t ClientExtendedQueryDescribe) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientExtendedQueryDescribe) Client() pgproto3.FrontendMessage { return t.T }
 
 // Close prepared statement/portal.
 // Note that closing a prepared statement implicitly closes any open
 // portals that were constructed from that statement.
 type ClientExtendedQueryClose FromClient[*pgproto3.Close]
 
-func (ClientExtendedQueryClose) Client()        {}
-func (ClientExtendedQueryClose) ExtendedQuery() {}
-func (ClientExtendedQueryClose) PgwireMessage() {}
+func (ClientExtendedQueryClose) ExtendedQuery()                     {}
+func (t ClientExtendedQueryClose) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientExtendedQueryClose) Client() pgproto3.FrontendMessage { return t.T }
 
 // The Flush message does not cause any specific output to be generated,
 // but forces the backend to deliver any data pending in its output
@@ -118,9 +118,9 @@ func (ClientExtendedQueryClose) PgwireMessage() {}
 // minimize network overhead.
 type ClientExtendedQueryFlush FromClient[*pgproto3.Flush]
 
-func (ClientExtendedQueryFlush) Client()        {}
-func (ClientExtendedQueryFlush) ExtendedQuery() {}
-func (ClientExtendedQueryFlush) PgwireMessage() {}
+func (ClientExtendedQueryFlush) ExtendedQuery()                     {}
+func (t ClientExtendedQueryFlush) PgwireMessage() pgproto3.Message  { return t.T }
+func (t ClientExtendedQueryFlush) Client() pgproto3.FrontendMessage { return t.T }
 
 // ToClientExtendedQuery converts a pgproto3.FrontendMessage to a ClientExtendedQuery if it matches one of the known types.
 func ToClientExtendedQuery(msg pgproto3.FrontendMessage) (ClientExtendedQuery, bool) {
