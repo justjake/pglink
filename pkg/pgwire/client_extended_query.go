@@ -6,34 +6,37 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
-// FrontendExtendedQuery is implemented by all Frontend ExtendedQuery message wrapper types.
-type FrontendExtendedQuery interface {
-	Frontend()
+// ClientExtendedQuery is implemented by all Client ExtendedQuery message wrapper types.
+type ClientExtendedQuery interface {
+	Client()
 	ExtendedQuery()
+	PgwireMessage()
 }
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ FrontendExtendedQuery = FrontendExtendedQueryParse{}
-	_ FrontendExtendedQuery = FrontendExtendedQueryBind{}
-	_ FrontendExtendedQuery = FrontendExtendedQueryExecute{}
-	_ FrontendExtendedQuery = FrontendExtendedQuerySync{}
-	_ FrontendExtendedQuery = FrontendExtendedQueryDescribe{}
-	_ FrontendExtendedQuery = FrontendExtendedQueryClose{}
-	_ FrontendExtendedQuery = FrontendExtendedQueryFlush{}
+	_ ClientExtendedQuery = ClientExtendedQueryParse{}
+	_ ClientExtendedQuery = ClientExtendedQueryBind{}
+	_ ClientExtendedQuery = ClientExtendedQueryExecute{}
+	_ ClientExtendedQuery = ClientExtendedQuerySync{}
+	_ ClientExtendedQuery = ClientExtendedQueryDescribe{}
+	_ ClientExtendedQuery = ClientExtendedQueryClose{}
+	_ ClientExtendedQuery = ClientExtendedQueryFlush{}
 )
 
 // Extended Query 1: parse text into a prepared statement.
-type FrontendExtendedQueryParse FromFrontend[*pgproto3.Parse]
+type ClientExtendedQueryParse FromClient[*pgproto3.Parse]
 
-func (FrontendExtendedQueryParse) Frontend()      {}
-func (FrontendExtendedQueryParse) ExtendedQuery() {}
+func (ClientExtendedQueryParse) Client()        {}
+func (ClientExtendedQueryParse) ExtendedQuery() {}
+func (ClientExtendedQueryParse) PgwireMessage() {}
 
 // Extended Query 2: Bind parameters to a prepared statement.
-type FrontendExtendedQueryBind FromFrontend[*pgproto3.Bind]
+type ClientExtendedQueryBind FromClient[*pgproto3.Bind]
 
-func (FrontendExtendedQueryBind) Frontend()      {}
-func (FrontendExtendedQueryBind) ExtendedQuery() {}
+func (ClientExtendedQueryBind) Client()        {}
+func (ClientExtendedQueryBind) ExtendedQuery() {}
+func (ClientExtendedQueryBind) PgwireMessage() {}
 
 // Extended Query 3: Execute a prepared statement, requesting N or all rows.
 // May need to be called again if server replies PortalSuspended.
@@ -43,10 +46,11 @@ func (FrontendExtendedQueryBind) ExtendedQuery() {}
 // - CommandComplete: success
 // - ErrorResponse: failure
 // - EmptyQueryResponse: the portal was created from an empty query string
-type FrontendExtendedQueryExecute FromFrontend[*pgproto3.Execute]
+type ClientExtendedQueryExecute FromClient[*pgproto3.Execute]
 
-func (FrontendExtendedQueryExecute) Frontend()      {}
-func (FrontendExtendedQueryExecute) ExtendedQuery() {}
+func (ClientExtendedQueryExecute) Client()        {}
+func (ClientExtendedQueryExecute) ExtendedQuery() {}
+func (ClientExtendedQueryExecute) PgwireMessage() {}
 
 // Extended Query 4: Command pipeline complete.
 //
@@ -64,10 +68,11 @@ func (FrontendExtendedQueryExecute) ExtendedQuery() {}
 // one and only one ReadyForQuery sent for each Sync.)
 // In addition to these fundamental, required operations, there are several
 // optional operations that can be used with extended-query protocol.
-type FrontendExtendedQuerySync FromFrontend[*pgproto3.Sync]
+type ClientExtendedQuerySync FromClient[*pgproto3.Sync]
 
-func (FrontendExtendedQuerySync) Frontend()      {}
-func (FrontendExtendedQuerySync) ExtendedQuery() {}
+func (ClientExtendedQuerySync) Client()        {}
+func (ClientExtendedQuerySync) ExtendedQuery() {}
+func (ClientExtendedQuerySync) PgwireMessage() {}
 
 // Extended Query tool: Describe prepared statement or portal.
 //
@@ -89,18 +94,20 @@ func (FrontendExtendedQuerySync) ExtendedQuery() {}
 // the formats to be used for returned columns are not yet known to the
 // backend; the format code fields in the RowDescription message will be
 // zeroes in this case.
-type FrontendExtendedQueryDescribe FromFrontend[*pgproto3.Describe]
+type ClientExtendedQueryDescribe FromClient[*pgproto3.Describe]
 
-func (FrontendExtendedQueryDescribe) Frontend()      {}
-func (FrontendExtendedQueryDescribe) ExtendedQuery() {}
+func (ClientExtendedQueryDescribe) Client()        {}
+func (ClientExtendedQueryDescribe) ExtendedQuery() {}
+func (ClientExtendedQueryDescribe) PgwireMessage() {}
 
 // Close prepared statement/portal.
 // Note that closing a prepared statement implicitly closes any open
 // portals that were constructed from that statement.
-type FrontendExtendedQueryClose FromFrontend[*pgproto3.Close]
+type ClientExtendedQueryClose FromClient[*pgproto3.Close]
 
-func (FrontendExtendedQueryClose) Frontend()      {}
-func (FrontendExtendedQueryClose) ExtendedQuery() {}
+func (ClientExtendedQueryClose) Client()        {}
+func (ClientExtendedQueryClose) ExtendedQuery() {}
+func (ClientExtendedQueryClose) PgwireMessage() {}
 
 // The Flush message does not cause any specific output to be generated,
 // but forces the backend to deliver any data pending in its output
@@ -109,28 +116,29 @@ func (FrontendExtendedQueryClose) ExtendedQuery() {}
 // before issuing more commands. Without Flush, messages returned by the
 // backend will be combined into the minimum possible number of packets to
 // minimize network overhead.
-type FrontendExtendedQueryFlush FromFrontend[*pgproto3.Flush]
+type ClientExtendedQueryFlush FromClient[*pgproto3.Flush]
 
-func (FrontendExtendedQueryFlush) Frontend()      {}
-func (FrontendExtendedQueryFlush) ExtendedQuery() {}
+func (ClientExtendedQueryFlush) Client()        {}
+func (ClientExtendedQueryFlush) ExtendedQuery() {}
+func (ClientExtendedQueryFlush) PgwireMessage() {}
 
-// ToFrontendExtendedQuery converts a pgproto3.FrontendMessage to a FrontendExtendedQuery if it matches one of the known types.
-func ToFrontendExtendedQuery(msg pgproto3.FrontendMessage) (FrontendExtendedQuery, bool) {
+// ToClientExtendedQuery converts a pgproto3.FrontendMessage to a ClientExtendedQuery if it matches one of the known types.
+func ToClientExtendedQuery(msg pgproto3.FrontendMessage) (ClientExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Parse:
-		return FrontendExtendedQueryParse{m}, true
+		return ClientExtendedQueryParse{m}, true
 	case *pgproto3.Bind:
-		return FrontendExtendedQueryBind{m}, true
+		return ClientExtendedQueryBind{m}, true
 	case *pgproto3.Execute:
-		return FrontendExtendedQueryExecute{m}, true
+		return ClientExtendedQueryExecute{m}, true
 	case *pgproto3.Sync:
-		return FrontendExtendedQuerySync{m}, true
+		return ClientExtendedQuerySync{m}, true
 	case *pgproto3.Describe:
-		return FrontendExtendedQueryDescribe{m}, true
+		return ClientExtendedQueryDescribe{m}, true
 	case *pgproto3.Close:
-		return FrontendExtendedQueryClose{m}, true
+		return ClientExtendedQueryClose{m}, true
 	case *pgproto3.Flush:
-		return FrontendExtendedQueryFlush{m}, true
+		return ClientExtendedQueryFlush{m}, true
 	}
 	return nil, false
 }

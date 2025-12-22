@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // PooledConn wraps a pgxpool connection with automatic release tracking.
@@ -25,6 +26,11 @@ func (c *PooledConn) PgConn() *pgconn.PgConn {
 
 func (c *PooledConn) Name() string {
 	return fmt.Sprintf("%s&pooledConn=%p", c.session.Name(), c)
+}
+
+func (c *PooledConn) ReadingChan() <-chan ReadResult[pgwire.ServerMessage] {
+	c.panicIfReleased()
+	return c.session.reader.ReadingChan()
 }
 
 // Release returns the connection to the pool.

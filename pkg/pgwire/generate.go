@@ -20,6 +20,7 @@ import (
 var from = flag.String("from", "", "the origin of the message: Frontend or Backend")
 var typePrefix = flag.String("type", "", "the type prefix for generated types")
 var fn = flag.String("fn", "", "the function name containing the type switch")
+var methods = flag.String("methods", "", "comma-separated list of additional no-arg methods to generate")
 
 func main() {
 	flag.Parse()
@@ -130,8 +131,14 @@ func main() {
 		log.Fatalf("no types found in type switch in function %s", *fn)
 	}
 
+	// Parse additional methods
+	var extraMethods []string
+	if *methods != "" {
+		extraMethods = strings.Split(*methods, ",")
+	}
+
 	// Generate the output
-	output := generateCode(pkgName, imports, *from, *typePrefix, inputType, types)
+	output := generateCode(pkgName, imports, *from, *typePrefix, inputType, extraMethods, types)
 
 	// Write to output file
 	outFile := toSnakeCase(*from) + "_" + toSnakeCase(*typePrefix) + ".go"
@@ -220,7 +227,7 @@ func extractTypeInfo(expr ast.Expr) typeInfo {
 	return ti
 }
 
-func generateCode(pkgName string, imports []string, from, prefix, inputType string, types []typeInfo) []byte {
+func generateCode(pkgName string, imports []string, from, prefix, inputType string, extraMethods []string, types []typeInfo) []byte {
 	var buf bytes.Buffer
 
 	// Header
@@ -242,6 +249,9 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	fmt.Fprintf(&buf, "type %s interface {\n", interfaceName)
 	fmt.Fprintf(&buf, "\t%s()\n", from)
 	fmt.Fprintf(&buf, "\t%s()\n", prefix)
+	for _, method := range extraMethods {
+		fmt.Fprintf(&buf, "\t%s()\n", method)
+	}
 	buf.WriteString("}\n\n")
 
 	// Compile-time interface checks
@@ -272,7 +282,11 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 
 		// Marker methods for interface satisfaction
 		fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, from)
-		fmt.Fprintf(&buf, "func (%s) %s() {}\n\n", newTypeName, prefix)
+		fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, prefix)
+		for _, method := range extraMethods {
+			fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, method)
+		}
+		buf.WriteString("\n")
 	}
 
 	// Conversion function: To<From><Prefix>(inputType) -> (interface, bool)

@@ -12,6 +12,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"runtime"
+	"time"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -44,7 +45,7 @@ type Session struct {
 	dbConfig          *config.DatabaseConfig
 	userConfig        *config.UserConfig
 	tlsState          *tls.ConnectionState
-	trackedParameters []string
+	database          *backend.Database
 
 	// Client's view of the server's session state.
 	state pgwire.ProtocolState
@@ -56,15 +57,13 @@ type Session struct {
 	frontendNextMsg    chan pgproto3.FrontendMessage
 	frontendDisposeMsg chan pgproto3.FrontendMessage
 
-	readErrors chan error
-
 	// The server.
 	// nil until a backend connection is acquired to run a transaction.
 	// nil once the backend connection is released.
-	backend             *backend.PooledConn
-	backendNextMsg      chan pgproto3.BackendMessage
-	backendDisposeMsg   chan pgproto3.BackendMessage
-	backendConnectedCtx context.Context
+	backend            *backend.PooledConn
+	backendReadingChan chan backend.ReadResult[pgwire.ServerMessage]
+	backendCtx         context.Context
+	cancelBackendCtx   context.CancelFunc
 }
 
 // Context returns the session's context, which is canceled when Close is called.
@@ -73,22 +72,30 @@ func (s *Session) Context() context.Context {
 }
 
 // Select over reading from frontend, reading from backend, or receiving a context cancellation.
-func (s *Session) ReceiveAny() (pgproto3.Message, error) {
+func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
-	case err := <-s.readErrors:
-		return nil, err
-	case msg := <-s.frontendNextMsg:
-		return msg, nil
-	case msg := <-s.backendNextMsg:
-		return msg, nil
+	case msg := <-s.frontend.Reader().ReadingChan():
+		return msg.Value, msg.Error
+	}
+}
+
+func (s *Session) RecvAny() (pgwire.Message, error) {
+	select {
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	case msg := <-s.frontend.Reader().ReadingChan():
+		return msg.Value, msg.Error
+	case msg := <-s.backend.ReadingChan():
+		return msg.Value, msg.Error
 	}
 }
 
 // Close cancels the session's context and releases associated resources.
 func (s *Session) Close() {
 	s.cancel()
+	s.releaseBackend()
 	if s.frontendNextMsg != nil {
 		close(s.frontendNextMsg)
 	}
@@ -106,9 +113,6 @@ func (s *Session) Close() {
 		if closeErr != nil {
 			s.logger.Error("error closing client", "error", closeErr)
 		}
-	}
-	if s.backend != nil {
-		s.backend.Release()
 	}
 }
 
@@ -192,64 +196,37 @@ func (s *Session) Run() {
 	// command cycle.
 	s.sendReadyForQuery()
 
-	go func() {
-		defer s.logger.Debug("frontend reader routine exited")
-		for {
-			msg, err := s.frontend.Receive()
-			if s.ctx.Err() != nil {
-				return
-			}
-			if err != nil {
-				s.readErrors <- err
-				return
-			}
-			s.frontendNextMsg <- msg
-
-			// Messages are ony valid until the next call to Receive() So we need to
-			// block the reader routine until the session is done with the message.
-			select {
-			case <-s.ctx.Done():
-				return
-			case returned := <-s.frontendDisposeMsg:
-				if returned != msg {
-					panic(fmt.Errorf("session did not release message in order for reuse: expectedc %T %p != actual %T %p", msg, msg, returned, returned))
-				}
-			}
-		}
-	}()
-
 	for {
 		// Initial state: no backend connection, so only receive from frontend.
-		anyMsg, err := s.ReceiveAny()
+		msg, err := s.RecvFrontend()
 		if err != nil {
 			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving client message: %v", err))
 			return
 		}
 
-		msg, ok := anyMsg.(pgproto3.FrontendMessage)
-		if !ok {
-			panic(fmt.Errorf("expected frontend message, got %T", anyMsg))
-		}
-
 		s.logger.Debug("recv client message", "type", fmt.Sprintf("%T", msg))
 
-		if pgwire.IsTerminateConnMessage(msg) {
+		if _, ok := msg.(pgwire.ClientTerminateConn); ok {
 			// Messages that close the connection.
 			s.logger.Info("client terminated connection")
 			return
-		} else if pgwire.IsCancelMessage(msg) {
+		} else if _, ok := msg.(pgwire.ClientCancel); ok {
 			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("cancel request received on normal connection: %T", msg))
 			return
-		} else if pgwire.IsStartupModeMessage(msg) {
+		} else if _, ok := msg.(pgwire.ClientStartup); ok {
 			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("startup completed already: %T", msg))
 			return
-		} else if pgwire.IsCopyModeMessage(msg) {
+		} else if _, ok := msg.(pgwire.ClientCopy); ok {
 			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("idle client not in copy mode: %T", msg))
 			return
-		} else if pgwire.IsSimpleQueryModeMessage(msg) || pgwire.IsExtendedQueryModeMessage(msg) {
+		} else if _, ok := msg.(pgwire.ClientSimpleQuery); ok {
 			// Enter state where we have a backend connection.
 			if err := s.runWithBackend(msg); err != nil {
-				return err
+				return
+			}
+		} else if _, ok := msg.(pgwire.ClientExtendedQuery); ok {
+			if err := s.runWithBackend(msg); err != nil {
+				return
 			}
 		} else {
 			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("unknown client message: %T", msg))
@@ -260,17 +237,67 @@ func (s *Session) Run() {
 	}
 }
 
-func (s *Session) runWithBackend(firstMsg pgproto3.FrontendMessage) error {
-	oldLogger := s.logger
-	if err := s.acquireBackend(); err != nil {
+func (s *Session) acquireBackend() (*slog.Logger, error) {
+	ctx, _ := context.WithTimeout(s.ctx, time.Second)
+	be, err := s.database.Acquire(ctx, *s.userConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire backend: %w", err)
+	}
+	s.backend = be
+	s.backendReadingChan = make(chan backend.ReadResult[pgwire.ServerMessage])
+	s.backendCtx, s.cancelBackendCtx = context.WithCancel(s.ctx)
+	logger := s.logger.With("backend", s.backend.Name())
+
+	go func() {
+		defer logger.Debug("backend reader exited")
+		for {
+			select {
+			case <-s.backendCtx.Done():
+				return
+			case msg := <-s.backend.ReadingChan():
+				select {
+				case <-s.ctx.Done():
+					logger.Error("backend reader exited before forwarding last message")
+					return
+				case s.backendReadingChan <- msg:
+					continue
+				}
+			}
+		}
+	}()
+
+	return logger, nil
+}
+
+func (s *Session) releaseBackend() {
+	if s.backend == nil {
+		return
+	}
+	s.backend.Release()
+	s.backend = nil
+
+	s.cancelBackendCtx()
+	s.backendCtx = nil
+	s.cancelBackendCtx = nil
+
+	close(s.backendReadingChan)
+	s.backendReadingChan = nil
+}
+
+func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
+	logger, err := s.acquireBackend()
+	if err != nil {
 		s.sendError(pgwire.ErrorFatal, pgerrcode.CannotConnectNow, fmt.Sprintf("failed to acquire backend: %v", err))
 		return err
 	}
 	defer s.releaseBackend()
-	s.logger = s.logger.With("backend", s.backend.Name())
+
+	oldLogger := s.logger
+	s.logger = logger
 	defer func() { s.logger = oldLogger }()
 
-	msg := firstMsg
+	var msg pgwire.Message
+	msg = firstMsg
 
 	for {
 		if pgwire.IsSimpleQueryModeMessage(msg) {
@@ -281,7 +308,7 @@ func (s *Session) runWithBackend(firstMsg pgproto3.FrontendMessage) error {
 			clientMsg
 		}
 
-		msg, err := s.ReceiveAny()
+		msg, err = s.RecvAny()
 		if err != nil {
 			s.sendError(pgwire.ErrorFatal, pgerrcode.ProtocolViolation, fmt.Sprintf("error receiving message: %v", err))
 			return err
@@ -356,6 +383,7 @@ func (s *Session) handleStartup() error {
 		return fmt.Errorf("unknown database: %s", s.databaseName)
 	}
 	s.dbConfig = dbConfig
+	s.database = s.service.databases[dbConfig]
 
 	// Find matching user config
 	userConfig, err := s.findUserConfig(dbConfig)
@@ -484,7 +512,7 @@ func (s *Session) sendBackendParameterStatusChanges() {
 	if s.backend == nil {
 		return
 	}
-	diff := s.state.ParameterStatuses.DiffToTip(s.backend.ParameterStatuses(s.trackedParameters))
+	diff := s.backend.ParameterStatusChanges(s.trackedParameters, s.state.ParameterStatuses)
 	if diff == nil {
 		return
 	}
@@ -567,10 +595,11 @@ func (w *slogTraceWriter) Write(p []byte) (n int, err error) {
 
 type Frontend struct {
 	*pgproto3.Backend
-	ctx context.Context
+	ctx    context.Context
+	reader *backend.ChanReader[pgwire.ClientMessage]
 }
 
-func (f *Frontend) Receive() (pgwire.FrontendMessage, error) {
+func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
 	if err := f.ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
@@ -582,9 +611,16 @@ func (f *Frontend) Receive() (pgwire.FrontendMessage, error) {
 		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
-	if m, ok := pgwire.ToFrontendMessage(msg); ok {
+	if m, ok := pgwire.ToClientMessage(msg); ok {
 		return m, nil
 	}
 
 	return nil, fmt.Errorf("unknown frontend message: %T", msg)
+}
+
+func (f *Frontend) Reader() *backend.ChanReader[pgwire.ClientMessage] {
+	if f.reader == nil {
+		f.reader = backend.NewChanReader(f.Receive)
+	}
+	return f.reader
 }

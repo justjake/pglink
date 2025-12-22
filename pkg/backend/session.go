@@ -83,7 +83,7 @@ type Session struct {
 	TrackedParameters []string
 
 	mu     sync.Mutex
-	reader *ChanReader[pgwire.BackendMessage]
+	reader *ChanReader[pgwire.ServerMessage]
 	logger *slog.Logger
 }
 
@@ -115,12 +115,12 @@ func (s *Session) updateState() {
 	s.State.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
 }
 
-func (s *Session) readBackendMessage() (pgwire.BackendMessage, error) {
+func (s *Session) readBackendMessage() (pgwire.ServerMessage, error) {
 	msg, err := s.Conn.Frontend().Receive()
 	if err != nil {
 		return nil, err
 	}
-	if m, ok := pgwire.ToBackendMessage(msg); ok {
+	if m, ok := pgwire.ToServerMessage(msg); ok {
 		return m, nil
 	}
 	return nil, fmt.Errorf("unknown backend message: %T", msg)
