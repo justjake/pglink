@@ -2,10 +2,9 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"time"
+	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,8 +21,10 @@ import (
 type Database struct {
 	config  *config.DatabaseConfig
 	secrets *config.SecretCache
-	pools   *MultiPool[config.UserConfig]
+	pool    *MultiPool[config.UserConfig]
 	logger  *slog.Logger
+
+	destroyedConns atomic.Int32
 }
 
 // NewDatabase creates a new Database with the given database configuration.
@@ -33,47 +34,25 @@ func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *confi
 	db := &Database{
 		config:  cfg,
 		secrets: secrets,
-		pools:   NewMultiPool[config.UserConfig](cfg.Backend.PoolMaxConns),
-		logger:  logger,
 	}
+	db.logger = db.logger.With("backend", db.Name())
 
-	// Eagerly create all user pools to respect MinIdleConns
+	db.pool = NewMultiPool[config.UserConfig](cfg.Backend.PoolMaxConns, db.logger)
 	for _, user := range cfg.Users {
-		pool, err := db.createPool(ctx, user)
+		cfg, err := db.poolConfigForUser(ctx, user)
 		if err != nil {
-			// Close any pools we already created
 			db.Close()
-			return nil, fmt.Errorf("failed to create pool for user: %w", err)
+			return nil, fmt.Errorf("failed to create pool for user %s: %w", user.String(), err)
 		}
-		db.userPools[user] = pool
+		err = db.pool.AddPool(ctx, user, cfg)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to add pool for user %s: %w", user.String(), err)
+		}
 	}
+	db.pool.Start()
 
 	return db, nil
-}
-
-// GetPool returns the connection pool for the given user.
-// Panics if the user is not known (all valid users have pools created in NewDatabase).
-func (d *Database) GetPool(user config.UserConfig) *pgxpool.Pool {
-	pool := d.userPools[user]
-	if pool == nil {
-		panic("Database: unknown user")
-	}
-	return pool
-}
-
-// createPool creates a new connection pool for the given user.
-func (d *Database) createPool(ctx context.Context, user config.UserConfig) (*pgxpool.Pool, error) {
-	poolCfg, err := d.poolConfigForUser(ctx, user)
-	if err != nil {
-		return nil, err
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pool: %w", err)
-	}
-
-	return pool, nil
 }
 
 // poolConfigForUser builds a pgxpool.Config for the given user.
@@ -95,56 +74,15 @@ func (d *Database) poolConfigForUser(ctx context.Context, user config.UserConfig
 
 	cfg.ConnConfig.User = username
 	cfg.ConnConfig.Password = password
-
-	// Install callbacks to track actual database connections
-	d.installConnectionCallbacks(cfg)
-
-	return cfg, nil
-}
-
-// installConnectionCallbacks sets up BeforeConnect and BeforeClose callbacks
-// to track actual database connections across all pools.
-func (d *Database) installConnectionCallbacks(cfg *pgxpool.Config) {
-	// Chain with any existing BeforeConnect
-	existingBeforeConnect := cfg.BeforeConnect
-	cfg.BeforeConnect = func(ctx context.Context, connCfg *pgx.ConnConfig) error {
-		// Check global limit before allowing new connection
-		if !d.connMgr.tryReserveDBConn() {
-			return ErrConnectionLimitReached
-		}
-
-		if existingBeforeConnect != nil {
-			if err := existingBeforeConnect(ctx, connCfg); err != nil {
-				// Release the reservation since connection won't be created
-				d.connMgr.releaseDBConn()
-				return err
-			}
-		}
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		d.logger.Debug("connected to backend", "user", username, "pid", conn.PgConn().PID())
 		return nil
 	}
-
-	// Chain with any existing BeforeClose
-	existingBeforeClose := cfg.BeforeClose
 	cfg.BeforeClose = func(conn *pgx.Conn) {
-		// Release the connection slot
-		d.connMgr.releaseDBConn()
-
-		if existingBeforeClose != nil {
-			existingBeforeClose(conn)
-		}
-	}
-}
-
-// PoolConfig returns a pgxpool.Config for the given user.
-// If a pool already exists for this user, returns its config.
-// Otherwise, builds a new config from the backend configuration and user credentials.
-func (d *Database) PoolConfig(ctx context.Context, user config.UserConfig) (*pgxpool.Config, error) {
-	// Check if pool already exists
-	if pool := d.GetPool(user); pool != nil {
-		return pool.Config(), nil
+		d.logger.Debug("disconnecting from backend", "user", username, "pid", conn.PgConn().PID())
 	}
 
-	return d.poolConfigForUser(ctx, user)
+	return cfg, nil
 }
 
 // Acquire acquires a connection from the pool for the given user.
@@ -154,117 +92,36 @@ func (d *Database) PoolConfig(ctx context.Context, user config.UserConfig) (*pgx
 //
 // The returned PooledConn must be released by calling Release() when done.
 // Failing to release connections will exhaust the connection pool.
-func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*PooledConn, error) {
-	// Get the user's pool (created eagerly in NewDatabase)
-	pool := d.GetPool(user)
-
-	// Acquire with retry loop for handling connection limit
-	for {
-		// Try to acquire from the user's pool first.
-		// This will succeed immediately if there's an idle connection available.
-		// Only if the pool needs to create a NEW connection will BeforeConnect
-		// be called, which may return ErrConnectionLimitReached.
-		conn, err := pool.Acquire(ctx)
-		if err == nil {
-			session, err := GetOrCreateSession(conn.Conn().PgConn(), d, user)
-			if err != nil {
-				// Drop the connection from the pool.
-				d.logger.Error("failed to create session, dropping connection", "error", err, "pid", conn.Conn().PgConn().PID())
-				closeErr := conn.Hijack().Close(context.Background())
-				if closeErr != nil {
-					err = errors.Join(err, closeErr)
-				}
-				return nil, err
-			}
-
-			// Acquire the session so it can be used for reading/writing
-			if err := session.Acquire(); err != nil {
-				d.logger.Error("failed to acquire session", "error", err)
-				conn.Release()
-				return nil, err
-			}
-
-			return &PooledConn{
-				conn:    conn,
-				session: session,
-			}, nil
-		}
-
-		// Check if we hit the global connection limit (no idle connections,
-		// and can't create new ones because we're at the limit)
-		if errors.Is(err, ErrConnectionLimitReached) {
-			// Try to steal an idle connection from another pool
-			if d.tryStealIdleConnection(user) {
-				// Successfully stole a connection, retry acquire
-				continue
-			}
-
-			// No idle connections available and at the global limit.
-			// Poll for an idle connection to become available.
-			// In transaction pooling mode, connections are released back to the pool
-			// (not closed), so we can't rely on waitForTurn which only wakes on close.
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(5 * time.Millisecond):
-				// Retry - an idle connection may have been released
-				continue
-			}
-		}
-
-		// Some other error
+func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*PooledBackend, error) {
+	conn, err := d.pool.Acquire(ctx, user)
+	if err != nil {
 		return nil, fmt.Errorf("failed to acquire connection: %w", err)
 	}
-}
 
-// tryStealIdleConnection attempts to close an idle connection from any pool
-// except the excluded user. Returns true if a connection was stolen.
-func (d *Database) tryStealIdleConnection(exclude config.UserConfig) bool {
-	for user, pool := range d.userPools {
-		if user == exclude {
-			continue
-		}
-		if pool.Stat().IdleConns() > 0 {
-			if d.tryHijackIdleConnection(pool) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// tryHijackIdleConnection tries to acquire an idle connection and close it.
-// This makes room in the global connection count.
-// Returns true if successful.
-func (d *Database) tryHijackIdleConnection(pool *pgxpool.Pool) bool {
-	// Use a very short timeout - we only want to grab an idle connection,
-	// not wait for one to become available
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
-	defer cancel()
-
-	conn, err := pool.Acquire(ctx)
+	session, err := GetOrCreateSession(conn.Value().Conn().PgConn(), d, user)
 	if err != nil {
-		return false
+		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Got a connection - hijack and close it
-	// Hijack removes it from the pool, then we close the underlying connection
-	pgConn := conn.Hijack()
-	_ = pgConn.Close(context.Background())
-	// Note: BeforeClose will be called, decrementing dbConns
-
-	return true
+	return &PooledBackend{
+		conn:    conn,
+		session: session,
+	}, nil
 }
 
 // Stats returns statistics about the database's connection pools.
 func (d *Database) Stats() DatabaseStats {
+	// TODO: move to MultiPool, private access violation here:
 	stats := DatabaseStats{
-		ConnManager: d.connMgr.stats(),
-		Pools:       make(map[string]PoolStats),
+		MaxConns:       d.pool.MaxConns,
+		TotalConns:     d.pool.totalConns.Load(),
+		IdleConns:      d.pool.totalIdleConns.Load(),
+		DestroyedConns: d.destroyedConns.Load(),
+		Pools:          make(map[string]PoolStats, len(d.pool.pools)),
 	}
 
-	for user, pool := range d.userPools {
-		poolStat := pool.Stat()
+	for user, stuff := range d.pool.pools {
+		poolStat := stuff.pool.Stat()
 		stats.Pools[user.String()] = PoolStats{
 			TotalConns:    poolStat.TotalConns(),
 			AcquiredConns: poolStat.AcquiredConns(),
@@ -276,16 +133,13 @@ func (d *Database) Stats() DatabaseStats {
 	return stats
 }
 
-// TotalDBConnections returns the total number of actual database connections
-// across all pools. This is the authoritative count tracked via callbacks.
-func (d *Database) TotalDBConnections() int32 {
-	return d.connMgr.currentDBConns()
-}
-
 // DatabaseStats contains statistics about the database and its pools.
 type DatabaseStats struct {
-	ConnManager connManagerStats
-	Pools       map[string]PoolStats
+	MaxConns       int32
+	TotalConns     int32
+	IdleConns      int32
+	DestroyedConns int32
+	Pools          map[string]PoolStats
 }
 
 // PoolStats contains statistics about a single connection pool.
@@ -298,9 +152,7 @@ type PoolStats struct {
 
 // Close closes all connection pools.
 func (d *Database) Close() {
-	for _, pool := range d.userPools {
-		pool.Close()
-	}
+	d.pool.Close()
 }
 
 func (d *Database) Name() string {

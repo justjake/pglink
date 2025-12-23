@@ -88,7 +88,7 @@ func GetOrCreateSession(conn *pgconn.PgConn, db *Database, user config.UserConfi
 		TrackedParameters: tracked,
 	}
 	session.updateState()
-	session.logger = db.logger.With("backend", session.Name())
+	session.logger = db.logger.With("session", session.Name())
 
 	conn.CustomData()[SessionExtraDataKey] = session
 	return session, nil
@@ -143,6 +143,8 @@ func (s *Session) ReadingChan() <-chan ReadResult[pgwire.ServerMessage] {
 // We have error signature because it's likely we'll want one in the future.
 func (s *Session) Send(msg pgproto3.FrontendMessage) error {
 	s.Conn.Frontend().Send(msg)
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
 	s.State.UpdateForFrontentMessage(msg)
 	return nil
 }

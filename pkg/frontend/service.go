@@ -28,7 +28,7 @@ type Service struct {
 	secrets   *config.SecretCache
 	tlsConfig *tls.Config
 
-	listener net.Listener
+	listener  net.Listener
 	databases map[*config.DatabaseConfig]*backend.Database
 
 	// Connection tracking

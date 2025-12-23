@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/puddle/v2"
 )
@@ -70,11 +71,16 @@ func (p *MultiPool[K]) AddPool(ctx context.Context, key K, givenConfig *pgxpool.
 	// conns limit
 	if givenConfig.BeforeConnect != nil {
 		stuff.config.BeforeConnect = func(ctx context.Context, connCfg *pgx.ConnConfig) error {
+			if err := givenConfig.BeforeConnect(ctx, connCfg); err != nil {
+				return err
+			}
+
 			totalConns := p.totalConns.Load()
 			if totalConns >= p.MaxConns {
 				return fmt.Errorf("connection limit reached: %d >= %d", totalConns, p.MaxConns)
 			}
-			return givenConfig.BeforeConnect(ctx, connCfg)
+
+			return nil
 		}
 	} else {
 		stuff.config.BeforeConnect = func(ctx context.Context, connCfg *pgx.ConnConfig) error {
@@ -118,18 +124,25 @@ func (p *MultiPool[K]) AddPool(ctx context.Context, key K, givenConfig *pgxpool.
 	// AfterRelease is called after a connection is released, but before it is
 	// returned to the pool. It must return true to return the connection to the
 	// pool or false to destroy the connection.
-	stuff.config.AfterRelease = func(conn *pgx.Conn) bool {
-		p.totalIdleConns.Add(1)
+	if givenConfig.AfterRelease != nil {
+		stuff.config.AfterRelease = func(conn *pgx.Conn) bool {
+			p.totalIdleConns.Add(1)
 
-		if p.shouldDestroyConnection(stuff, conn) {
-			return false
+			if !givenConfig.AfterRelease(conn) {
+				return false
+			}
+
+			if p.shouldDestroyConnection(stuff, conn) {
+				return false
+			}
+
+			return true
 		}
-
-		if givenConfig.AfterRelease != nil {
-			return givenConfig.AfterRelease(conn)
+	} else {
+		stuff.config.AfterRelease = func(conn *pgx.Conn) bool {
+			p.totalIdleConns.Add(1)
+			return !p.shouldDestroyConnection(stuff, conn)
 		}
-
-		return true
 	}
 
 	if givenConfig.BeforeClose != nil {
@@ -153,6 +166,7 @@ func (p *MultiPool[K]) AddPool(ctx context.Context, key K, givenConfig *pgxpool.
 	stuff.pool = pool
 	p.pools[key] = stuff
 	p.stuff = append(p.stuff, stuff)
+	return nil
 }
 
 // Not thread-safe. Setup complete, now you can call Acquire.
@@ -207,7 +221,25 @@ func (p *MultiPool[K]) Close() {
 	})
 }
 
+const destroyKey = "XXX"
+
+func MarkForDestroy(conn *pgconn.PgConn) {
+	conn.CustomData()[destroyKey] = true
+}
+
+func IsMarkedForDestroy(conn *pgconn.PgConn) bool {
+	customData := conn.CustomData()
+	if destroy, ok := customData[destroyKey].(bool); ok && destroy {
+		return true
+	}
+	return false
+}
+
 func (p *MultiPool[K]) shouldDestroyConnection(stuff *poolStuff[K], conn *pgx.Conn) bool {
+	if IsMarkedForDestroy(conn.PgConn()) {
+		return true
+	}
+
 	totalConns := p.totalConns.Load()
 	return totalConns > p.MaxConns
 }
@@ -290,6 +322,12 @@ func (c *MultiPoolConn) Value() *pgxpool.Conn {
 	// This will panic if released.
 	c.resource.Value()
 	return c.conn
+}
+
+func (c *MultiPoolConn) ReleaseAndDestroy() {
+	// mark for destrution in AfterRelease
+	c.conn.Conn().PgConn().CustomData()[destroyKey] = true
+	c.Release()
 }
 
 type poolStuff[K comparable] struct {

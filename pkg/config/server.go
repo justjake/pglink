@@ -167,6 +167,14 @@ type BackendConfig struct {
 	DefaultStartupParameters PgStartupParameters `json:"default_startup_parameters,omitempty"`
 }
 
+func (c *BackendConfig) Addr() string {
+	if c.Port != nil {
+		return fmt.Sprintf("%s:%d", c.Host, *c.Port)
+	} else {
+		return fmt.Sprintf("%s:5432", c.Host)
+	}
+}
+
 // PoolConfigString builds a libpq-style connection string in key=value format.
 // This includes all configured parameters except user credentials.
 func (c *BackendConfig) PoolConfigString() string {

@@ -61,7 +61,7 @@ type Session struct {
 	// The server.
 	// nil until a backend connection is acquired to run a transaction.
 	// nil once the backend connection is released.
-	backend              *backend.PooledConn
+	backend              *backend.PooledBackend
 	backendReadingChan   chan backend.ReadResult[pgwire.ServerMessage]
 	backendCtx           context.Context
 	cancelBackendCtx     context.CancelFunc
