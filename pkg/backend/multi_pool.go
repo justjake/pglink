@@ -18,6 +18,11 @@ import (
 var ErrMaxConnsReached = errors.New("max conns reached")
 var ErrNoIdleConnections = fmt.Errorf("%w, no idle connections to close", ErrMaxConnsReached)
 
+// MultiPool controls a set of pgxpool.Pool connection pools, while enforcing a
+// global max connections limit.
+//
+// The total number of connections may temporarily exceed the MaxConns limit.
+// It is a bug if the total number of connections grows beyond MaxConns without bound.
 type MultiPool[K comparable] struct {
 	MaxConns int32
 	pools    map[K]*multiPoolMember[K]
@@ -367,9 +372,19 @@ func (m *multiPoolMember[K]) beforeConnect(ctx context.Context, connCfg *pgx.Con
 	if req, ok := ctx.Value(acquireContextKey).(*acquireContextReq); ok {
 		// Only track pending creates if we can decrement pendingCreates on error.
 		// We will track errors of pending creates in Acquire.
+		//
+		// Other create attempts may come from MinIdleConns setting causing the pool
+		// to autotomatically create idle conns in the background.
 		req.createAttempts++
 		m.parent.pendingCreates.Add(1)
 	}
+	// TODO: else trigger health check, since we may be creating idle conns
+	// without incrementing pendingCreates.
+	//
+	// TODO: we could refuse to acquireConnSlot here unless we have a valid ticket,
+	// and dedicate re-balancing MinIdleConns between pools entirely to the
+	// healthcheck thread/process, which may help prevent bursting beyond MaxConns
+	// due to untracked pendingCreates not matching the tracked pendingDestroys.
 
 	return nil
 }
