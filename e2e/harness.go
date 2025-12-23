@@ -503,7 +503,7 @@ func (h *Harness) ExecDirect(ctx context.Context, db TestDatabase, sql string) e
 	if err != nil {
 		return err
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	_, err = conn.Exec(ctx, sql)
 	return err

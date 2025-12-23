@@ -205,20 +205,6 @@ func makePglinkTarget(name string, maxConns, concurrency, gomaxprocs int, task f
 	}
 }
 
-// makePsqlTarget creates a target that uses psql CLI instead of pgx pool
-func makePsqlTarget(name string, concurrency int, connParams func(s *BenchmarkSuite) (host string, port int, dbname, user, password string), task func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error) *BenchmarkTarget {
-	return &BenchmarkTarget{
-		Name:        name,
-		MaxConns:    0, // Not applicable for psql
-		Concurrency: concurrency,
-		ConnString: func(s *BenchmarkSuite) string {
-			host, port, dbname, user, password := connParams(s)
-			return fmt.Sprintf("postgres://%s:%s@%s:%d/%s", user, password, host, port, dbname)
-		},
-		Task: task,
-	}
-}
-
 // ============================================================================
 // Task Implementations
 // ============================================================================
@@ -249,7 +235,7 @@ func taskTransaction(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool)
 	}
 	var result int
 	if err := tx.QueryRow(ctx, "SELECT 1").Scan(&result); err != nil {
-		tx.Rollback(ctx)
+		_ = tx.Rollback(ctx)
 		return err
 	}
 	return tx.Commit(ctx)
@@ -282,7 +268,7 @@ func taskCopyIn(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) erro
 
 	_, err = tx.Conn().PgConn().CopyFrom(ctx, strings.NewReader(string(s.copyData)), "COPY bench_copy FROM STDIN")
 	if err != nil {
-		tx.Rollback(ctx)
+		_ = tx.Rollback(ctx)
 		return err
 	}
 
@@ -488,7 +474,7 @@ func (s *BenchmarkSuite) setupCopyTable(ctx context.Context, _ *BenchmarkSuite) 
 	if err != nil {
 		return fmt.Errorf("failed to connect for setup: %w", err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	// Create benchmark table for COPY operations and grant access to app user
 	_, err = conn.Exec(ctx, `
@@ -529,9 +515,9 @@ func (s *BenchmarkSuite) generateCopyData() error {
 	if err != nil {
 		return err
 	}
-	defer tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 	if _, err := tmpFile.Write(s.copyData); err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
 		return err
 	}
 	s.copyDataFile = tmpFile.Name()
@@ -568,11 +554,11 @@ func (s *BenchmarkSuite) startPglink(ctx context.Context, cfg *config.Config, go
 	configPath := filepath.Join(tmpDir, "pglink.json")
 	configData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return err
 	}
 	if err := os.WriteFile(configPath, configData, 0644); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return err
 	}
 
@@ -581,7 +567,7 @@ func (s *BenchmarkSuite) startPglink(ctx context.Context, cfg *config.Config, go
 		buildCmd := exec.CommandContext(ctx, filepath.Join(s.projectDir, "bin", "build"))
 		buildCmd.Dir = s.projectDir
 		if err := buildCmd.Run(); err != nil {
-			os.RemoveAll(tmpDir)
+			_ = os.RemoveAll(tmpDir)
 			return fmt.Errorf("failed to build pglink: %w", err)
 		}
 	}
@@ -591,7 +577,7 @@ func (s *BenchmarkSuite) startPglink(ctx context.Context, cfg *config.Config, go
 	s.pglinkCmd.Dir = tmpDir
 
 	if err := s.pglinkCmd.Start(); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return fmt.Errorf("failed to start pglink: %w", err)
 	}
 
@@ -601,13 +587,13 @@ func (s *BenchmarkSuite) startPglink(ctx context.Context, cfg *config.Config, go
 
 func (s *BenchmarkSuite) stopPglink() {
 	if s.pglinkCmd != nil && s.pglinkCmd.Process != nil {
-		s.pglinkCmd.Process.Signal(syscall.SIGTERM)
+		_ = s.pglinkCmd.Process.Signal(syscall.SIGTERM)
 		done := make(chan error, 1)
 		go func() { done <- s.pglinkCmd.Wait() }()
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			s.pglinkCmd.Process.Kill()
+			_ = s.pglinkCmd.Process.Kill()
 		}
 		s.pglinkCmd = nil
 	}
@@ -622,11 +608,11 @@ func (s *BenchmarkSuite) startPgbouncer(ctx context.Context, cfg *config.Config)
 	secrets := config.NewSecretCache(nil)
 	pgbCfg, err := pgbouncer.GenerateConfig(ctx, cfg, secrets, s.pgbouncerPort)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return fmt.Errorf("failed to generate pgbouncer config: %w", err)
 	}
 	if err := pgbCfg.WriteToDir(tmpDir); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return fmt.Errorf("failed to write pgbouncer config: %w", err)
 	}
 
@@ -634,7 +620,7 @@ func (s *BenchmarkSuite) startPgbouncer(ctx context.Context, cfg *config.Config)
 	s.pgbouncerCmd.Dir = tmpDir
 
 	if err := s.pgbouncerCmd.Start(); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return fmt.Errorf("failed to start pgbouncer: %w", err)
 	}
 
@@ -643,13 +629,13 @@ func (s *BenchmarkSuite) startPgbouncer(ctx context.Context, cfg *config.Config)
 
 func (s *BenchmarkSuite) stopPgbouncer() {
 	if s.pgbouncerCmd != nil && s.pgbouncerCmd.Process != nil {
-		s.pgbouncerCmd.Process.Signal(syscall.SIGTERM)
+		_ = s.pgbouncerCmd.Process.Signal(syscall.SIGTERM)
 		done := make(chan error, 1)
 		go func() { done <- s.pgbouncerCmd.Wait() }()
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			s.pgbouncerCmd.Process.Kill()
+			_ = s.pgbouncerCmd.Process.Kill()
 		}
 		s.pgbouncerCmd = nil
 	}
@@ -666,7 +652,7 @@ func (s *BenchmarkSuite) waitForPort(ctx context.Context, port int, timeout time
 		}
 		conn, err := pgx.Connect(ctx, connStr)
 		if err == nil {
-			conn.Close(ctx)
+			_ = conn.Close(ctx)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -692,7 +678,7 @@ func (s *BenchmarkSuite) Run(ctx context.Context) error {
 	if err := s.generateCopyData(); err != nil {
 		return fmt.Errorf("failed to generate copy data: %w", err)
 	}
-	defer os.Remove(s.copyDataFile)
+	defer func() { _ = os.Remove(s.copyDataFile) }()
 
 	// Generate config for the first max_conns value (will be regenerated per case if needed)
 	if len(s.runCfg.MaxConns) > 0 {
@@ -770,7 +756,7 @@ func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, targe
 	// Ensure teardown runs
 	defer func() {
 		if target.TearDown != nil {
-			target.TearDown(ctx, s)
+			_ = target.TearDown(ctx, s)
 		}
 	}()
 
@@ -1070,7 +1056,7 @@ High error rates typically indicate:
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return t.Execute(f, data)
 }

@@ -181,8 +181,8 @@ func buildINI(cfg *config.Config, listenPort int, databases string) string {
 // Format: "md5" + md5(password + username)
 func md5Password(username, password string) string {
 	h := md5.New()
-	io.WriteString(h, password)
-	io.WriteString(h, username)
+	_, _ = io.WriteString(h, password)
+	_, _ = io.WriteString(h, username)
 	return fmt.Sprintf("md5%x", h.Sum(nil))
 }
 
