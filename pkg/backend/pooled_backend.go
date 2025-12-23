@@ -66,6 +66,11 @@ func (c *PooledBackend) Release() {
 	// the connection is actually closed.
 }
 
+func (c *PooledBackend) MarkForDestroy(err error) {
+	c.session.logger.Error("marking for destruction due to error", "error", err)
+	c.conn.MarkForDestroy()
+}
+
 func (c *PooledBackend) ReleaseAndDestroy(err error) {
 	if c.released {
 		c.session.logger.Error("LogicError: already released, refusing to mark for destruction", "error", err)

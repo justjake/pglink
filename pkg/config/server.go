@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,6 +26,10 @@ type DatabaseConfig struct {
 	// Backend configures the PostgreSQL server to proxy connections to.
 	Backend BackendConfig `json:"backend"`
 
+	// PoolAcquireTimeout specifies the max time to wait for a connection from the backend connection pool.
+	// Defaults to 1 second.
+	PoolAcquireTimeoutMilliseconds *int `json:"pool_acquire_timeout_milliseconds,omitempty"`
+
 	// TrackExtraParameters is a list of additional PostgreSQL startup parameters
 	// to track and forward to the backend. By default, only standard parameters
 	// like client_encoding and application_name are tracked.
@@ -35,6 +40,10 @@ type DatabaseConfig struct {
 // It verifies pool constraints, backend config, and that all usernames are unique.
 func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) error {
 	var errs []error
+
+	if c.PoolAcquireTimeoutMilliseconds != nil && *c.PoolAcquireTimeoutMilliseconds <= 0 {
+		errs = append(errs, fmt.Errorf("pool_acquire_timeout_milliseconds must be > 0"))
+	}
 
 	if c.Backend.PoolMaxConns <= 0 {
 		errs = append(errs, fmt.Errorf("backend.pool_max_conns is required and must be > 0"))
@@ -73,6 +82,13 @@ func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) err
 		return nil
 	}
 	return errors.Join(errs...)
+}
+
+func (c *DatabaseConfig) PoolAcquireTimeout() time.Duration {
+	if c.PoolAcquireTimeoutMilliseconds != nil {
+		return time.Duration(*c.PoolAcquireTimeoutMilliseconds) * time.Millisecond
+	}
+	return 1 * time.Second
 }
 
 // UserConfig configures authentication credentials for a user.

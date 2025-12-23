@@ -324,9 +324,13 @@ func (c *MultiPoolConn) Value() *pgxpool.Conn {
 	return c.conn
 }
 
-func (c *MultiPoolConn) ReleaseAndDestroy() {
-	// mark for destrution in AfterRelease
+// MarkForDestroy marks the connection for destruction after it is released.
+func (c *MultiPoolConn) MarkForDestroy() {
 	c.conn.Conn().PgConn().CustomData()[destroyKey] = true
+}
+
+func (c *MultiPoolConn) ReleaseAndDestroy() {
+	c.MarkForDestroy()
 	c.Release()
 }
 

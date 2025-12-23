@@ -10,7 +10,7 @@ import (
 func NewProtocolState() ProtocolState {
 	return ProtocolState{
 		ParameterStatuses: ParameterStatuses{},
-		PreparedStatements: NamedObjectState[bool]{
+		Statements: NamedObjectState[bool]{
 			Alive:         make(map[string]bool),
 			PendingCreate: make(map[string]bool),
 			PendingClose:  make(map[string]bool),
@@ -36,6 +36,8 @@ type ProtocolState struct {
 	// Once the client sends an Extended Query message, the backend will enter
 	// extended query mode.
 	ExtendedQueryMode bool
+	SyncsInFlight     int
+
 	// When an error is detected while processing any extended-query message, the
 	// backend issues ErrorResponse, then reads and discards messages until a Sync
 	// is reached, then issues ReadyForQuery and returns to normal message
@@ -52,22 +54,44 @@ type ProtocolState struct {
 	// See CopyMode above.
 	CopyMode CopyMode
 
-	PreparedStatements NamedObjectState[bool]
-	Portals            NamedObjectState[bool]
+	Statements NamedObjectState[bool]
+	Portals    NamedObjectState[bool]
 
-	// TODO: do we have to track what portals are suspended? / What executions are underway?
+	// TODO: do we have to track what portals are suspended?
 }
 
 type NamedObjectState[T any] struct {
-	Alive         map[string]T
+	// Names created and not closed.
+	Alive map[string]T
+	// The client sent a Create, but the server hasn't responded yet.
 	PendingCreate map[string]T
-	PendingClose  map[string]T
+	// The client sent a Close, but the server hasn't responded yet.
+	PendingClose map[string]T
+	// True when the previous message was part of a strict Extended Query flow:
+	// 1. Parse (set state.PreparedStatements.PendingExecute to the statement name)
+	// 2. Bind (set state.Portals.PendingExecute to the portal name)
+	// 3. Execute (set state.*.Executing to the corresponding name, clear PendingExecute)
+	// (Calls to other Extended Query messages besides Close are permitted any time after Parse.)
+	PendingExecute *string
+	Executing      *string
+}
+
+func (s *ProtocolState) InTxOrQuery() bool {
+	return s.TxStatus != TxIdle || s.Statements.PendingExecute != nil || s.Statements.Executing != nil || s.Portals.PendingExecute != nil && s.Portals.Executing != nil
 }
 
 func (s *ProtocolState) UpdateForFrontentMessage(msg pgproto3.FrontendMessage) {
-	if extendedQuery, ok := ToClientExtendedQuery(msg); ok {
-		s.UpdateForExtendedQueryMessage(extendedQuery)
+	pgwireMsg, ok := ToClientMessage(msg)
+	if !ok {
+		panic(fmt.Sprintf("unexpected frontend message: %T", msg))
 	}
+
+	handlers := ClientMessageHandlers[struct{}]{
+		SimpleQuery:   wrapVoid(s.UpdateForSimpleQueryMessage),
+		ExtendedQuery: wrapVoid(s.UpdateForExtendedQueryMessage),
+	}
+
+	_, _ = handlers.HandleDefault(pgwireMsg, func(msg ClientMessage) (struct{}, error) { return struct{}{}, nil })
 }
 
 func (s *ProtocolState) UpdateForServerMessage(msg ServerMessage) {
@@ -80,27 +104,64 @@ func (s *ProtocolState) UpdateForServerMessage(msg ServerMessage) {
 	_, _ = handlers.HandleDefault(msg, func(msg ServerMessage) (struct{}, error) { return struct{}{}, nil })
 }
 
+func (s *ProtocolState) UpdateForSimpleQueryMessage(msg ClientSimpleQuery) {
+	switch msg := msg.(type) {
+	case ClientSimpleQueryQuery:
+		s.clearPendingExecute()
+		s.ExtendedQueryMode = false
+		unnamed := ""
+		delete(s.Statements.Alive, unnamed)
+		delete(s.Portals.Alive, unnamed)
+		s.Statements.Executing = &unnamed
+		s.Portals.Executing = &unnamed
+	case ClientSimpleQueryFunctionCall:
+		// Nothing.
+	default:
+		panic(fmt.Sprintf("unexpected pgwire.ClientSimpleQuery: %#v", msg))
+	}
+}
+
 func (s *ProtocolState) UpdateForExtendedQueryMessage(msg ClientExtendedQuery) {
 	switch msg := msg.(type) {
 	case ClientExtendedQueryParse:
+		s.clearPendingExecute()
 		s.ExtendedQueryMode = true
-		s.PreparedStatements.PendingCreate[msg.T.Name] = true
+		s.Statements.PendingCreate[msg.T.Name] = true
+		name := msg.T.Name
+		s.Statements.PendingExecute = &name
 	case ClientExtendedQueryClose:
+		s.clearPendingExecute()
 		s.ExtendedQueryMode = true
 		if msg.T.ObjectType == ObjectTypePreparedStatement {
-			s.PreparedStatements.PendingClose[msg.T.Name] = true
+			s.Statements.PendingClose[msg.T.Name] = true
 		} else {
 			s.Portals.PendingClose[msg.T.Name] = true
 		}
 	case ClientExtendedQueryBind:
 		s.ExtendedQueryMode = true
-		s.PreparedStatements.PendingCreate[msg.T.DestinationPortal] = true
+		s.Statements.PendingCreate[msg.T.DestinationPortal] = true
+		if s.Statements.PendingExecute != nil && *s.Statements.PendingExecute == msg.T.PreparedStatement {
+			dest := msg.T.DestinationPortal
+			s.Portals.PendingExecute = &dest
+		} else {
+			s.clearPendingExecute()
+		}
 	case ClientExtendedQueryDescribe:
 		s.ExtendedQueryMode = true
 	case ClientExtendedQueryExecute:
 		s.ExtendedQueryMode = true
+		name := msg.T.Portal
+		s.Portals.Executing = &name
+		if s.Portals.PendingExecute != nil && *s.Portals.PendingExecute == msg.T.Portal {
+			s.Statements.Executing = s.Statements.PendingExecute
+		} else {
+			stmtName := ""
+			s.Statements.PendingExecute = nil
+			s.Statements.Executing = &stmtName
+		}
 	case ClientExtendedQueryFlush:
 	case ClientExtendedQuerySync:
+		s.SyncsInFlight++
 	default:
 		panic(fmt.Sprintf("unexpected pgwire.ClientExtendedQuery: %#v", msg))
 	}
@@ -111,19 +172,19 @@ func (s *ProtocolState) UpdateForServerExtendedQueryMessage(msg ServerExtendedQu
 
 	switch msg := msg.(type) {
 	case ServerExtendedQueryParseComplete:
-		for name := range s.PreparedStatements.PendingCreate {
-			s.PreparedStatements.Alive[name] = true
+		for name := range s.Statements.PendingCreate {
+			s.Statements.Alive[name] = true
 		}
-		clear(s.PreparedStatements.PendingCreate)
+		clear(s.Statements.PendingCreate)
 	case ServerExtendedQueryCloseComplete:
-		for name := range s.PreparedStatements.PendingClose {
-			s.PreparedStatements.Alive[name] = false
+		for name := range s.Statements.PendingClose {
+			s.Statements.Alive[name] = false
 		}
-		clear(s.PreparedStatements.PendingClose)
+		clear(s.Statements.PendingClose)
 		for name := range s.Portals.PendingClose {
 			s.Portals.Alive[name] = false
 		}
-		clear(s.PreparedStatements.PendingClose)
+		clear(s.Statements.PendingClose)
 	case ServerExtendedQueryBindComplete:
 		for name := range s.Portals.PendingCreate {
 			s.Portals.Alive[name] = true
@@ -163,11 +224,20 @@ func (s *ProtocolState) UpdateForServerResponseMessage(msg ServerResponse) {
 		s.CopyMode = CopyNone
 		s.TxStatus = TxStatus(msg.T.TxStatus)
 		s.ServerIgnoringMessagesUntilSync = false
+		if s.SyncsInFlight > 0 {
+			s.SyncsInFlight--
+		}
+		if s.Portals.Executing != nil {
+			s.clearPendingExecute()
+		}
 	case ServerResponseCommandComplete:
 	case ServerResponseDataRow:
 	case ServerResponseEmptyQueryResponse:
+		s.clearPendingExecute()
 	case ServerResponseFunctionCallResponse:
+		s.clearPendingExecute()
 	case ServerResponseErrorResponse:
+		s.clearPendingExecute()
 		if s.ExtendedQueryMode {
 			s.ServerIgnoringMessagesUntilSync = true
 		}
@@ -189,6 +259,13 @@ func (s *ProtocolState) UpdateForServerAsyncMessage(msg ServerAsync) {
 	default:
 		panic(fmt.Sprintf("unexpected pgwire.ServerAsync: %T", msg))
 	}
+}
+
+func (s *ProtocolState) clearPendingExecute() {
+	s.Statements.PendingExecute = nil
+	s.Statements.Executing = nil
+	s.Portals.PendingExecute = nil
+	s.Portals.Executing = nil
 }
 
 func wrapVoid[T any](fn func(T)) func(T) (struct{}, error) {

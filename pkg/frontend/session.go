@@ -61,11 +61,10 @@ type Session struct {
 	// The server.
 	// nil until a backend connection is acquired to run a transaction.
 	// nil once the backend connection is released.
-	backend              *backend.PooledBackend
-	backendReadingChan   chan backend.ReadResult[pgwire.ServerMessage]
-	backendCtx           context.Context
-	cancelBackendCtx     context.CancelFunc
-	backendAcquisitionID uint64 // Incremented each time we acquire a backend
+	backend *backend.PooledBackend
+
+	// TODO: do we actually want this, or is it Claude papering over bugs?
+	TODO_backendAcquisitionID uint64 // Incremented each time we acquire a backend
 
 	// Backend key data for query cancellation.
 	// These are captured from the backend's BackendKeyData message when we
@@ -82,11 +81,6 @@ type Session struct {
 	lastRecv pgwire.Message
 }
 
-// Context returns the session's context, which is canceled when Close is called.
-func (s *Session) Context() context.Context {
-	return s.ctx
-}
-
 // Select over reading from frontend, reading from backend, or receiving a context cancellation.
 func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
 	s.logger.Debug("RecvFrontend: freeing lastRecv", "lastRecv", fmt.Sprintf("%T", s.lastRecv))
@@ -96,8 +90,9 @@ func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
 	case msg := <-s.frontend.Reader().ReadingChan():
-		s.logger.Debug("RecvFrontend: received", "msg", fmt.Sprintf("%T", msg.Value))
+		s.logger.Debug("received (frontend only): from frontend", "msg", fmt.Sprintf("%T", msg.Value))
 		s.lastRecv = msg.Value
+		s.state.UpdateForFrontentMessage(msg.Value.Client())
 		return msg.Value, msg.Error
 	}
 }
@@ -110,30 +105,29 @@ func (s *Session) RecvAny() (pgwire.Message, error) {
 		return nil, s.ctx.Err()
 	case msg := <-s.frontend.Reader().ReadingChan():
 		s.lastRecv = msg.Value
-		s.logger.Debug("RecvAny: received from frontend", "msg", fmt.Sprintf("%T", msg.Value))
+		s.logger.Debug("receive: from frontend", "msg", fmt.Sprintf("%T", msg.Value))
+		s.state.UpdateForFrontentMessage(msg.Value.Client())
 		return msg.Value, msg.Error
-	case msg := <-s.backendReadingChan:
+	case msg := <-s.backend.ReadingChan():
 		s.lastRecv = msg.Value
-		s.logger.Debug("RecvAny: received from backend", "msg", fmt.Sprintf("%T", msg.Value))
+		s.logger.Debug("RecvAny: from backend", "msg", fmt.Sprintf("%T", msg.Value))
+		// We never want to rewrite a server message, since they never contain
+		// information like portal or statement names.
+		s.state.UpdateForServerMessage(msg.Value)
 		return msg.Value, msg.Error
 	}
 }
 
 func (s *Session) freeLastRecvAndContinueSender() {
 	if s.lastRecv == nil {
-		s.logger.Debug("freeLastRecvAndContinueSender: lastRecv is nil, no-op")
 		return
 	}
 
 	if _, ok := s.lastRecv.(pgwire.ServerMessage); ok {
 		if s.backend != nil {
-			s.logger.Debug("freeLastRecvAndContinueSender: calling backend.Continue()")
 			s.backend.Continue()
-		} else {
-			s.logger.Debug("freeLastRecvAndContinueSender: lastRecv is ServerMessage but backend is nil, skipping Continue()")
 		}
 	} else {
-		s.logger.Debug("freeLastRecvAndContinueSender: calling frontend.Reader().Continue()")
 		s.frontend.Reader().Continue()
 	}
 
@@ -154,14 +148,14 @@ func (s *Session) Close() {
 
 	s.cancel()
 
-	s.releaseBackend()
-
 	if s.conn != nil {
 		closeErr := s.conn.Close()
 		if closeErr != nil {
 			s.logger.Error("session close: error closing client connection", "error", closeErr)
 		}
 	}
+
+	s.releaseBackend()
 
 	if s.logger.Enabled(s.ctx, slog.LevelDebug) {
 		s.logger.Debug("session closed", "state", s.state)
@@ -189,6 +183,8 @@ func (s *Session) Run() {
 		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 			s.logger.Error("startup failed", "error", err)
+		} else {
+			s.logger.Debug("startup cancelled", "error", err)
 		}
 		return
 	}
@@ -246,14 +242,22 @@ func (s *Session) Run() {
 		but continue listening for ReadyForQuery or ErrorResponse.
 	*/
 	s.initSessionProcessState()
-	s.sendInitialParameterStatuses()
-	s.sendBackendKeyData()
+	for key, value := range s.state.ParameterStatuses {
+		s.frontend.Send(&pgproto3.ParameterStatus{
+			Name:  key,
+			Value: value,
+		})
+	}
+	s.frontend.Send(&pgproto3.BackendKeyData{
+		ProcessID: s.state.PID,
+		SecretKey: s.state.SecretCancelKey,
+	})
 	// The ReadyForQuery message is the same one that the backend will issue after
 	// each command cycle. Depending on the coding needs of the frontend, it is
 	// reasonable to consider ReadyForQuery as starting a command cycle, or to
 	// consider ReadyForQuery as ending the start-up phase and each subsequent
 	// command cycle.
-	s.sendReadyForQuery()
+	s.frontend.Send(&pgproto3.ReadyForQuery{TxStatus: byte(s.state.TxStatus)})
 
 	if err := s.flush(); err != nil {
 		s.sendError(err)
@@ -315,99 +319,38 @@ func (s *Session) Run() {
 }
 
 func (s *Session) acquireBackend() (*slog.Logger, error) {
-	ctx, cancel := context.WithTimeout(s.ctx, time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, s.dbConfig.PoolAcquireTimeout())
 	defer cancel()
+
 	be, err := s.database.Acquire(ctx, *s.userConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to acquire backend: %w", err)
 	}
+
+	logger := s.logger.With("backend", s.backend.Name())
+
 	s.backend = be
-	s.backendAcquisitionID++ // Increment to ensure unique statement names per acquisition
+	s.TODO_backendAcquisitionID++ // Increment to ensure unique statement names per acquisition
 
 	// Capture the backend's key data for query cancellation.
 	// These credentials are used to forward cancel requests to the backend.
 	pgConn := s.backend.PgConn()
 	s.backendPID = pgConn.PID()
 	s.backendSecretKey = pgConn.SecretKey()
-	s.backendReadingChan = make(chan backend.ReadResult[pgwire.ServerMessage])
-	s.backendCtx, s.cancelBackendCtx = context.WithCancel(s.ctx)
-	logger := s.logger.With("backend", s.backend.Name())
-
-	// Debug: check if context is already done
-	logger.Debug("acquireBackend: created backendCtx", "ctxPtr", fmt.Sprintf("%p", s.backendCtx), "cancelPtr", fmt.Sprintf("%p", s.cancelBackendCtx))
-	if s.backendCtx.Err() != nil {
-		logger.Error("acquireBackend: backendCtx is already done!", "err", s.backendCtx.Err())
-	}
-	if s.ctx.Err() != nil {
-		logger.Error("acquireBackend: session ctx is done!", "err", s.ctx.Err())
-	}
-
-	// Get the reading channel once before starting the loop to avoid
-	// race conditions when the backend is released.
-	// Also capture the context locally to avoid race with releaseBackend setting it to nil.
-	backendCh := s.backend.ReadingChan()
-	backendCtx := s.backendCtx
-	backendReadingChan := s.backendReadingChan
-	logger.Debug("acquireBackend: captured backendCtx", "ctxPtr", fmt.Sprintf("%p", backendCtx))
-	go func() {
-		defer logger.Debug("backend reader goroutine exited")
-		// Debug: check if context is already done at start
-		logger.Debug("backend reader: goroutine starting", "ctxPtr", fmt.Sprintf("%p", backendCtx), "ctxErr", backendCtx.Err())
-		if backendCtx.Err() != nil {
-			logger.Error("backend reader: context already done at start!", "err", backendCtx.Err(), "ctxPtr", fmt.Sprintf("%p", backendCtx))
-			return
-		}
-		for {
-			logger.Debug("backend reader: waiting for message from backend")
-			select {
-			case <-backendCtx.Done():
-				logger.Debug("backend reader: context done")
-				return
-			case msg, ok := <-backendCh:
-				if !ok {
-					// Channel closed
-					logger.Debug("backend reader: channel closed")
-					return
-				}
-				logger.Debug("backend reader: received message, forwarding", "msg", fmt.Sprintf("%T", msg.Value))
-				select {
-				case <-backendCtx.Done():
-					logger.Debug("backend reader: context done while forwarding")
-					return
-				case backendReadingChan <- msg:
-					logger.Debug("backend reader: forwarded message")
-					// Continue() is called by freeLastRecvAndContinueSender when
-					// the message is processed
-				}
-			}
-		}
-	}()
 
 	return logger, nil
 }
 
 func (s *Session) releaseBackend() {
 	if s.backend == nil {
-		s.logger.Debug("releaseBackend: backend is nil, nothing to release")
 		return
 	}
 
-	s.logger.Debug("releaseBackend: releasing", "ctxPtr", fmt.Sprintf("%p", s.backendCtx), "cancelPtr", fmt.Sprintf("%p", s.cancelBackendCtx))
-
-	// Cancel the backend context FIRST to stop the reader goroutine,
-	// before releasing the backend connection (which sets reader to nil)
-	s.cancelBackendCtx()
-	s.logger.Debug("releaseBackend: canceled context")
-	s.backendCtx = nil
-	s.cancelBackendCtx = nil
-
-	// Now it's safe to release the backend and close the channel
 	s.backend.Release()
 	s.backend = nil
 
-	close(s.backendReadingChan)
-	s.backendReadingChan = nil
-
+	//// TODO: why is this comment here?
+	//
 	// NOTE: We intentionally do NOT clear statementNameMap here.
 	// In transaction pooling mode with QueryExecModeDescribeExec, the client
 	// does Parse+Describe+Sync in one round trip, then Bind+Execute+Sync in
@@ -511,7 +454,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			Response:      s.handleServerResponse,
 			Startup: func(msg pgwire.ServerStartup) (bool, error) {
 				err := pgwire.NewProtocolViolation(fmt.Errorf("backend sent startup message to active client session"), msg)
-				s.backend.Kill(s.ctx, err)
+				s.backend.MarkForDestroy(err)
 				return false, err
 			},
 		},
@@ -519,24 +462,20 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 
 	var msg pgwire.Message = firstMsg
 	for {
-		s.logger.Debug("runWithBackend: handling message", "msgType", fmt.Sprintf("%T", msg))
+		s.logger.Debug("runWithBackend: handling message", "msg", fmt.Sprintf("%T", msg))
 		continueWithBackend, err := backendAcquiredState.Handle(msg)
 		s.logger.Debug("runWithBackend: handler returned", "continueWithBackend", continueWithBackend, "err", err)
+
+		// Ensure we've sent any pending messages
+		if flushErr := s.flush(); flushErr != nil {
+			return errors.Join(err, flushErr)
+		}
+
 		if !continueWithBackend || err != nil {
-			// Transition out to idle client state.
-			// Ensure we flush any pending messages (like ReadyForQuery) before returning.
-			if flushErr := s.flush(); flushErr != nil {
-				s.logger.Error("error flushing before releasing backend", "error", flushErr)
-			}
 			if err != nil {
 				return err
 			}
 			return nil
-		}
-
-		// Ensure we've sent any pending messages
-		if err := s.flush(); err != nil {
-			return err
 		}
 
 		// Read next message from client or backend,
@@ -602,34 +541,27 @@ func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (b
 		},
 	}
 
-	s.logger.Debug("runExtendedQueryWithBackend: calling Handle")
 	rewritten, err := extendedQueryRewriter.Handle(msg)
-	s.logger.Debug("runExtendedQueryWithBackend: Handle returned", "rewritten", fmt.Sprintf("%T", rewritten), "err", err)
 	if err != nil {
 		return false, err
 	}
-	s.logger.Debug("runExtendedQueryWithBackend: sending to backend")
+
+	s.logger.Debug("runExtendedQueryWithBackend: sending to backend", "msg", fmt.Sprintf("%T", rewritten))
 	if err := s.backend.Send(rewritten); err != nil {
 		return false, err
 	}
 
-	s.logger.Debug("runExtendedQueryWithBackend: updating state")
-	s.state.UpdateForExtendedQueryMessage(msg)
-	s.logger.Debug("runExtendedQueryWithBackend: done")
 	return true, nil
 }
 
 func (s *Session) handleServerResponse(msg pgwire.ServerResponse) (bool, error) {
 	continueWithBackend := true
-	s.state.UpdateForServerResponseMessage(msg)
 	if _, ok := msg.(pgwire.ServerResponseReadyForQuery); ok {
 		// We may have missed a status update message, double check.
 		s.sendBackendParameterStatusChanges()
-		// Once the transaction ends, we're done with the backend.
-		// TODO: should we also release the backend if s.state.TxStatus == error ?
-		if s.state.TxStatus == pgwire.TxIdle {
-			continueWithBackend = false
+		if !s.state.InTxOrQuery() {
 			s.logger.Info("transaction ended, releasing backend")
+			continueWithBackend = false
 		}
 	}
 
@@ -638,7 +570,6 @@ func (s *Session) handleServerResponse(msg pgwire.ServerResponse) (bool, error) 
 }
 
 func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery) (bool, error) {
-	s.state.UpdateForServerExtendedQueryMessage(msg)
 	s.frontend.Send(msg.Server())
 	return true, nil
 }
@@ -649,7 +580,6 @@ func (s *Session) handleServerAsync(msg pgwire.ServerAsync) (bool, error) {
 }
 
 func (s *Session) handleServerCopy(msg pgwire.ServerCopy) (bool, error) {
-	s.state.UpdateForServerCopyMessage(msg)
 	s.frontend.Send(msg.Server())
 	return true, nil
 }
@@ -698,7 +628,7 @@ func (s *Session) clientToServerPortalName(name string) string {
 	// For named portals, use unique names to avoid collisions when
 	// backend connections are shared across sessions.
 	// Portals are per-transaction so we use the acquisition ID.
-	return fmt.Sprintf("pgwire_%d_%d_%s", s.state.PID, s.backendAcquisitionID, name)
+	return fmt.Sprintf("pgwire_%d_%d_%s", s.state.PID, s.TODO_backendAcquisitionID, name)
 }
 
 // handleStartup processes the initial connection: TLS negotiation and startup message.
@@ -879,7 +809,7 @@ func (s *Session) initSessionProcessState() {
 	s.state.ParameterStatuses = maps.Collect(s.dbConfig.Backend.DefaultStartupParameters.All())
 	maps.Copy(s.state.ParameterStatuses, s.startupParameters)
 	s.state.TxStatus = pgwire.TxIdle
-	s.state.PreparedStatements = pgwire.NamedObjectState[bool]{
+	s.state.Statements = pgwire.NamedObjectState[bool]{
 		Alive:         make(map[string]bool),
 		PendingCreate: make(map[string]bool),
 		PendingClose:  make(map[string]bool),
@@ -892,27 +822,6 @@ func (s *Session) initSessionProcessState() {
 
 	// Register for cancel requests so this session can be found by PID.
 	s.service.registerForCancel(s)
-}
-
-func (s *Session) sendReadyForQuery() {
-	s.sendBackendParameterStatusChanges()
-	s.frontend.Send(&pgproto3.ReadyForQuery{TxStatus: byte(s.state.TxStatus)})
-}
-
-func (s *Session) sendBackendKeyData() {
-	s.frontend.Send(&pgproto3.BackendKeyData{
-		ProcessID: s.state.PID,
-		SecretKey: s.state.SecretCancelKey,
-	})
-}
-
-func (s *Session) sendInitialParameterStatuses() {
-	for key, value := range s.state.ParameterStatuses {
-		s.frontend.Send(&pgproto3.ParameterStatus{
-			Name:  key,
-			Value: value,
-		})
-	}
 }
 
 func (s *Session) sendBackendParameterStatusChanges() {
@@ -1015,47 +924,4 @@ func (w *slogTraceWriter) Write(p []byte) (n int, err error) {
 	}
 
 	return n, nil
-}
-
-type Frontend struct {
-	*pgproto3.Backend
-	ctx    context.Context
-	reader *backend.ChanReader[pgwire.ClientMessage]
-}
-
-func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
-	if err := f.ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
-	}
-	msg, err := f.Backend.Receive()
-	if err != nil {
-		return nil, err
-	}
-	if err := f.ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
-	}
-
-	if m, ok := pgwire.ToClientMessage(msg); ok {
-		return m, nil
-	}
-
-	return nil, fmt.Errorf("unknown frontend message: %T", msg)
-}
-
-func (f *Frontend) receiveBackgroundThread() (*pgwire.ClientMessage, error) {
-	msg, err := f.Receive()
-	if err != nil {
-		return nil, err
-	}
-	if msg == nil {
-		return nil, nil
-	}
-	return &msg, nil
-}
-
-func (f *Frontend) Reader() *backend.ChanReader[pgwire.ClientMessage] {
-	if f.reader == nil {
-		f.reader = backend.NewChanReader(f.receiveBackgroundThread)
-	}
-	return f.reader
 }
