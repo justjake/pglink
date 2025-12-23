@@ -327,9 +327,8 @@ func (s *Session) acquireBackend() (*slog.Logger, error) {
 		return nil, fmt.Errorf("failed to acquire backend: %w", err)
 	}
 
-	logger := s.logger.With("backend", s.backend.Name())
-
 	s.backend = be
+	logger := s.logger.With("backend", be.Name())
 	s.TODO_backendAcquisitionID++ // Increment to ensure unique statement names per acquisition
 
 	// Capture the backend's key data for query cancellation.

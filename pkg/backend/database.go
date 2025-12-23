@@ -35,7 +35,7 @@ func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *confi
 		config:  cfg,
 		secrets: secrets,
 	}
-	db.logger = db.logger.With("backend", db.Name())
+	db.logger = logger.With("backend", db.Name())
 
 	db.pool = NewMultiPool[config.UserConfig](cfg.Backend.PoolMaxConns, db.logger)
 	for _, user := range cfg.Users {
@@ -101,6 +101,11 @@ func (d *Database) Acquire(ctx context.Context, user config.UserConfig) (*Pooled
 	session, err := GetOrCreateSession(conn.Value().Conn().PgConn(), d, user)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
+	}
+
+	if err := session.Acquire(); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("failed to acquire session: %w", err)
 	}
 
 	return &PooledBackend{
