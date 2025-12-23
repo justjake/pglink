@@ -43,11 +43,15 @@ func (m AuthMethod) Valid() bool {
 	}
 }
 
+// DefaultListenAddr is the default listen address if none is specified.
+const DefaultListenAddr = ":16432"
+
 // Config holds the pglink configuration.
 type Config struct {
 	// Listen is the network address to listen on.
 	// Examples: "5432", ":5432", "127.0.0.1:5432", "0.0.0.0:5432"
-	Listen ListenAddr `json:"listen"`
+	// Defaults to ":16432" if not specified.
+	Listen ListenAddr `json:"listen,omitzero"`
 
 	// TLS configures TLS for incoming client connections.
 	// If not specified, a self-signed certificate is generated in memory.
@@ -101,6 +105,19 @@ func (c *Config) GetSCRAMIterations() int {
 		return 4096
 	}
 	return int(*c.SCRAMIterations)
+}
+
+// GetListenAddr returns the listen address, defaulting to DefaultListenAddr (":16432").
+func (c *Config) GetListenAddr() ListenAddr {
+	if c.Listen == "" {
+		return ListenAddr(DefaultListenAddr)
+	}
+	return c.Listen
+}
+
+// SetListenAddr sets the listen address, overriding any configured value.
+func (c *Config) SetListenAddr(addr string) {
+	c.Listen = ListenAddr(normalizeListenAddr(addr))
 }
 
 // FilePath returns the path to the config file on disk.

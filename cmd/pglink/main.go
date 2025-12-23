@@ -143,6 +143,7 @@ func printFullDocs() {
 
 func main() {
 	configPath := flag.String("config", "", "path to pglink.json config file")
+	listenAddr := flag.String("listen-addr", "", "listen address (overrides config file, e.g. :16432, 0.0.0.0:5432)")
 	jsonLogs := flag.Bool("json", false, "output logs in JSON format")
 	showHelp := flag.Bool("help", false, "show full documentation")
 	writePgbouncerDir := flag.String("write-pgbouncer-config-dir", "", "write equivalent pgbouncer config to this directory and exit")
@@ -177,6 +178,11 @@ func main() {
 	if err != nil {
 		logger.Error("failed to read config", "error", err)
 		os.Exit(1)
+	}
+
+	// Apply CLI overrides
+	if *listenAddr != "" {
+		cfg.SetListenAddr(*listenAddr)
 	}
 
 	ctx := context.Background()

@@ -716,4 +716,3 @@ ROLLBACK;
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "should have 0 rows after rollback")
 }
-

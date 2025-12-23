@@ -36,6 +36,7 @@ func GenerateConfig(ctx context.Context, cfg *config.Config, secrets *config.Sec
 	// Build [databases] section
 	for dbName, dbCfg := range cfg.Databases {
 		// Build connection string for this database
+		// PgBouncer will pass through client credentials to the backend
 		connStr := buildConnString(&dbCfg.Backend)
 		databases.WriteString(fmt.Sprintf("%s = %s\n", dbName, connStr))
 
@@ -53,9 +54,8 @@ func GenerateConfig(ctx context.Context, cfg *config.Config, secrets *config.Sec
 			// Only add each user once to userlist
 			if !seenUsers[username] {
 				seenUsers[username] = true
-				// Use MD5 password format: "md5" + md5(password + username)
-				md5Pass := md5Password(username, password)
-				users.WriteString(fmt.Sprintf("%q %q\n", username, md5Pass))
+				// Store plain text password - pgbouncer needs this to authenticate to backend
+				users.WriteString(fmt.Sprintf("%q %q\n", username, password))
 			}
 		}
 	}
@@ -94,6 +94,7 @@ func (c *Config) WriteToDir(dir string) error {
 }
 
 // buildConnString creates a PgBouncer-compatible connection string from a BackendConfig.
+// PgBouncer will pass through client credentials to the backend.
 func buildConnString(backend *config.BackendConfig) string {
 	var parts []string
 
@@ -136,8 +137,8 @@ func buildINI(cfg *config.Config, listenPort int, databases string) string {
 	b.WriteString(fmt.Sprintf("listen_addr = %s\n", listenAddr))
 	b.WriteString(fmt.Sprintf("listen_port = %d\n", listenPort))
 
-	// Authentication
-	b.WriteString("auth_type = md5\n")
+	// Authentication - use plain text to allow password passthrough to backend
+	b.WriteString("auth_type = plain\n")
 	b.WriteString("auth_file = userlist.txt\n")
 
 	// Pool mode - transaction pooling like pglink

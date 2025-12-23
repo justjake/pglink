@@ -1219,3 +1219,167 @@ func TestStressQueries(t *testing.T) {
 	successRate := float64(successCount.Load()) / float64(numQueries)
 	assert.GreaterOrEqual(t, successRate, 0.99, "at least 99%% of queries should succeed")
 }
+
+// =============================================================================
+// COPY Protocol Tests (pgx CopyFrom API)
+// =============================================================================
+
+// TestCopyFrom tests pgx's CopyFrom API which uses pipelined COPY protocol
+func TestCopyFrom(t *testing.T) {
+	h := getHarness(t)
+	ctx, cancel := testTimeout(t)
+	defer cancel()
+
+	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
+	require.NoError(t, err)
+	defer conn.Close(context.Background())
+
+	// Create temp table
+	_, err = conn.Exec(ctx, "CREATE TEMP TABLE copy_test (id int, name text)")
+	require.NoError(t, err)
+
+	// Use CopyFrom to insert rows
+	rows := [][]any{
+		{1, "row1"},
+		{2, "row2"},
+		{3, "row3"},
+	}
+
+	count, err := conn.CopyFrom(ctx, pgx.Identifier{"copy_test"}, []string{"id", "name"}, pgx.CopyFromRows(rows))
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+
+	// Verify the data was inserted
+	var rowCount int
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM copy_test").Scan(&rowCount)
+	require.NoError(t, err)
+	assert.Equal(t, 3, rowCount)
+
+	// Verify specific values
+	var id int
+	var name string
+	err = conn.QueryRow(ctx, "SELECT id, name FROM copy_test WHERE id = 2").Scan(&id, &name)
+	require.NoError(t, err)
+	assert.Equal(t, 2, id)
+	assert.Equal(t, "row2", name)
+}
+
+// TestCopyFromLargeDataset tests CopyFrom with a larger dataset
+func TestCopyFromLargeDataset(t *testing.T) {
+	h := getHarness(t)
+	ctx, cancel := testTimeout(t)
+	defer cancel()
+
+	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
+	require.NoError(t, err)
+	defer conn.Close(context.Background())
+
+	// Create temp table
+	_, err = conn.Exec(ctx, "CREATE TEMP TABLE copy_large (id int, data text)")
+	require.NoError(t, err)
+
+	// Generate 1000 rows
+	const numRows = 1000
+	rows := make([][]any, numRows)
+	for i := 0; i < numRows; i++ {
+		rows[i] = []any{i, fmt.Sprintf("data-%d", i)}
+	}
+
+	count, err := conn.CopyFrom(ctx, pgx.Identifier{"copy_large"}, []string{"id", "data"}, pgx.CopyFromRows(rows))
+	require.NoError(t, err)
+	assert.Equal(t, int64(numRows), count)
+
+	// Verify count
+	var rowCount int
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM copy_large").Scan(&rowCount)
+	require.NoError(t, err)
+	assert.Equal(t, numRows, rowCount)
+
+	// Verify min/max
+	var minID, maxID int
+	err = conn.QueryRow(ctx, "SELECT MIN(id), MAX(id) FROM copy_large").Scan(&minID, &maxID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, minID)
+	assert.Equal(t, numRows-1, maxID)
+}
+
+// TestCopyFromInTransaction tests CopyFrom within a transaction
+func TestCopyFromInTransaction(t *testing.T) {
+	h := getHarness(t)
+	ctx, cancel := testTimeout(t)
+	defer cancel()
+
+	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
+	require.NoError(t, err)
+	defer conn.Close(context.Background())
+
+	// Create temp table
+	_, err = conn.Exec(ctx, "CREATE TEMP TABLE copy_tx (id int, name text)")
+	require.NoError(t, err)
+
+	// Start transaction
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+
+	// CopyFrom within transaction
+	rows := [][]any{
+		{1, "tx-row1"},
+		{2, "tx-row2"},
+	}
+	count, err := tx.CopyFrom(ctx, pgx.Identifier{"copy_tx"}, []string{"id", "name"}, pgx.CopyFromRows(rows))
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	// Verify data visible within transaction
+	var rowCount int
+	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM copy_tx").Scan(&rowCount)
+	require.NoError(t, err)
+	assert.Equal(t, 2, rowCount)
+
+	// Commit
+	err = tx.Commit(ctx)
+	require.NoError(t, err)
+
+	// Verify data persisted after commit
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM copy_tx").Scan(&rowCount)
+	require.NoError(t, err)
+	assert.Equal(t, 2, rowCount)
+}
+
+// TestCopyFromRollback tests that CopyFrom respects transaction rollback
+func TestCopyFromRollback(t *testing.T) {
+	h := getHarness(t)
+	ctx, cancel := testTimeout(t)
+	defer cancel()
+
+	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
+	require.NoError(t, err)
+	defer conn.Close(context.Background())
+
+	// Create temp table
+	_, err = conn.Exec(ctx, "CREATE TEMP TABLE copy_rollback (id int, name text)")
+	require.NoError(t, err)
+
+	// Start transaction
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+
+	// CopyFrom within transaction
+	rows := [][]any{
+		{1, "will-rollback"},
+		{2, "also-rollback"},
+	}
+	count, err := tx.CopyFrom(ctx, pgx.Identifier{"copy_rollback"}, []string{"id", "name"}, pgx.CopyFromRows(rows))
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	// Rollback
+	err = tx.Rollback(ctx)
+	require.NoError(t, err)
+
+	// Verify data was rolled back
+	var rowCount int
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM copy_rollback").Scan(&rowCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, rowCount, "rolled back data should not be visible")
+}

@@ -429,9 +429,9 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			SimpleQuery:   s.runSimpleQueryWithBackend,
 			ExtendedQuery: s.runExtendedQueryWithBackend,
 			Copy: func(msg pgwire.ClientCopy) (bool, error) {
-				if s.state.CopyMode == pgwire.CopyNone {
-					return false, pgwire.NewProtocolViolation(fmt.Errorf("copy request without active copy session"), msg)
-				}
+				// Forward copy data to backend regardless of our CopyMode state.
+				// The client may have pipelined CopyData before we received
+				// CopyInResponse from backend. Let the backend validate the protocol.
 				if err := s.backend.Send(msg.Client()); err != nil {
 					return false, err
 				}

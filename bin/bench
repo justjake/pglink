@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+log() {
+    echo -e "${GREEN}[bench]${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}[bench]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[bench]${NC} $1" >&2
+}
+
+# Check for required tools
+check_requirements() {
+    log "Checking requirements..."
+
+    # Check for docker-compose
+    if ! command -v docker-compose &> /dev/null; then
+        error "docker-compose is required but not installed"
+        exit 1
+    fi
+
+    # Check for pgbouncer - try to install if missing
+    if ! command -v pgbouncer &> /dev/null; then
+        warn "pgbouncer not found, attempting to install..."
+
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            if command -v brew &> /dev/null; then
+                log "Installing pgbouncer via Homebrew..."
+                brew install pgbouncer
+            else
+                error "Homebrew not found. Please install pgbouncer manually."
+                exit 1
+            fi
+        elif [[ "$OSTYPE" == "linux"* ]]; then
+            if command -v apt-get &> /dev/null; then
+                log "Installing pgbouncer via apt..."
+                sudo apt-get update && sudo apt-get install -y pgbouncer
+            elif command -v yum &> /dev/null; then
+                log "Installing pgbouncer via yum..."
+                sudo yum install -y pgbouncer
+            else
+                error "Please install pgbouncer manually"
+                exit 1
+            fi
+        else
+            error "Unsupported OS. Please install pgbouncer manually."
+            exit 1
+        fi
+    fi
+
+    log "pgbouncer version: $(pgbouncer --version 2>&1 | head -1)"
+
+    # Check for Go
+    if ! command -v go &> /dev/null; then
+        error "Go is required but not installed"
+        exit 1
+    fi
+}
+
+# Ensure docker-compose is running
+ensure_docker() {
+    log "Ensuring docker-compose services are running..."
+    docker-compose up -d --wait
+
+    # Verify backends are healthy
+    for port in 15432 15433 15434; do
+        if ! pg_isready -h localhost -p $port -U postgres &> /dev/null; then
+            error "PostgreSQL on port $port is not ready"
+            exit 1
+        fi
+    done
+
+    log "All PostgreSQL backends are healthy"
+}
+
+# Build the benchmark tool
+build_bench() {
+    log "Building benchmark tool..."
+
+    # Use mise if available
+    if command -v mise &> /dev/null; then
+        eval "$(mise activate bash --shims)"
+    fi
+
+    go build -o out/bench ./cmd/bench
+    log "Built out/bench"
+}
+
+# Build pglink
+build_pglink() {
+    log "Building pglink..."
+    ./bin/build
+    log "Built out/pglink"
+}
+
+# Run benchmarks
+run_benchmarks() {
+    log "Running benchmarks..."
+
+    # Create output directory with timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    output_dir="out/benchmark/${timestamp}"
+    mkdir -p "$output_dir"
+
+    # Default benchmark parameters
+    duration="${BENCH_DURATION:-10s}"
+    warmup="${BENCH_WARMUP:-2s}"
+    max_conns="${BENCH_MAX_CONNS:-100,500,1000}"
+    concurrency="${BENCH_CONCURRENCY:-100,200,500,600,1000,1500}"
+    gomaxprocs="${BENCH_GOMAXPROCS:-1,2,4,8,16}"
+
+    log "Benchmark parameters:"
+    log "  Duration: $duration"
+    log "  Warmup: $warmup"
+    log "  Max connections: $max_conns"
+    log "  Concurrency: $concurrency"
+    log "  GOMAXPROCS: $gomaxprocs"
+    log "  Output: $output_dir"
+
+    # Run the benchmark
+    ./out/bench \
+        -duration "$duration" \
+        -warmup "$warmup" \
+        -max-conns "$max_conns" \
+        -concurrency "$concurrency" \
+        -gomaxprocs "$gomaxprocs" \
+        -output "$output_dir" \
+        2>&1 | tee "$output_dir/bench.log"
+
+    # Copy results to latest
+    ln -sfn "$timestamp" out/benchmark/latest
+
+    log "Results written to $output_dir"
+    log "Latest results linked at out/benchmark/latest"
+}
+
+# Quick smoke test mode
+smoke_test() {
+    log "Running smoke test (quick benchmark)..."
+
+    output_dir="out/benchmark/smoke"
+    mkdir -p "$output_dir"
+
+    ./out/bench \
+        -duration 2s \
+        -warmup 1s \
+        -max-conns 100 \
+        -concurrency 50,100 \
+        -gomaxprocs 4 \
+        -output "$output_dir" \
+        2>&1 | tee "$output_dir/bench.log"
+
+    log "Smoke test complete. Results in $output_dir"
+}
+
+# Main
+main() {
+    local mode="${1:-full}"
+
+    log "pglink Benchmark Suite"
+    log "======================"
+
+    check_requirements
+    ensure_docker
+    build_pglink
+    build_bench
+
+    case "$mode" in
+        full)
+            run_benchmarks
+            ;;
+        smoke)
+            smoke_test
+            ;;
+        quick)
+            # Quick test with reduced parameters
+            BENCH_DURATION=5s \
+            BENCH_WARMUP=1s \
+            BENCH_MAX_CONNS=100,500 \
+            BENCH_CONCURRENCY=100,500 \
+            BENCH_GOMAXPROCS=4,8 \
+            run_benchmarks
+            ;;
+        *)
+            error "Unknown mode: $mode"
+            echo "Usage: $0 [full|smoke|quick]"
+            exit 1
+            ;;
+    esac
+
+    log "Benchmark complete!"
+    log "Results: out/benchmark/latest"
+    log "Report: BENCHMARKS.md"
+}
+
+main "$@"

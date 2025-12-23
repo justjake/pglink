@@ -49,25 +49,18 @@ func TestGenerateConfig(t *testing.T) {
 	// Check INI content
 	t.Logf("INI:\n%s", result.INI)
 	assert.Contains(t, result.INI, "[databases]")
+	// Database connection string should NOT include user credentials - pgbouncer passes through client creds
 	assert.Contains(t, result.INI, "test_db = host=localhost port=15432 dbname=mydb")
 	assert.Contains(t, result.INI, "[pgbouncer]")
 	assert.Contains(t, result.INI, "listen_port = 16433")
 	assert.Contains(t, result.INI, "pool_mode = transaction")
-	assert.Contains(t, result.INI, "auth_type = md5")
+	assert.Contains(t, result.INI, "auth_type = plain")
 	assert.Contains(t, result.INI, "default_pool_size = 10")
 
-	// Check userlist content
+	// Check userlist content - plain text passwords for backend authentication
 	t.Logf("Userlist:\n%s", result.Userlist)
-	assert.Contains(t, result.Userlist, `"testuser"`)
-	assert.Contains(t, result.Userlist, `"admin"`)
-	// MD5 passwords should start with "md5"
-	lines := strings.Split(result.Userlist, "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		assert.Contains(t, line, `"md5`)
-	}
+	assert.Contains(t, result.Userlist, `"testuser" "testpass"`)
+	assert.Contains(t, result.Userlist, `"admin" "adminpass"`)
 }
 
 func TestMd5Password(t *testing.T) {
@@ -127,16 +120,16 @@ func TestGenerateConfig_MultipleDatabases(t *testing.T) {
 	result, err := GenerateConfig(ctx, cfg, secrets, 16433)
 	require.NoError(t, err)
 
-	// Both databases should be in config
+	// Both databases should be in config (without user credentials - pgbouncer passes through client creds)
 	assert.Contains(t, result.INI, "db1 = host=host1 port=15432 dbname=backend1")
 	assert.Contains(t, result.INI, "db2 = host=host2 port=15433 dbname=backend2")
 
 	// Pool size should be max of all databases
 	assert.Contains(t, result.INI, "default_pool_size = 15")
 
-	// Both users should be in userlist
-	assert.Contains(t, result.Userlist, `"user1"`)
-	assert.Contains(t, result.Userlist, `"user2"`)
+	// Both users should be in userlist with plain text passwords
+	assert.Contains(t, result.Userlist, `"user1" "pass1"`)
+	assert.Contains(t, result.Userlist, `"user2" "pass2"`)
 }
 
 func TestGenerateConfig_DeduplicatesUsers(t *testing.T) {

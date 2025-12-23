@@ -91,7 +91,7 @@ func (s *Service) Listen() error {
 	}
 
 	// Set up listener
-	addr := s.config.Listen
+	addr := s.config.GetListenAddr()
 	ln, err := net.Listen("tcp", addr.String())
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
