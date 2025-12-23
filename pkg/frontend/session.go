@@ -22,6 +22,11 @@ import (
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
+// errCancelRequest is a sentinel error returned from handleStartup when the
+// connection was a cancel request. This is not a real error - the cancel was
+// handled successfully and the connection should be closed.
+var errCancelRequest = errors.New("cancel request handled")
+
 // Session represents a client's session with the Service.
 type Session struct {
 	ctx    context.Context
@@ -61,6 +66,13 @@ type Session struct {
 	backendCtx           context.Context
 	cancelBackendCtx     context.CancelFunc
 	backendAcquisitionID uint64 // Incremented each time we acquire a backend
+
+	// Backend key data for query cancellation.
+	// These are captured from the backend's BackendKeyData message when we
+	// first acquire a backend connection. We use them to forward cancel
+	// requests to the correct backend.
+	backendPID       uint32
+	backendSecretKey uint32
 
 	// Map from client statement name to server statement name.
 	// Used to ensure consistent naming within a backend acquisition.
@@ -130,6 +142,12 @@ func (s *Session) freeLastRecvAndContinueSender() {
 
 // Close cancels the session's context and releases associated resources.
 func (s *Session) Close() {
+	// Unregister from cancel registry if we were registered.
+	// Check if we have a PID (meaning initSessionProcessState was called).
+	if s.state.PID != 0 {
+		s.service.unregisterForCancel(s)
+	}
+
 	if flushError := s.flush(); flushError != nil {
 		s.logger.Error("session close: error flushing to client", "error", flushError)
 	}
@@ -164,6 +182,11 @@ func (s *Session) Run() {
 
 	// Handle TLS and startup
 	if err := s.handleStartup(); err != nil {
+		// Cancel requests are one-shot connections that don't establish a session.
+		// They return errCancelRequest which is not a real error.
+		if errors.Is(err, errCancelRequest) {
+			return
+		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 			s.logger.Error("startup failed", "error", err)
 		}
@@ -300,6 +323,12 @@ func (s *Session) acquireBackend() (*slog.Logger, error) {
 	}
 	s.backend = be
 	s.backendAcquisitionID++ // Increment to ensure unique statement names per acquisition
+
+	// Capture the backend's key data for query cancellation.
+	// These credentials are used to forward cancel requests to the backend.
+	pgConn := s.backend.PgConn()
+	s.backendPID = pgConn.PID()
+	s.backendSecretKey = pgConn.SecretKey()
 	s.backendReadingChan = make(chan backend.ReadResult[pgwire.ServerMessage])
 	s.backendCtx, s.cancelBackendCtx = context.WithCancel(s.ctx)
 	logger := s.logger.With("backend", s.backend.Name())
@@ -379,10 +408,61 @@ func (s *Session) releaseBackend() {
 	close(s.backendReadingChan)
 	s.backendReadingChan = nil
 
-	// Clear statement name map so new acquisition gets fresh names.
-	// The backend we just released may be used by another session,
-	// and we don't want statement name collisions.
-	s.statementNameMap = nil
+	// NOTE: We intentionally do NOT clear statementNameMap here.
+	// In transaction pooling mode with QueryExecModeDescribeExec, the client
+	// does Parse+Describe+Sync in one round trip, then Bind+Execute+Sync in
+	// another. The prepared statement exists on the backend between these
+	// round trips, and we need to use the same name in both.
+	// Name collisions with other sessions are avoided by using unique names
+	// (PID + global counter).
+}
+
+// cancelBackendQuery sends a cancel request to the backend to cancel
+// the currently running query. This is called when the proxy receives
+// a cancel request from the client.
+//
+// The cancel request is sent on a new TCP connection to the backend,
+// as per the PostgreSQL protocol. The connection is closed immediately
+// after sending the request.
+func (s *Session) cancelBackendQuery() error {
+	// Check if we have backend credentials
+	if s.backendPID == 0 {
+		return fmt.Errorf("no backend connection to cancel")
+	}
+
+	// Build the backend address
+	port := uint16(5432)
+	if s.dbConfig.Backend.Port != nil {
+		port = *s.dbConfig.Backend.Port
+	}
+	addr := fmt.Sprintf("%s:%d", s.dbConfig.Backend.Host, port)
+
+	// Connect to the backend
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to backend for cancel: %w", err)
+	}
+	defer conn.Close()
+
+	// Build and send the CancelRequest message
+	cancelReq := &pgproto3.CancelRequest{
+		ProcessID: s.backendPID,
+		SecretKey: s.backendSecretKey,
+	}
+	buf, err := cancelReq.Encode(nil)
+	if err != nil {
+		return fmt.Errorf("failed to encode cancel request: %w", err)
+	}
+
+	if _, err := conn.Write(buf); err != nil {
+		return fmt.Errorf("failed to send cancel request: %w", err)
+	}
+
+	s.logger.Debug("sent cancel request to backend",
+		"backendPID", s.backendPID,
+		"addr", addr)
+
+	return nil
 }
 
 func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
@@ -585,7 +665,15 @@ func (s *Session) clientToServerObjectName(objectType byte, name string) string 
 var globalStatementCounter atomic.Uint64
 
 func (s *Session) clientToServerPreparedStatementName(name string) string {
-	// Check if we already have a mapping for this client name
+	// The unnamed prepared statement ("") is special in PostgreSQL - it's
+	// automatically deallocated when a new Parse is done. Pass it through
+	// unchanged to let the backend handle it naturally.
+	if name == "" {
+		return ""
+	}
+
+	// For named statements, use unique names to avoid collisions when
+	// backend connections are shared across sessions.
 	if s.statementNameMap == nil {
 		s.statementNameMap = make(map[string]string)
 	}
@@ -601,8 +689,15 @@ func (s *Session) clientToServerPreparedStatementName(name string) string {
 }
 
 func (s *Session) clientToServerPortalName(name string) string {
-	// Portals are per-transaction and don't need global uniqueness like statements.
-	// Just use the PID and acquisition ID as prefix.
+	// The unnamed portal ("") is special in PostgreSQL - it's automatically
+	// destroyed when a new Bind is done. Pass it through unchanged.
+	if name == "" {
+		return ""
+	}
+
+	// For named portals, use unique names to avoid collisions when
+	// backend connections are shared across sessions.
+	// Portals are per-transaction so we use the acquisition ID.
 	return fmt.Sprintf("pgwire_%d_%d_%s", s.state.PID, s.backendAcquisitionID, name)
 }
 
@@ -637,6 +732,18 @@ func (s *Session) handleStartup() error {
 		if err != nil {
 			return fmt.Errorf("failed to read startup message after GSS decline: %w", err)
 		}
+	}
+
+	// Handle cancel request - these are one-shot connections that don't
+	// establish a session. The client sends a CancelRequest with the PID
+	// and secret key of the session to cancel, and then closes the connection.
+	if cancelReq, ok := startupMsg.(*pgproto3.CancelRequest); ok {
+		// Forward the cancel request to the target session via the service
+		if err := s.service.handleCancelRequest(cancelReq); err != nil {
+			s.logger.Error("failed to handle cancel request", "error", err)
+		}
+		// Cancel connections don't send a response - just close
+		return errCancelRequest
 	}
 
 	// Reject non-SSL connections if SSL is required
@@ -782,6 +889,9 @@ func (s *Session) initSessionProcessState() {
 		PendingCreate: make(map[string]bool),
 		PendingClose:  make(map[string]bool),
 	}
+
+	// Register for cancel requests so this session can be found by PID.
+	s.service.registerForCancel(s)
 }
 
 func (s *Session) sendReadyForQuery() {

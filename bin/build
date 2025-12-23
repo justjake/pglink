@@ -5,4 +5,5 @@ cd "$(dirname "$0")/.."
 eval "$(mise activate bash --shims)"
 
 mkdir -p out
+cp README.md cmd/pglink
 exec go build -v -o out/pglink "$@" ./cmd/pglink

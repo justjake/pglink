@@ -33,6 +33,8 @@ const (
 )
 
 // JsonTLSConfig configures TLS for incoming client connections.
+//
+// @docname TLSConfig
 type JsonTLSConfig struct {
 	// SSLMode controls whether TLS is required, preferred, or disabled.
 	// See the SSLMode type for valid values.

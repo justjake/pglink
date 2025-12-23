@@ -13,18 +13,18 @@ import (
 )
 
 // SecretRef identifies a secret value from one of several sources.
-// Exactly one of AwsSecretArn, InsecureValue, or EnvVar must be set.
+// Exactly one of `aws_secret_arn`, `insecure_value`, or `env_var` must be set.
 type SecretRef struct {
 	// AwsSecretArn is the ARN of an AWS Secrets Manager secret.
-	// When using this, Key must also be set to specify which field to extract.
+	// When using this, `key` must also be set to specify which JSON key to extract.
 	AwsSecretArn string `json:"aws_secret_arn,omitempty"`
 
 	// Key is the JSON key to extract from an AWS Secrets Manager secret.
-	// Required when using AwsSecretArn.
+	// Required when using `aws_secret_arn`.
 	Key string `json:"key,omitempty"`
 
 	// InsecureValue is a plaintext secret value embedded directly in the config.
-	// Only use this for development; prefer EnvVar or AwsSecretArn for production.
+	// Only use this for development; prefer `env_var` or `aws_secret_arn` for production.
 	InsecureValue string `json:"insecure_value,omitempty"`
 
 	// EnvVar is the name of an environment variable containing the secret value.

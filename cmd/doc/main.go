@@ -58,6 +58,14 @@ type ConfigDocs struct {
 	Enums []EnumDoc
 }
 
+// FieldNameMap maps Go field names to their JSON names and containing type.
+type FieldNameMap map[string]FieldNameInfo
+
+type FieldNameInfo struct {
+	JSONName string
+	TypeName string // The type containing this field
+}
+
 // TemplateData holds all data passed to the README template.
 type TemplateData struct {
 	Banner     string
@@ -235,6 +243,15 @@ func parseConfigPackage(pkgPath string) (ConfigDocs, error) {
 	// Start with Config, then follow nested type references
 	docs.Types = sortTypesDepthFirst(docs.Types)
 
+	// Build field name map and fix references in descriptions
+	fieldMap := buildFieldNameMap(docs.Types)
+	for i := range docs.Types {
+		docs.Types[i].Description = replaceFieldReferences(docs.Types[i].Description, fieldMap)
+		for j := range docs.Types[i].Fields {
+			docs.Types[i].Fields[j].Description = replaceFieldReferences(docs.Types[i].Fields[j].Description, fieldMap)
+		}
+	}
+
 	// Sort enums by importance
 	enumOrder := map[string]int{
 		"AuthMethod": 0,
@@ -253,6 +270,71 @@ func parseConfigPackage(pkgPath string) (ConfigDocs, error) {
 	})
 
 	return docs, nil
+}
+
+// buildFieldNameMap creates a mapping from Go field names to JSON field names.
+func buildFieldNameMap(types []TypeDoc) FieldNameMap {
+	m := make(FieldNameMap)
+	for _, t := range types {
+		for _, f := range t.Fields {
+			if f.GoName != "" && f.Name != "" {
+				m[f.GoName] = FieldNameInfo{
+					JSONName: f.Name,
+					TypeName: t.Name,
+				}
+			}
+		}
+	}
+	return m
+}
+
+// replaceFieldReferences replaces Go field names with JSON field names in descriptions.
+// It also wraps them in backticks for code formatting.
+// Only replaces PascalCase compound names to avoid false positives with common words.
+func replaceFieldReferences(desc string, fieldMap FieldNameMap) string {
+	if desc == "" {
+		return desc
+	}
+
+	// Sort field names by length (longest first) to avoid partial replacements
+	var goNames []string
+	for name := range fieldMap {
+		// Only include names that are clearly PascalCase compound words
+		// (have a lowercase letter followed by uppercase, or are all caps with length > 3)
+		// This avoids replacing common words like "TLS", "Host", "Port", "Key"
+		if isPascalCaseCompound(name) {
+			goNames = append(goNames, name)
+		}
+	}
+	sort.Slice(goNames, func(i, j int) bool {
+		return len(goNames[i]) > len(goNames[j])
+	})
+
+	// Replace each Go field name with its JSON equivalent
+	for _, goName := range goNames {
+		info := fieldMap[goName]
+		// Match the Go name as a whole word (not part of another word)
+		pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(goName) + `\b`)
+		replacement := "`" + info.JSONName + "`"
+		desc = pattern.ReplaceAllString(desc, replacement)
+	}
+
+	return desc
+}
+
+// isPascalCaseCompound returns true if the name is a PascalCase compound word
+// (has transitions from lowercase to uppercase like "AwsSecretArn" or "CertPath")
+func isPascalCaseCompound(name string) bool {
+	if len(name) < 2 {
+		return false
+	}
+	// Look for lowercase followed by uppercase (indicates compound word)
+	for i := 0; i < len(name)-1; i++ {
+		if name[i] >= 'a' && name[i] <= 'z' && name[i+1] >= 'A' && name[i+1] <= 'Z' {
+			return true
+		}
+	}
+	return false
 }
 
 // sortTypesDepthFirst sorts types in depth-first pre-order based on field references.
@@ -466,6 +548,11 @@ func extractFieldDoc(field *ast.Field) *FieldDoc {
 	// Extract default value from doc if present
 	defaultVal := extractDefault(docComment)
 
+	// Remove the "Defaults to X" from description since we show it separately
+	if defaultVal != "" {
+		docComment = removeDefaultFromDescription(docComment)
+	}
+
 	// Determine JSON type for display
 	jsonType := goTypeToJSONType(goType)
 
@@ -587,9 +674,23 @@ func extractDefault(doc string) string {
 	re := regexp.MustCompile(`[Dd]efaults?\s+to\s+(\S+|\d+|"[^"]*")`)
 	matches := re.FindStringSubmatch(doc)
 	if len(matches) > 1 {
-		return matches[1]
+		// Remove trailing punctuation
+		return strings.TrimRight(matches[1], ".,;:")
 	}
 	return ""
+}
+
+// removeDefaultFromDescription removes "Defaults to X" sentences from a description
+// since the default is shown separately in the table.
+func removeDefaultFromDescription(desc string) string {
+	// Remove sentences containing "Defaults to" or "defaults to"
+	// Handle both mid-sentence and end-of-sentence cases
+	re := regexp.MustCompile(`\s*[Dd]efaults?\s+to\s+[^.]+\.?`)
+	desc = re.ReplaceAllString(desc, "")
+	// Clean up any double spaces or trailing spaces
+	desc = strings.TrimSpace(desc)
+	desc = regexp.MustCompile(`\s+`).ReplaceAllString(desc, " ")
+	return desc
 }
 
 func extractEnumDoc(t *doc.Type) *EnumDoc {

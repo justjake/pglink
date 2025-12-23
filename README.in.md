@@ -4,8 +4,7 @@
 {{.Banner}}
 ```
 
-A high-performance PostgreSQL wire protocol proxy with connection pooling,
-authentication, and TLS support.
+PostgreSQL wire protocol proxy with transaction-based connection pooling. Supports SCRAM-SHA-256 authentication with TLS.
 
 ## Installation
 
@@ -72,7 +71,7 @@ pglink is configured via a JSON file (`pglink.json`).
 ```
 
 {{range .Config.Types}}
-### {{.Name}}
+### {{.DisplayName}}
 
 {{.Description}}
 

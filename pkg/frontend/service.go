@@ -39,6 +39,12 @@ type Service struct {
 	sessions   map[*Session]struct{}
 	sessionsWg sync.WaitGroup
 	nextPID    atomic.Uint32
+
+	// Cancel registry: maps proxy PID to session for query cancellation.
+	// When a cancel request arrives, we look up the session by PID,
+	// validate the secret key, and forward the cancel to the backend.
+	cancelRegistry   map[uint32]*Session
+	cancelRegistryMu sync.RWMutex
 }
 
 // NewService creates a new frontend Service with the given configuration.
@@ -56,15 +62,16 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 	innerCtx, cancel := context.WithCancel(ctx)
 
 	return &Service{
-		ctx:       innerCtx,
-		cancel:    cancel,
-		logger:    logger,
-		config:    cfg,
-		secrets:   secrets,
-		tlsConfig: tlsResult.Config,
-		listeners: make([]net.Listener, 0, len(cfg.Listen)),
-		databases: make(map[*config.DatabaseConfig]*backend.Database),
-		sessions:  make(map[*Session]struct{}),
+		ctx:            innerCtx,
+		cancel:         cancel,
+		logger:         logger,
+		config:         cfg,
+		secrets:        secrets,
+		tlsConfig:      tlsResult.Config,
+		listeners:      make([]net.Listener, 0, len(cfg.Listen)),
+		databases:      make(map[*config.DatabaseConfig]*backend.Database),
+		sessions:       make(map[*Session]struct{}),
+		cancelRegistry: make(map[uint32]*Session),
 	}, nil
 }
 
@@ -260,4 +267,56 @@ func (s *Service) Shutdown() {
 // ActiveConnections returns the current number of active client connections.
 func (s *Service) ActiveConnections() int32 {
 	return s.activeConns.Load()
+}
+
+// registerForCancel adds a session to the cancel registry so it can receive
+// cancel requests. Called after the session has been assigned a PID.
+func (s *Service) registerForCancel(sess *Session) {
+	s.cancelRegistryMu.Lock()
+	defer s.cancelRegistryMu.Unlock()
+	s.cancelRegistry[sess.state.PID] = sess
+}
+
+// unregisterForCancel removes a session from the cancel registry.
+// Called when the session is closing.
+func (s *Service) unregisterForCancel(sess *Session) {
+	s.cancelRegistryMu.Lock()
+	defer s.cancelRegistryMu.Unlock()
+	delete(s.cancelRegistry, sess.state.PID)
+}
+
+// handleCancelRequest processes a cancel request from a client.
+// It looks up the target session by PID, validates the secret key,
+// and forwards the cancel to the backend if valid.
+// Returns nil if the cancel was processed (whether or not it succeeded),
+// or an error if the cancel request itself was malformed.
+func (s *Service) handleCancelRequest(req *pgproto3.CancelRequest) error {
+	s.cancelRegistryMu.RLock()
+	sess := s.cancelRegistry[req.ProcessID]
+	s.cancelRegistryMu.RUnlock()
+
+	if sess == nil {
+		// No session found with this PID - silently ignore.
+		// This is expected if the session has already ended.
+		s.logger.Debug("cancel request for unknown PID", "pid", req.ProcessID)
+		return nil
+	}
+
+	// Validate the secret key
+	if sess.state.SecretCancelKey != req.SecretKey {
+		// Invalid secret key - silently ignore for security.
+		// Don't reveal whether the PID exists or not.
+		s.logger.Debug("cancel request with invalid secret", "pid", req.ProcessID)
+		return nil
+	}
+
+	// Forward the cancel to the backend
+	if err := sess.cancelBackendQuery(); err != nil {
+		s.logger.Debug("failed to cancel backend query", "pid", req.ProcessID, "error", err)
+		// Still return nil - we processed the request, it just failed
+	} else {
+		s.logger.Info("cancelled query", "pid", req.ProcessID)
+	}
+
+	return nil
 }

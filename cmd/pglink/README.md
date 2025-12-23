@@ -9,8 +9,7 @@
 /_/     /____/                      
 ```
 
-A high-performance PostgreSQL wire protocol proxy with connection pooling,
-authentication, and TLS support.
+PostgreSQL wire protocol proxy with transaction-based connection pooling. Supports SCRAM-SHA-256 authentication with TLS.
 
 ## Installation
 
@@ -84,12 +83,24 @@ The pglink configuration.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `listen` | array | Yes | The list of network addresses to listen on. Examples: "5432", ":5432", "127.0.0.1:5432", "0.0.0.0:5432" |
-| `tls` | JsonTLSConfig | No | TLS for incoming client connections. If not specified, a self-signed certificate is generated in memory. |
-| `databases` | object | Yes | Database names to their configurations. Clients connect by specifying a database name; the proxy routes the connection to the corresponding backend. |
-| `auth_method` | string | No | The authentication method for client connections. Valid values: "plaintext", "md5_password", "scram-sha-256" Defaults to "scram-sha-256" if not specified. Default: `"scram-sha-256"` |
-| `scram_iterations` | integer | No | The number of iterations for SCRAM-SHA-256 authentication. Higher values provide better protection against brute-force attacks but make authentication slower. Defaults to 4096 (PostgreSQL default). Default: `4096` |
-| `max_client_connections` | integer | No | The maximum number of concurrent client connections the proxy will accept. New connections beyond this limit are immediately rejected with an error. Defaults to 1000. Default: `1000.` |
+| `listen` | []string | Yes | The list of network addresses to listen on. Examples: "5432", ":5432", "127.0.0.1:5432", "0.0.0.0:5432" |
+| `tls` | [TLSConfig](#tlsconfig) | No | TLS for incoming client connections. If not specified, a self-signed certificate is generated in memory. |
+| `databases` | map[string][DatabaseConfig](#databaseconfig) | Yes | Database names to their configurations. Clients connect by specifying a database name; the proxy routes the connection to the corresponding backend. |
+| `auth_method` | string | No | The authentication method for client connections. Valid values: "plaintext", "md5_password", "scram-sha-256" Default: `"scram-sha-256"` |
+| `scram_iterations` | integer | No | The number of iterations for SCRAM-SHA-256 authentication. Higher values provide better protection against brute-force attacks but make authentication slower. Default: `4096` |
+| `max_client_connections` | integer | No | The maximum number of concurrent client connections the proxy will accept. New connections beyond this limit are immediately rejected with an error. Default: `1000` |
+
+
+### TLSConfig
+
+JsonTLSConfig configures TLS for incoming client connections.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `sslmode` | string | No | Whether TLS is required, preferred, or disabled. See the SSLMode type for valid values. |
+| `cert_path` | string | No | The path to the TLS certificate file in PEM format. |
+| `cert_private_key_path` | string | No | The path to the TLS private key file in PEM format. |
+| `generate_cert` | boolean | No | Automatic generation of a self-signed certificate. If `cert_path` and `cert_private_key_path` are also set, the certificate is written to those paths (unless they already exist). |
 
 
 ### DatabaseConfig
@@ -98,9 +109,9 @@ A single database that clients can connect to.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `users` | array | Yes | The list of user credentials that can connect to this database. Each user can authenticate with their own username and password. |
-| `backend` | BackendConfig | Yes | The PostgreSQL server to proxy connections to. |
-| `track_extra_parameters` | array | No | A list of additional PostgreSQL startup parameters to track and forward to the backend. By default, only standard parameters like client_encoding and application_name are tracked. |
+| `users` | [][UserConfig](#userconfig) | Yes | The list of user credentials that can connect to this database. Each user can authenticate with their own username and password. |
+| `backend` | [BackendConfig](#backendconfig) | Yes | The PostgreSQL server to proxy connections to. |
+| `track_extra_parameters` | []string | No | A list of additional PostgreSQL startup parameters to track and forward to the backend. By default, only standard parameters like client_encoding and application_name are tracked. |
 
 
 ### UserConfig
@@ -109,8 +120,21 @@ Authentication credentials for a user.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `username` | SecretRef | Yes | The username for this user, loaded from a secret source. |
-| `password` | SecretRef | Yes | The password for this user, loaded from a secret source. |
+| `username` | [SecretRef](#secretref) | Yes | The username for this user, loaded from a secret source. |
+| `password` | [SecretRef](#secretref) | Yes | The password for this user, loaded from a secret source. |
+
+
+### SecretRef
+
+A secret value from one of several sources.
+Exactly one of `aws_secret_arn`, `insecure_value`, or `env_var` must be set.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `aws_secret_arn` | string | No | The ARN of an AWS Secrets Manager secret. When using this, `key` must also be set to specify which JSON key to extract. |
+| `key` | string | No | The JSON key to extract from an AWS Secrets Manager secret. Required when using `aws_secret_arn`. |
+| `insecure_value` | string | No | A plaintext secret value embedded directly in the config. Only use this for development; prefer `env_var` or `aws_secret_arn` for production. |
+| `env_var` | string | No | The name of an environment variable containing the secret value. |
 
 
 ### BackendConfig
@@ -120,7 +144,7 @@ The backend PostgreSQL server to proxy to.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `host` | string | Yes | The hostname or IP address of the backend PostgreSQL server. |
-| `port` | integer | No | The port number of the backend PostgreSQL server. Defaults to 5432. Default: `5432.` |
+| `port` | integer | No | The port number of the backend PostgreSQL server. Default: `5432` |
 | `database` | string | Yes | The name of the database on the backend server. |
 | `connect_timeout` | string | No | The connection timeout in seconds (e.g., "5"). |
 | `sslmode` | string | No | SSL/TLS for backend connections. Values: disable, allow, prefer, require, verify-ca, verify-full |
@@ -128,40 +152,15 @@ The backend PostgreSQL server to proxy to.
 | `sslcert` | string | No | The path to the client certificate file for SSL authentication. |
 | `sslrootcert` | string | No | The path to the root CA certificate file for SSL verification. |
 | `sslpassword` | string | No | The password for the encrypted client private key. |
-| `statement_cache_capacity` | integer | No | The prepared statement cache size. Set to 0 to disable caching. Defaults to 512. Default: `512.` |
-| `description_cache_capacity` | integer | No | The statement description cache size. Set to 0 to disable caching. Defaults to 512. Default: `512.` |
+| `statement_cache_capacity` | integer | No | The prepared statement cache size. Set to 0 to disable caching. Default: `512` |
+| `description_cache_capacity` | integer | No | The statement description cache size. Set to 0 to disable caching. Default: `512` |
 | `pool_max_conns` | integer | Yes | The maximum number of connections in the pool. This is required and must be greater than 0. |
-| `pool_min_idle_conns` | integer | No | The minimum number of idle connections to maintain. The total across all users must not exceed PoolMaxConns. |
+| `pool_min_idle_conns` | integer | No | The minimum number of idle connections to maintain. The total across all users must not exceed `pool_max_conns`. |
 | `pool_max_conn_lifetime` | string | No | The maximum lifetime of a connection (e.g., "1h"). Connections older than this are closed and replaced. |
 | `pool_max_conn_lifetime_jitter` | string | No | Randomness to connection lifetimes (e.g., "5m"). Prevents all connections from expiring simultaneously. |
 | `pool_max_conn_idle_time` | string | No | The maximum time a connection can be idle (e.g., "30m"). Idle connections older than this are closed. |
 | `pool_health_check_period` | string | No | The interval between health checks (e.g., "1m"). Unhealthy connections are closed and replaced. |
-| `default_startup_parameters` | object | No | PostgreSQL parameters sent when connecting. These override client-provided parameters for keys present here. |
-
-
-### JsonTLSConfig
-
-TLS for incoming client connections.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `sslmode` | string | No | Whether TLS is required, preferred, or disabled. See the SSLMode type for valid values. |
-| `cert_path` | string | No | The path to the TLS certificate file in PEM format. |
-| `cert_private_key_path` | string | No | The path to the TLS private key file in PEM format. |
-| `generate_cert` | boolean | No | Automatic generation of a self-signed certificate. If CertPath and CertPrivateKeyPath are also set, the certificate is written to those paths (unless they already exist). |
-
-
-### SecretRef
-
-A secret value from one of several sources.
-Exactly one of AwsSecretArn, InsecureValue, or EnvVar must be set.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `aws_secret_arn` | string | No | The ARN of an AWS Secrets Manager secret. When using this, Key must also be set to specify which field to extract. |
-| `key` | string | No | The JSON key to extract from an AWS Secrets Manager secret. Required when using AwsSecretArn. |
-| `insecure_value` | string | No | A plaintext secret value embedded directly in the config. Only use this for development; prefer EnvVar or AwsSecretArn for production. |
-| `env_var` | string | No | The name of an environment variable containing the secret value. |
+| `default_startup_parameters` | map[string]string | No | PostgreSQL parameters sent when connecting. These override client-provided parameters for keys present here. |
 
 
 
