@@ -260,11 +260,7 @@ func (p *MultiPool[K]) backgroundHealthCheck() {
 }
 
 func (p *MultiPool[K]) checkHealth() {
-	for {
-		if !p.checkMaxConns() {
-			// Since we didn't destroy any connections we can stop looping
-			break
-		}
+	for p.checkMaxConns() {
 		// Technically Destroy is asynchronous but 500ms should be enough for it to
 		// remove it from the underlying pool
 		select {
@@ -338,10 +334,4 @@ type poolStuff[K comparable] struct {
 	key    K
 	pool   *pgxpool.Pool
 	config *pgxpool.Config
-	stat   *pgxpool.Stat
-}
-
-func (s *poolStuff[K]) statRefresh() *pgxpool.Stat {
-	s.stat = s.pool.Stat()
-	return s.stat
 }

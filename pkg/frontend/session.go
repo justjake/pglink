@@ -11,6 +11,7 @@ import (
 	"maps"
 	"math/rand/v2"
 	"net"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -378,14 +379,14 @@ func (s *Session) cancelBackendQuery() error {
 	if s.dbConfig.Backend.Port != nil {
 		port = *s.dbConfig.Backend.Port
 	}
-	addr := fmt.Sprintf("%s:%d", s.dbConfig.Backend.Host, port)
+	addr := net.JoinHostPort(s.dbConfig.Backend.Host, strconv.Itoa(int(port)))
 
 	// Connect to the backend
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to connect to backend for cancel: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Build and send the CancelRequest message
 	cancelReq := &pgproto3.CancelRequest{
