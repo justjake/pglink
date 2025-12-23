@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/config/pgbouncer"
 	"github.com/justjake/pglink/pkg/frontend"
 	"github.com/lucasb-eyer/go-colorful"
 	"golang.org/x/term"
@@ -144,6 +145,8 @@ func main() {
 	configPath := flag.String("config", "", "path to pglink.json config file")
 	jsonLogs := flag.Bool("json", false, "output logs in JSON format")
 	showHelp := flag.Bool("help", false, "show full documentation")
+	writePgbouncerDir := flag.String("write-pgbouncer-config-dir", "", "write equivalent pgbouncer config to this directory and exit")
+	pgbouncerPort := flag.Int("pgbouncer-port", 6432, "port for pgbouncer to listen on (used with -write-pgbouncer-config-dir)")
 	flag.Usage = printUsage
 	flag.Parse()
 
@@ -191,6 +194,25 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("config validated", "path", cfg.FilePath())
+
+	// Handle -write-pgbouncer-config-dir flag
+	if *writePgbouncerDir != "" {
+		pgbCfg, err := pgbouncer.GenerateConfig(ctx, cfg, secrets, *pgbouncerPort)
+		if err != nil {
+			logger.Error("failed to generate pgbouncer config", "error", err)
+			os.Exit(1)
+		}
+
+		if err := pgbCfg.WriteToDir(*writePgbouncerDir); err != nil {
+			logger.Error("failed to write pgbouncer config", "error", err)
+			os.Exit(1)
+		}
+
+		logger.Info("wrote pgbouncer config",
+			"dir", *writePgbouncerDir,
+			"port", *pgbouncerPort)
+		os.Exit(0)
+	}
 
 	svc, err := frontend.NewService(ctx, cfg, fsys, secrets, logger)
 	if err != nil {

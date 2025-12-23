@@ -314,6 +314,23 @@ func TestTransactionIsolation(t *testing.T) {
 	ctx, cancel := testTimeout(t)
 	defer cancel()
 
+	db := h.GetTestDatabase("alpha_uno")
+
+	// Create a test table directly on the backend (as postgres superuser)
+	err := h.ExecDirect(ctx, db, `
+		DROP TABLE IF EXISTS schema1.isolation_test;
+		CREATE TABLE schema1.isolation_test (id INT PRIMARY KEY, value TEXT);
+		GRANT SELECT, INSERT, UPDATE, DELETE ON schema1.isolation_test TO app;
+	`)
+	require.NoError(t, err)
+
+	// Cleanup at end of test
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		h.ExecDirect(cleanupCtx, db, "DROP TABLE IF EXISTS schema1.isolation_test")
+	}()
+
 	conn1, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
 	defer conn1.Close(context.Background())
@@ -322,68 +339,40 @@ func TestTransactionIsolation(t *testing.T) {
 	require.NoError(t, err)
 	defer conn2.Close(context.Background())
 
-	// Create a test table in a transaction on conn1
-	_, err = conn1.Exec(ctx, "CREATE TEMP TABLE test_isolation (id int, value text)")
-	require.NoError(t, err)
-
 	// Start transaction on conn1
 	tx1, err := conn1.Begin(ctx)
 	require.NoError(t, err)
 	defer tx1.Rollback(context.Background())
 
-	// Insert in transaction
-	_, err = tx1.Exec(ctx, "INSERT INTO test_isolation VALUES (1, 'uncommitted')")
+	// Insert data in transaction (not yet committed)
+	_, err = tx1.Exec(ctx, "INSERT INTO schema1.isolation_test (id, value) VALUES (1, 'uncommitted')")
 	require.NoError(t, err)
 
-	// conn2 shouldn't see the uncommitted data (even if temp tables were shared, which they aren't)
-	// Actually temp tables are session-local, so conn2 won't see the table at all
-	// Let's use a schema-level table for this test
-
-	// Cleanup and use a real table
-	tx1.Rollback(context.Background())
-
-	// Test transaction isolation using session variables instead of tables
-	// since the app user doesn't have CREATE TABLE permission.
-	// We'll test that a session variable set in a transaction is visible
-	// within that transaction but doesn't affect other sessions.
-
-	// Get initial work_mem values for both connections
-	var initialWorkMem1, initialWorkMem2 string
-	err = conn1.QueryRow(ctx, "SHOW work_mem").Scan(&initialWorkMem1)
-	require.NoError(t, err)
-	err = conn2.QueryRow(ctx, "SHOW work_mem").Scan(&initialWorkMem2)
-	require.NoError(t, err)
-
-	// Start a transaction on conn1 and set work_mem locally
-	tx1, err = conn1.Begin(ctx)
-	require.NoError(t, err)
-	defer tx1.Rollback(context.Background())
-
-	// Set work_mem to a distinct value in the transaction
-	_, err = tx1.Exec(ctx, "SET LOCAL work_mem = '256MB'")
-	require.NoError(t, err)
-
-	// Verify the variable is set within the transaction
+	// Verify data is visible within the transaction
 	var val1 string
-	err = tx1.QueryRow(ctx, "SHOW work_mem").Scan(&val1)
+	err = tx1.QueryRow(ctx, "SELECT value FROM schema1.isolation_test WHERE id = 1").Scan(&val1)
 	require.NoError(t, err)
-	assert.Equal(t, "256MB", val1, "work_mem should be set in transaction")
+	assert.Equal(t, "uncommitted", val1, "data should be visible within transaction")
 
-	// conn2 should still have its original work_mem (different session)
-	var val2 string
-	err = conn2.QueryRow(ctx, "SHOW work_mem").Scan(&val2)
+	// conn2 should NOT see the uncommitted data (transaction isolation)
+	var count int
+	err = conn2.QueryRow(ctx, "SELECT COUNT(*) FROM schema1.isolation_test WHERE id = 1").Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, initialWorkMem2, val2, "work_mem should not be affected in other session")
+	assert.Equal(t, 0, count, "uncommitted data should not be visible to other connections")
 
 	// Commit the transaction
 	err = tx1.Commit(ctx)
 	require.NoError(t, err)
 
-	// After commit with LOCAL, work_mem should be reset to original
-	var val3 string
-	err = conn1.QueryRow(ctx, "SHOW work_mem").Scan(&val3)
+	// Now conn2 should see the committed data
+	err = conn2.QueryRow(ctx, "SELECT COUNT(*) FROM schema1.isolation_test WHERE id = 1").Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, initialWorkMem1, val3, "LOCAL work_mem should be reset after commit")
+	assert.Equal(t, 1, count, "committed data should be visible to other connections")
+
+	var val2 string
+	err = conn2.QueryRow(ctx, "SELECT value FROM schema1.isolation_test WHERE id = 1").Scan(&val2)
+	require.NoError(t, err)
+	assert.Equal(t, "uncommitted", val2, "data value should match what was inserted")
 }
 
 // TestSessionVariablesWithinTransaction verifies that session variables
@@ -824,23 +813,37 @@ func TestTransactionRollback(t *testing.T) {
 	ctx, cancel := testTimeout(t)
 	defer cancel()
 
+	db := h.GetTestDatabase("alpha_uno")
+
+	// Create a test table directly on the backend (as postgres superuser)
+	err := h.ExecDirect(ctx, db, `
+		DROP TABLE IF EXISTS schema1.rollback_test;
+		CREATE TABLE schema1.rollback_test (id INT PRIMARY KEY, value TEXT);
+		GRANT SELECT, INSERT, UPDATE, DELETE ON schema1.rollback_test TO app;
+	`)
+	require.NoError(t, err)
+
+	// Cleanup at end of test
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		h.ExecDirect(cleanupCtx, db, "DROP TABLE IF EXISTS schema1.rollback_test")
+	}()
+
 	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
 	require.NoError(t, err)
 	defer conn.Close(context.Background())
 
-	// Test rollback behavior using session variables since the app user
-	// doesn't have CREATE TABLE permission.
-
-	// Start transaction and set a session variable
+	// Start transaction and insert data
 	tx, err := conn.Begin(ctx)
 	require.NoError(t, err)
 
-	_, err = tx.Exec(ctx, "SET LOCAL my.rollback_test = 'should_be_rolled_back'")
+	_, err = tx.Exec(ctx, "INSERT INTO schema1.rollback_test (id, value) VALUES (1, 'should_be_rolled_back')")
 	require.NoError(t, err)
 
-	// Verify the variable is set within transaction
+	// Verify data is visible within the transaction
 	var val string
-	err = tx.QueryRow(ctx, "SHOW my.rollback_test").Scan(&val)
+	err = tx.QueryRow(ctx, "SELECT value FROM schema1.rollback_test WHERE id = 1").Scan(&val)
 	require.NoError(t, err)
 	assert.Equal(t, "should_be_rolled_back", val)
 
@@ -848,10 +851,11 @@ func TestTransactionRollback(t *testing.T) {
 	err = tx.Rollback(ctx)
 	require.NoError(t, err)
 
-	// Verify the LOCAL setting was rolled back
-	err = conn.QueryRow(ctx, "SHOW my.rollback_test").Scan(&val)
+	// Verify the data was rolled back (table should be empty)
+	var count int
+	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM schema1.rollback_test").Scan(&count)
 	require.NoError(t, err)
-	assert.Empty(t, val, "LOCAL variable should be reset after rollback")
+	assert.Equal(t, 0, count, "data should be rolled back")
 }
 
 // TestErrorInTransaction tests error handling within transactions

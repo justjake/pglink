@@ -23,10 +23,14 @@ var ErrNoIdleConnections = fmt.Errorf("%w, no idle connections to close", ErrMax
 //
 // The total number of connections may temporarily exceed the MaxConns limit.
 // It is a bug if the total number of connections grows beyond MaxConns without bound.
+//
+// MultiPool will run in production environments with MaxConns=1000+. It's okay
+// to overshoot a MaxConns of 1000 by about 20 connections at a time. Beyond
+// that it's prefereable to error even if a connection was recently released but
+// hasn't been destroyed or made available for Acquire yet.
 type MultiPool[K comparable] struct {
 	MaxConns int32
 	pools    map[K]*multiPoolMember[K]
-	stuff    []*multiPoolMember[K]
 	started  bool
 	tickets  *puddle.Pool[ticket]
 
@@ -100,7 +104,6 @@ func (p *MultiPool[K]) AddPool(ctx context.Context, key K, givenConfig *pgxpool.
 
 	stuff.pool = pool
 	p.pools[key] = stuff
-	p.stuff = append(p.stuff, stuff)
 	return nil
 }
 
@@ -165,7 +168,16 @@ func (p *MultiPool[K]) acquireConnSlot(ctx context.Context, forPool *multiPoolMe
 	pendingCreates := p.pendingCreates.Load()
 	pendingDestroys := p.pendingDestroys.Load()
 	total := existing + pendingCreates - pendingDestroys
-	if total < p.MaxConns {
+	// Use <= because pendingCreates now includes the current request (incremented
+	// before this check). If total == MaxConns, this request is already counted.
+	if total <= p.MaxConns {
+		return nil
+	}
+
+	// If there are pending destroys, room will be made soon. Allow this create
+	// to proceed, which may briefly exceed MaxConns. The shouldDestroyConnection
+	// check will ensure we settle back to MaxConns.
+	if pendingDestroys > 0 {
 		return nil
 	}
 
@@ -174,6 +186,7 @@ func (p *MultiPool[K]) acquireConnSlot(ctx context.Context, forPool *multiPoolMe
 		return fmt.Errorf("%w: max %d: %d created, %d pending create, %d pending destroy, %d total", ErrNoIdleConnections, p.MaxConns, existing, pendingCreates, pendingDestroys, total)
 	}
 
+	// Try to mark an idle connection in OTHER pools for destruction.
 	alreadyMarked := 0
 	pools := 0
 	for _, otherMember := range p.pools {
@@ -197,6 +210,16 @@ func (p *MultiPool[K]) acquireConnSlot(ctx context.Context, forPool *multiPoolMe
 		if found {
 			return nil
 		}
+	}
+
+	// If there are no other pools (single-pool case), or other pools have no
+	// idle connections to reclaim, check if the CURRENT pool has idle connections.
+	// If so, allow the creation - the idle connections will be destroyed by
+	// shouldDestroyConnection when released, settling back to MaxConns.
+	// This handles the race where pgxpool decides to create a new connection
+	// before a just-released connection is fully available in the idle pool.
+	if idle > 0 {
+		return nil
 	}
 
 	return fmt.Errorf("%w: max %d: searched %d pools, %d already marked for destroy", ErrNoIdleConnections, p.MaxConns, pools, alreadyMarked)
@@ -239,11 +262,18 @@ func (p *MultiPool[K]) shouldDestroyConnection(_ *multiPoolMember[K], conn *pgx.
 		return true
 	}
 
-	totalConns := p.totalConns.Load() + p.pendingCreates.Load() - p.pendingDestroys.Load()
+	// Only destroy if we're actually over the limit. Don't consider pendingCreates
+	// here because those creates might fail, and destroying connections preemptively
+	// can starve the pending creates of idle connections to reclaim.
+	// The pendingDestroys already account for connections that will be destroyed.
+	totalConns := p.totalConns.Load() - p.pendingDestroys.Load()
 	return totalConns > p.MaxConns
 }
 
 func (p *MultiPool[K]) markForDestroy(conn *pgconn.PgConn) {
+	if IsMarkedForDestroy(conn) {
+		return // Already marked, don't double-count pendingDestroys
+	}
 	conn.CustomData()[destroyKey] = true
 	p.pendingDestroys.Add(1)
 }
@@ -365,21 +395,26 @@ func (m *multiPoolMember[K]) beforeConnect(ctx context.Context, connCfg *pgx.Con
 		}
 	}
 
-	if err := m.parent.acquireConnSlot(ctx, m); err != nil {
-		return err
-	}
-
-	if req, ok := ctx.Value(acquireContextKey).(*acquireContextReq); ok {
-		// Only track pending creates if we can decrement pendingCreates on error.
-		// We will track errors of pending creates in Acquire.
-		//
-		// Other create attempts may come from MinIdleConns setting causing the pool
-		// to autotomatically create idle conns in the background.
+	// Track pending creates BEFORE acquireConnSlot so that concurrent callers
+	// see an accurate count. This bounds the overshoot to approximately the
+	// number of goroutines that can increment pendingCreates before the first
+	// one reaches acquireConnSlot's check.
+	req, hasReq := ctx.Value(acquireContextKey).(*acquireContextReq)
+	if hasReq {
 		req.createAttempts++
 		m.parent.pendingCreates.Add(1)
 	}
-	// TODO: else trigger health check, since we may be creating idle conns
-	// without incrementing pendingCreates.
+
+	if err := m.parent.acquireConnSlot(ctx, m); err != nil {
+		if hasReq {
+			m.parent.pendingCreates.Add(-1)
+			req.createAttempts-- // Prevent double-decrement in Acquire
+		}
+		return err
+	}
+
+	// TODO: if !hasReq, trigger health check, since we may be creating idle conns
+	// without incrementing pendingCreates (e.g., from MinIdleConns).
 	//
 	// TODO: we could refuse to acquireConnSlot here unless we have a valid ticket,
 	// and dedicate re-balancing MinIdleConns between pools entirely to the

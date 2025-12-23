@@ -8,6 +8,15 @@ You must take your time and think deeply when working on pglink. Do not be lazy.
 
 When you encounter a bug, take a step back and look at the structure of the project. You should fix the underlying issues to make the code correct by design, rather than adding a bandaid to fix the symptom. If you need to add a goroutine to solve a bug, you are probably making a bandaid fix rather than addressing the underlying issue.
 
+## Test timeouts
+
+This project is highly asynchronous, so it's easy to write tests that hang
+forever.  Always run test commands with a 30s timeout or less, and consider test
+runs that take longer than 30s to be a bug.
+
+When you write a new test case, ensure the test case fails after 30s no matter what.
+Add such timeouts to any tests you encounter.
+
 ## Structure
 
 - `pkg/frontend`: Interactions between clients and the proxy. Accepts incoming connections, authenticates clients, proxies client requests to the backend.

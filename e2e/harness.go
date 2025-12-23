@@ -495,3 +495,27 @@ func (h *Harness) FileSystem() fs.FS {
 func (h *Harness) Logger() *slog.Logger {
 	return h.logger
 }
+
+// ExecDirect executes SQL directly on a backend database as the postgres superuser.
+// This is useful for test setup and teardown (creating tables, granting permissions, etc.).
+func (h *Harness) ExecDirect(ctx context.Context, db TestDatabase, sql string) error {
+	conn, err := h.ConnectDirect(ctx, db)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	_, err = conn.Exec(ctx, sql)
+	return err
+}
+
+// GetTestDatabase returns the TestDatabase config for the given database name.
+// Panics if the database is not found.
+func (h *Harness) GetTestDatabase(name string) TestDatabase {
+	for _, db := range PredefinedDatabases {
+		if db.Name == name {
+			return db
+		}
+	}
+	panic(fmt.Sprintf("database %q not found in PredefinedDatabases", name))
+}
