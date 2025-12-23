@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -184,11 +186,11 @@ type BackendConfig struct {
 }
 
 func (c *BackendConfig) Addr() string {
+	port := "5432"
 	if c.Port != nil {
-		return fmt.Sprintf("%s:%d", c.Host, *c.Port)
-	} else {
-		return fmt.Sprintf("%s:5432", c.Host)
+		port = strconv.Itoa(int(*c.Port))
 	}
+	return net.JoinHostPort(c.Host, port)
 }
 
 // PoolConfigString builds a libpq-style connection string in key=value format.
