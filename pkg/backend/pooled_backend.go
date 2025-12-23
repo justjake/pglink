@@ -59,11 +59,11 @@ func (c *PooledBackend) Release() {
 		return
 	}
 	c.released = true
-	c.conn.Release()
+	// Release session BEFORE releasing connection to avoid race condition:
+	// another goroutine could acquire the same connection before we release
+	// the session, causing "session already acquired" errors.
 	c.session.Release()
-	// Note: We don't release dbConns here because the connection goes back
-	// to the pool as idle. dbConns is only decremented in BeforeClose when
-	// the connection is actually closed.
+	c.conn.Release()
 }
 
 func (c *PooledBackend) MarkForDestroy(err error) {

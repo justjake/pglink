@@ -413,6 +413,7 @@ func (s *Session) cancelBackendQuery() error {
 func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	logger, err := s.acquireBackend()
 	if err != nil {
+		s.logger.Error("failed to acquire backend", "error", err)
 		pgErr := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.CannotConnectNow, "failed to acquire backend", err)
 		pgErr.Detail = fmt.Sprintf("while handling message %T", firstMsg)
 		return pgErr

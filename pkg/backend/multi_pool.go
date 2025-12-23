@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -14,10 +15,13 @@ import (
 	"github.com/jackc/puddle/v2"
 )
 
+var ErrMaxConnsReached = errors.New("max conns reached")
+var ErrNoIdleConnections = fmt.Errorf("%w, no idle connections to close", ErrMaxConnsReached)
+
 type MultiPool[K comparable] struct {
 	MaxConns int32
-	pools    map[K]*poolStuff[K]
-	stuff    []*poolStuff[K]
+	pools    map[K]*multiPoolMember[K]
+	stuff    []*multiPoolMember[K]
 	started  bool
 	tickets  *puddle.Pool[ticket]
 
@@ -28,12 +32,14 @@ type MultiPool[K comparable] struct {
 	logger            *slog.Logger
 	healthCheckPeriod time.Duration
 
-	totalConns     atomic.Int32
-	totalIdleConns atomic.Int32
+	totalConns      atomic.Int32
+	totalIdleConns  atomic.Int32
+	pendingCreates  atomic.Int32
+	pendingDestroys atomic.Int32
 }
 
 func NewMultiPool[K comparable](maxConns int32, logger *slog.Logger) *MultiPool[K] {
-	tickets, err := puddle.NewPool[ticket](&puddle.Config[ticket]{
+	tickets, err := puddle.NewPool(&puddle.Config[ticket]{
 		Constructor: func(ctx context.Context) (ticket, error) {
 			return ticket{}, nil
 		},
@@ -46,7 +52,7 @@ func NewMultiPool[K comparable](maxConns int32, logger *slog.Logger) *MultiPool[
 
 	return &MultiPool[K]{
 		MaxConns:          maxConns,
-		pools:             make(map[K]*poolStuff[K]),
+		pools:             make(map[K]*multiPoolMember[K]),
 		tickets:           tickets,
 		closeChan:         make(chan struct{}),
 		logger:            logger,
@@ -56,109 +62,33 @@ func NewMultiPool[K comparable](maxConns int32, logger *slog.Logger) *MultiPool[
 
 type ticket struct{}
 
+var acquireContextKey = ticket{}
+
+type acquireContextReq struct {
+	createAttempts int
+	created        bool
+}
+
 // Not thread-safe.
 func (p *MultiPool[K]) AddPool(ctx context.Context, key K, givenConfig *pgxpool.Config) error {
 	if p.started {
 		panic("multi pool already started")
 	}
 
-	stuff := &poolStuff[K]{
+	stuff := &multiPoolMember[K]{
 		key:    key,
-		config: givenConfig.Copy(),
+		config: givenConfig,
+		parent: p,
 	}
 
-	// BeforeConnect: prevent new connections to be created if we're at the max
-	// conns limit
-	if givenConfig.BeforeConnect != nil {
-		stuff.config.BeforeConnect = func(ctx context.Context, connCfg *pgx.ConnConfig) error {
-			if err := givenConfig.BeforeConnect(ctx, connCfg); err != nil {
-				return err
-			}
+	withCallbacks := givenConfig.Copy()
+	withCallbacks.BeforeConnect = stuff.beforeConnect
+	withCallbacks.AfterConnect = stuff.afterConnect
+	withCallbacks.PrepareConn = stuff.prepareConn
+	withCallbacks.AfterRelease = stuff.afterRelease
+	withCallbacks.BeforeClose = stuff.beforeClose
 
-			totalConns := p.totalConns.Load()
-			if totalConns >= p.MaxConns {
-				return fmt.Errorf("connection limit reached: %d >= %d", totalConns, p.MaxConns)
-			}
-
-			return nil
-		}
-	} else {
-		stuff.config.BeforeConnect = func(ctx context.Context, connCfg *pgx.ConnConfig) error {
-			totalConns := p.totalConns.Load()
-			if totalConns >= p.MaxConns {
-				return fmt.Errorf("connection limit reached: %d >= %d", totalConns, p.MaxConns)
-			}
-			return nil
-		}
-	}
-
-	// AfterConnect: increment the total conns count
-	//               increment the idle conns count
-	if givenConfig.AfterConnect != nil {
-		stuff.config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-			p.totalConns.Add(1)
-			p.totalIdleConns.Add(1)
-			return givenConfig.AfterConnect(ctx, conn)
-		}
-	} else {
-		stuff.config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-			p.totalConns.Add(1)
-			p.totalIdleConns.Add(1)
-			return nil
-		}
-	}
-
-	// BeforeAcquire(aka PrepareConn): decrement the idle conns count
-	if givenConfig.PrepareConn != nil {
-		stuff.config.PrepareConn = func(ctx context.Context, conn *pgx.Conn) (bool, error) {
-			p.totalIdleConns.Add(-1)
-			return givenConfig.PrepareConn(ctx, conn)
-		}
-	} else {
-		stuff.config.PrepareConn = func(ctx context.Context, conn *pgx.Conn) (bool, error) {
-			p.totalIdleConns.Add(-1)
-			return true, nil
-		}
-	}
-
-	// AfterRelease is called after a connection is released, but before it is
-	// returned to the pool. It must return true to return the connection to the
-	// pool or false to destroy the connection.
-	if givenConfig.AfterRelease != nil {
-		stuff.config.AfterRelease = func(conn *pgx.Conn) bool {
-			p.totalIdleConns.Add(1)
-
-			if !givenConfig.AfterRelease(conn) {
-				return false
-			}
-
-			if p.shouldDestroyConnection(stuff, conn) {
-				return false
-			}
-
-			return true
-		}
-	} else {
-		stuff.config.AfterRelease = func(conn *pgx.Conn) bool {
-			p.totalIdleConns.Add(1)
-			return !p.shouldDestroyConnection(stuff, conn)
-		}
-	}
-
-	if givenConfig.BeforeClose != nil {
-		stuff.config.BeforeClose = func(conn *pgx.Conn) {
-			p.totalConns.Add(-1)
-			p.totalIdleConns.Add(-1)
-			givenConfig.BeforeClose(conn)
-		}
-	} else {
-		stuff.config.BeforeClose = func(conn *pgx.Conn) {
-			p.totalConns.Add(-1)
-			p.totalIdleConns.Add(-1)
-		}
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, stuff.config)
+	pool, err := pgxpool.NewWithConfig(ctx, withCallbacks)
 	if err != nil {
 		return err
 	}
@@ -198,16 +128,83 @@ func (p *MultiPool[K]) Acquire(ctx context.Context, key K) (*MultiPoolConn, erro
 		return nil, err
 	}
 
-	conn, err := p.pools[key].pool.Acquire(ctx)
+	// The BeforeConnect hook will handle destroying idle connections if needed
+	// when creating new connections at the global limit.
+	req := &acquireContextReq{}
+	conn, err := p.pools[key].pool.Acquire(context.WithValue(ctx, acquireContextKey, req))
 	if err != nil {
+		if req.createAttempts > 0 && !req.created {
+			// We increment createAttempts before attempting to create;
+			// but there's no callback on creation error, so we do that book-keeping here.
+			p.pendingCreates.Add(int32(-req.createAttempts))
+		}
 		r.ReleaseUnused()
 		return nil, err
 	}
+	// In the success case, pendingCreates is handled by the AfterConnect callback.
 
 	return &MultiPoolConn{
 		conn:     conn,
 		resource: r,
+		pool:     p,
 	}, nil
+}
+
+// acquireConnSlot attempts to find an unused idle connection and mark it for
+// deletion, to allow the creation of a new connection in another pool.
+//
+// Returns nil if under the MaxConns limit or if an idle connection was marked for deletion.
+// Otherwise, returns an error where errors.Is(err, ErrNoIdleConnections) is true.
+func (p *MultiPool[K]) acquireConnSlot(ctx context.Context, forPool *multiPoolMember[K]) error {
+	existing := p.totalConns.Load()
+	pendingCreates := p.pendingCreates.Load()
+	pendingDestroys := p.pendingDestroys.Load()
+	total := existing + pendingCreates - pendingDestroys
+	if total < p.MaxConns {
+		return nil
+	}
+
+	idle := p.totalIdleConns.Load()
+	if idle == 0 {
+		return fmt.Errorf("%w: max %d: %d created, %d pending create, %d pending destroy, %d total", ErrNoIdleConnections, p.MaxConns, existing, pendingCreates, pendingDestroys, total)
+	}
+
+	alreadyMarked := 0
+	pools := 0
+	for _, otherMember := range p.pools {
+		if otherMember == forPool {
+			continue
+		}
+		pools++
+		idle := otherMember.pool.AcquireAllIdle(ctx)
+		found := false
+		for _, c := range idle {
+			if !found {
+				if IsMarkedForDestroy(c.Conn().PgConn()) {
+					alreadyMarked++
+				} else {
+					p.markForDestroy(c.Conn().PgConn())
+					found = true
+				}
+			}
+			c.Release()
+		}
+		if found {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%w: max %d: searched %d pools, %d already marked for destroy", ErrNoIdleConnections, p.MaxConns, pools, alreadyMarked)
+}
+
+func (p *MultiPool[K]) markIdle(conn *pgx.Conn, isIdle bool) {
+	if isIdle {
+		p.totalIdleConns.Add(1)
+		conn.PgConn().CustomData()[idleKey] = true
+	} else if _, ok := conn.PgConn().CustomData()[idleKey]; ok {
+		p.totalIdleConns.Add(-1)
+		delete(conn.PgConn().CustomData(), idleKey)
+	}
 }
 
 // Close all pools and release all connections.
@@ -221,11 +218,8 @@ func (p *MultiPool[K]) Close() {
 	})
 }
 
-const destroyKey = "XXX"
-
-func MarkForDestroy(conn *pgconn.PgConn) {
-	conn.CustomData()[destroyKey] = true
-}
+const destroyKey = "xxx"
+const idleKey = "idle"
 
 func IsMarkedForDestroy(conn *pgconn.PgConn) bool {
 	customData := conn.CustomData()
@@ -235,13 +229,18 @@ func IsMarkedForDestroy(conn *pgconn.PgConn) bool {
 	return false
 }
 
-func (p *MultiPool[K]) shouldDestroyConnection(stuff *poolStuff[K], conn *pgx.Conn) bool {
+func (p *MultiPool[K]) shouldDestroyConnection(_ *multiPoolMember[K], conn *pgx.Conn) bool {
 	if IsMarkedForDestroy(conn.PgConn()) {
 		return true
 	}
 
-	totalConns := p.totalConns.Load()
+	totalConns := p.totalConns.Load() + p.pendingCreates.Load() - p.pendingDestroys.Load()
 	return totalConns > p.MaxConns
+}
+
+func (p *MultiPool[K]) markForDestroy(conn *pgconn.PgConn) {
+	conn.CustomData()[destroyKey] = true
+	p.pendingDestroys.Add(1)
 }
 
 func (p *MultiPool[K]) backgroundHealthCheck() {
@@ -302,13 +301,28 @@ func (p *MultiPool[K]) checkMaxConns() (destroyed bool) {
 	return destroyedAny
 }
 
+type destroyMarker interface {
+	markForDestroy(conn *pgconn.PgConn)
+}
+
 type MultiPoolConn struct {
-	conn     *pgxpool.Conn
-	resource *puddle.Resource[ticket]
+	conn                    *pgxpool.Conn
+	resource                *puddle.Resource[ticket]
+	pool                    destroyMarker
+	released                bool
+	markForDestroyOnRelease bool
 }
 
 // Release returns the connection to the pool.
 func (c *MultiPoolConn) Release() {
+	if c.released {
+		return
+	}
+	c.released = true
+	if c.markForDestroyOnRelease {
+		c.pool.markForDestroy(c.conn.Conn().PgConn())
+	}
+	// Must release conn before resource
 	c.conn.Release()
 	c.resource.Release()
 }
@@ -322,7 +336,7 @@ func (c *MultiPoolConn) Value() *pgxpool.Conn {
 
 // MarkForDestroy marks the connection for destruction after it is released.
 func (c *MultiPoolConn) MarkForDestroy() {
-	c.conn.Conn().PgConn().CustomData()[destroyKey] = true
+	c.markForDestroyOnRelease = true
 }
 
 func (c *MultiPoolConn) ReleaseAndDestroy() {
@@ -330,8 +344,102 @@ func (c *MultiPoolConn) ReleaseAndDestroy() {
 	c.Release()
 }
 
-type poolStuff[K comparable] struct {
+type multiPoolMember[K comparable] struct {
 	key    K
 	pool   *pgxpool.Pool
 	config *pgxpool.Config
+	parent *MultiPool[K]
+}
+
+// BeforeConnect is called before a new connection is made. It is passed a copy of the underlying pgx.ConnConfig and
+// will not impact any existing open connections.
+func (m *multiPoolMember[K]) beforeConnect(ctx context.Context, connCfg *pgx.ConnConfig) error {
+	if m.config.BeforeConnect != nil {
+		if err := m.config.BeforeConnect(ctx, connCfg); err != nil {
+			return err
+		}
+	}
+
+	if err := m.parent.acquireConnSlot(ctx, m); err != nil {
+		return err
+	}
+
+	if req, ok := ctx.Value(acquireContextKey).(*acquireContextReq); ok {
+		// Only track pending creates if we can decrement pendingCreates on error.
+		// We will track errors of pending creates in Acquire.
+		req.createAttempts++
+		m.parent.pendingCreates.Add(1)
+	}
+
+	return nil
+}
+
+// AfterConnect is called after a connection is established, but before it is added to the pool.
+func (m *multiPoolMember[K]) afterConnect(ctx context.Context, conn *pgx.Conn) error {
+	if m.config.AfterConnect != nil {
+		if err := m.config.AfterConnect(ctx, conn); err != nil {
+			return err
+		}
+	}
+
+	if req, ok := ctx.Value(acquireContextKey).(*acquireContextReq); ok {
+		req.created = true
+		m.parent.pendingCreates.Add(int32(-req.createAttempts))
+	}
+	m.parent.totalConns.Add(1)
+	m.parent.markIdle(conn, true)
+	return nil
+}
+
+// PrepareConn is called before a connection is acquired from the pool. If this function returns true, the connection
+// is considered valid, otherwise the connection is destroyed. If the function returns a non-nil error, the instigating
+// query will fail with the returned error.
+//
+// Specifically, this means that:
+//
+//   - If it returns true and a nil error, the query proceeds as normal.
+//   - If it returns true and an error, the connection will be returned to the pool, and the instigating query will fail with the returned error.
+//   - If it returns false, and an error, the connection will be destroyed, and the query will fail with the returned error.
+//   - If it returns false and a nil error, the connection will be destroyed, and the instigating query will be retried on a new connection.
+func (m *multiPoolMember[K]) prepareConn(ctx context.Context, conn *pgx.Conn) (bool, error) {
+	if m.config.PrepareConn != nil {
+		if ok, err := m.config.PrepareConn(ctx, conn); !ok || err != nil {
+			if !ok {
+				m.parent.markForDestroy(conn.PgConn())
+			}
+
+			return ok, err
+		}
+	}
+
+	m.parent.markIdle(conn, false)
+	return true, nil
+}
+
+// AfterRelease is called after a connection is released, but before it is returned to the pool. It must return true to return the connection to the pool or false to destroy the connection.
+func (m *multiPoolMember[K]) afterRelease(conn *pgx.Conn) bool {
+	m.parent.markIdle(conn, true)
+
+	if m.config.AfterRelease != nil {
+		if !m.config.AfterRelease(conn) {
+			m.parent.markForDestroy(conn.PgConn())
+			return false
+		}
+	}
+
+	if m.parent.shouldDestroyConnection(m, conn) {
+		m.parent.markForDestroy(conn.PgConn())
+		return false
+	}
+
+	return true
+}
+
+// BeforeClose is called right before a connection is closed and removed from the pool.
+func (m *multiPoolMember[K]) beforeClose(conn *pgx.Conn) {
+	m.parent.totalConns.Add(-1)
+	if IsMarkedForDestroy(conn.PgConn()) {
+		m.parent.pendingDestroys.Add(-1)
+	}
+	m.parent.markIdle(conn, false)
 }

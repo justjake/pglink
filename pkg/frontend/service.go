@@ -219,12 +219,17 @@ func (s *Service) unregisterSession(sess *Session) {
 	delete(s.sessions, sess)
 }
 
-// cancelAllSessions cancels all active sessions.
+// cancelAllSessions cancels all active sessions and closes their connections.
+// Closing the connection ensures that any blocked reads return immediately.
 func (s *Service) cancelAllSessions() {
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
 	for sess := range s.sessions {
 		sess.cancel()
+		// Close the connection to unblock any readers waiting on I/O
+		if sess.conn != nil {
+			_ = sess.conn.Close()
+		}
 	}
 }
 

@@ -13,13 +13,14 @@
         {"username": {"insecure_value": "admin"}, "password": {"insecure_value": "admin_password"}},
         {"username": {"insecure_value": "developer"}, "password": {"insecure_value": "developer_password"}}
       ],
+      "pool_acquire_timeout_milliseconds": 1000,
       "backend": {
         "host": "localhost",
         "port": 15432,
         "database": "uno",
         "sslmode": "disable",
         "pool_max_conns": 10,
-        "pool_min_idle_conns": 2
+        "pool_min_idle_conns": 0
       }
     },
     "alpha_dos": {

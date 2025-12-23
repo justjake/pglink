@@ -177,11 +177,23 @@ func (h *Harness) Start(ctx context.Context) {
 func (h *Harness) Stop() {
 	h.logger.Info("stopping e2e test harness")
 
-	// Shutdown service
+	// Shutdown service with a timeout
 	if h.service != nil {
 		h.cancel()
-		h.serviceWg.Wait()
-		h.logger.Info("pglink service stopped")
+
+		// Wait for service shutdown with a timeout
+		done := make(chan struct{})
+		go func() {
+			h.serviceWg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			h.logger.Info("pglink service stopped")
+		case <-time.After(3 * time.Second):
+			h.logger.Warn("pglink service shutdown timed out, exiting anyway")
+		}
 	}
 
 	// Note: We intentionally do NOT stop docker-compose after tests
