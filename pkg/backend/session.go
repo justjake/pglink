@@ -74,27 +74,17 @@ func GetOrCreateSession(conn *pgconn.PgConn, db *Database, user config.UserConfi
 		}
 	}
 
+	state := pgwire.NewProtocolState()
+	state.PID = conn.PID()
+	state.SecretCancelKey = conn.SecretKey()
+	state.TxStatus = pgwire.TxStatus(conn.TxStatus())
+
 	session := &Session{
-		DB:       db,
-		Conn:     conn,
-		UserName: username,
-		User:     user,
-		State: pgwire.ProtocolState{
-			PID:               conn.PID(),
-			SecretCancelKey:   conn.SecretKey(),
-			TxStatus:          pgwire.TxStatus(conn.TxStatus()),
-			ParameterStatuses: pgwire.ParameterStatuses{},
-			PreparedStatements: pgwire.NamedObjectState[bool]{
-				Alive:         make(map[string]bool),
-				PendingCreate: make(map[string]bool),
-				PendingClose:  make(map[string]bool),
-			},
-			Portals: pgwire.NamedObjectState[bool]{
-				Alive:         make(map[string]bool),
-				PendingCreate: make(map[string]bool),
-				PendingClose:  make(map[string]bool),
-			},
-		},
+		DB:                db,
+		Conn:              conn,
+		UserName:          username,
+		User:              user,
+		State:             state,
 		TrackedParameters: tracked,
 	}
 	session.updateState()

@@ -12,32 +12,22 @@ func TestParseConfig_Listen(t *testing.T) {
 	tests := []struct {
 		name     string
 		json     string
-		expected []ListenAddr
+		expected ListenAddr
 	}{
 		{
 			name:     "port only",
-			json:     `{"listen": ["5432"]}`,
-			expected: []ListenAddr{":5432"},
+			json:     `{"listen": "5432"}`,
+			expected: ":5432",
 		},
 		{
 			name:     "colon port",
-			json:     `{"listen": [":5432"]}`,
-			expected: []ListenAddr{":5432"},
+			json:     `{"listen": ":5432"}`,
+			expected: ":5432",
 		},
 		{
 			name:     "host and port",
-			json:     `{"listen": ["127.0.0.1:5432"]}`,
-			expected: []ListenAddr{"127.0.0.1:5432"},
-		},
-		{
-			name:     "multiple addresses",
-			json:     `{"listen": ["5432", ":6432", "192.168.1.1:7432"]}`,
-			expected: []ListenAddr{":5432", ":6432", "192.168.1.1:7432"},
-		},
-		{
-			name:     "empty listen",
-			json:     `{"listen": []}`,
-			expected: []ListenAddr{},
+			json:     `{"listen": "127.0.0.1:5432"}`,
+			expected: "127.0.0.1:5432",
 		},
 	}
 
@@ -48,15 +38,8 @@ func TestParseConfig_Listen(t *testing.T) {
 				t.Fatalf("ParseConfig failed: %v", err)
 			}
 
-			got := cfg.Listen
-			if len(got) != len(tt.expected) {
-				t.Fatalf("expected %d listen addresses, got %d", len(tt.expected), len(got))
-			}
-
-			for i, addr := range got {
-				if addr != tt.expected[i] {
-					t.Errorf("listen[%d]: expected %q, got %q", i, tt.expected[i], addr)
-				}
+			if cfg.Listen != tt.expected {
+				t.Errorf("listen: expected %q, got %q", tt.expected, cfg.Listen)
 			}
 		})
 	}
@@ -71,7 +54,7 @@ func TestListenAddr_String(t *testing.T) {
 
 func TestParseConfig_MultipleDatabases(t *testing.T) {
 	jsonStr := `{
-		"listen": [":5432"],
+		"listen": ":5432",
 		"databases": {
 			"db1": {},
 			"db2": {}
@@ -135,15 +118,15 @@ func TestReadConfigFile(t *testing.T) {
 				return
 			}
 
-			if len(cfg.Listen) == 0 {
-				t.Error("expected at least one listen address")
+			if cfg.Listen == "" {
+				t.Error("expected a listen address")
 			}
 			if len(cfg.Databases) == 0 {
 				t.Error("expected at least one database")
 			}
 
-			t.Logf("loaded config with %d listen addresses and %d databases",
-				len(cfg.Listen), len(cfg.Databases))
+			t.Logf("loaded config with listen=%s and %d databases",
+				cfg.Listen, len(cfg.Databases))
 		})
 	}
 }
@@ -245,7 +228,7 @@ func TestConfig_Validate_AccumulatesErrors(t *testing.T) {
 
 	// Create a config with multiple errors
 	cfg := &Config{
-		Listen: []ListenAddr{":5432"},
+		Listen: ":5432",
 		Databases: map[string]*DatabaseConfig{
 			"db1": {
 				Database: "db1",

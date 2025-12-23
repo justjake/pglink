@@ -6,6 +6,23 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
+// NewProtocolState creates a new ProtocolState with all maps initialized.
+func NewProtocolState() ProtocolState {
+	return ProtocolState{
+		ParameterStatuses: ParameterStatuses{},
+		PreparedStatements: NamedObjectState[bool]{
+			Alive:         make(map[string]bool),
+			PendingCreate: make(map[string]bool),
+			PendingClose:  make(map[string]bool),
+		},
+		Portals: NamedObjectState[bool]{
+			Alive:         make(map[string]bool),
+			PendingCreate: make(map[string]bool),
+			PendingClose:  make(map[string]bool),
+		},
+	}
+}
+
 // State of a session in the PostgreSQL wire protocol.
 type ProtocolState struct {
 	// Immutable

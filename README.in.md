@@ -4,7 +4,9 @@
 {{.Banner}}
 ```
 
-PostgreSQL wire protocol proxy with transaction-based connection pooling. Supports SCRAM-SHA-256 authentication with TLS.
+PostgreSQL wire protocol proxy with transaction-based connection pooling.
+
+pglink supports SCRAM-SHA-256 authentication with TLS channel binding (SCRAM-SHA-256-PLUS). Plaintext authentication is suppoted only with TLS connections. MD5-hashed password authentication is supported but strongly discouraged.
 
 ## Installation
 

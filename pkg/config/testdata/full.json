@@ -1,5 +1,5 @@
 {
-  "listen": [":5432", "127.0.0.1:6432"],
+  "listen": ":5432",
   "databases": {
     "production": {
       "users": [

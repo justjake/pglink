@@ -1,0 +1,192 @@
+// Frontend Session State Machine
+// Tracks the high-level phase of a client session through the proxy.
+//
+// Generate Go code: go run ./cmd/fsm-gen -input pkg/frontend/session_states.dot
+// Render diagram:   dot -Tpng pkg/frontend/session_states.dot -o session_states.png
+
+digraph SessionPhase {
+    // Graph metadata for code generation
+    graph [
+        label="Frontend Session State Machine"
+        labelloc="t"
+        fontsize=14
+        rankdir=LR
+        package="frontend"
+        type_name="SessionPhase"
+        state_struct_name="SessionStateMachine"
+    ];
+
+    // Default styling
+    node [shape=box, style=rounded, fontsize=10];
+    edge [fontsize=9];
+
+    // Start state marker
+    node [shape=point, width=0.2] { __start__; };
+    node [shape=box, style=rounded];
+
+    // === Connection Establishment Phase ===
+    subgraph cluster_startup {
+        label="Connection Establishment";
+        style=dashed;
+        color=gray;
+
+        Start [
+            doc="Initial state when connection is accepted"
+        ];
+
+        TLSHandshake [
+            doc="TLS handshake in progress"
+            on_enter="onTLSHandshake"
+        ];
+
+        SSLRequested [
+            doc="Client sent SSLRequest, awaiting response"
+        ];
+
+        CancelRequest [
+            doc="One-shot cancel request connection"
+            terminal="true"
+            on_enter="onCancelRequest"
+        ];
+
+        Authenticating [
+            doc="Authentication in progress"
+            on_enter="onAuthenticating"
+        ];
+
+        PreparingSession [
+            doc="Setting up session resources post-auth"
+        ];
+    }
+
+    // === Normal Operation Phase ===
+    subgraph cluster_operation {
+        label="Normal Operation";
+        style=solid;
+        color=blue;
+
+        Idle [
+            doc="Ready for query, no backend held"
+            on_enter="onIdle"
+        ];
+
+        AcquiringBackend [
+            doc="Getting backend connection from pool"
+            on_enter="onAcquiringBackend"
+        ];
+
+        SimpleQuery [
+            doc="Simple query protocol in progress"
+        ];
+
+        ExtendedQuery [
+            doc="Extended query flow (parse/bind/execute)"
+            substate="ExtendedQueryPhase"
+        ];
+
+        InTransaction [
+            doc="Inside explicit transaction"
+        ];
+
+        CopyMode [
+            doc="COPY protocol active"
+            on_enter="onCopyMode"
+        ];
+    }
+
+    // === Cleanup Phase ===
+    subgraph cluster_cleanup {
+        label="Cleanup";
+        style=dashed;
+        color=red;
+
+        ReleasingBackend [
+            doc="Returning backend to pool"
+            on_enter="onReleasingBackend"
+            guard="canReleaseBackend"
+        ];
+
+        KillingBackend [
+            doc="Backend misbehaved, destroying connection"
+            on_enter="onKillingBackend"
+        ];
+
+        KillingClient [
+            doc="Client misbehaved, terminating session"
+            on_enter="onKillingClient"
+        ];
+
+        Shutdown [
+            doc="Final cleanup state"
+            terminal="true"
+            on_enter="onShutdown"
+        ];
+    }
+
+    // === Transitions ===
+
+    // Entry point
+    __start__ -> Start;
+
+    // Connection establishment transitions
+    Start -> TLSHandshake [label="raw TLS connect"];
+    Start -> SSLRequested [label="SSLRequest msg"];
+    Start -> CancelRequest [label="CancelRequest msg"];
+    Start -> Authenticating [label="StartupMessage"];
+
+    SSLRequested -> TLSHandshake [label="accept TLS"];
+    SSLRequested -> Authenticating [label="decline TLS"];
+
+    TLSHandshake -> CancelRequest [label="CancelRequest"];
+    TLSHandshake -> Authenticating [label="StartupMessage"];
+
+    Authenticating -> PreparingSession [label="auth success"];
+    Authenticating -> KillingClient [label="auth failed"];
+
+    PreparingSession -> Idle [label="ready"];
+
+    // Normal operation cycle
+    Idle -> AcquiringBackend [label="Query/Parse"];
+    Idle -> Shutdown [label="Terminate msg"];
+
+    AcquiringBackend -> SimpleQuery [label="simple query"];
+    AcquiringBackend -> ExtendedQuery [label="extended query"];
+    AcquiringBackend -> KillingClient [label="client error"];
+    AcquiringBackend -> KillingBackend [label="backend error"];
+
+    // Query processing
+    SimpleQuery -> InTransaction [label="BEGIN"];
+    SimpleQuery -> ReleasingBackend [label="ReadyForQuery(I)", guard="canReleaseBackend"];
+    SimpleQuery -> CopyMode [label="COPY response"];
+    SimpleQuery -> KillingBackend [label="backend error"];
+    SimpleQuery -> KillingClient [label="client error"];
+
+    ExtendedQuery -> InTransaction [label="BEGIN"];
+    ExtendedQuery -> ReleasingBackend [label="ReadyForQuery(I)", guard="canReleaseBackend"];
+    ExtendedQuery -> CopyMode [label="COPY response"];
+    ExtendedQuery -> KillingBackend [label="backend error"];
+    ExtendedQuery -> KillingClient [label="client error"];
+
+    // Transaction handling
+    InTransaction -> ReleasingBackend [label="COMMIT/ROLLBACK"];
+    InTransaction -> CopyMode [label="COPY response"];
+    InTransaction -> KillingBackend [label="backend error"];
+    InTransaction -> KillingClient [label="client error"];
+
+    // Copy mode transitions
+    CopyMode -> SimpleQuery [label="CopyDone (simple)"];
+    CopyMode -> ExtendedQuery [label="CopyDone (extended)"];
+    CopyMode -> InTransaction [label="CopyDone (in tx)"];
+    CopyMode -> KillingBackend [label="backend error"];
+    CopyMode -> KillingClient [label="client error"];
+
+    // Cleanup transitions
+    ReleasingBackend -> Idle [label="released"];
+    ReleasingBackend -> Shutdown [label="shutting down"];
+
+    KillingBackend -> Idle [label="continue session"];
+    KillingBackend -> KillingClient [label="also kill client"];
+    KillingBackend -> Shutdown [label="shutting down"];
+
+    KillingClient -> Shutdown [label="cleanup"];
+}

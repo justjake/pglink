@@ -22,13 +22,8 @@ import (
 type Database struct {
 	config  *config.DatabaseConfig
 	secrets *config.SecretCache
-
-	userPools map[config.UserConfig]*pgxpool.Pool
-
-	// Connection coordination
-	connMgr *connManager[config.UserConfig]
-
-	logger *slog.Logger
+	pools   *MultiPool[config.UserConfig]
+	logger  *slog.Logger
 }
 
 // NewDatabase creates a new Database with the given database configuration.
@@ -36,15 +31,11 @@ type Database struct {
 // All user pools are created eagerly to respect MinIdleConns settings.
 func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *config.SecretCache, logger *slog.Logger) (*Database, error) {
 	db := &Database{
-		config:    cfg,
-		secrets:   secrets,
-		userPools: make(map[config.UserConfig]*pgxpool.Pool),
-		connMgr:   newConnManager(cfg.Backend.PoolMaxConns, cfg.Users),
-		logger:    logger,
+		config:  cfg,
+		secrets: secrets,
+		pools:   NewMultiPool[config.UserConfig](cfg.Backend.PoolMaxConns),
+		logger:  logger,
 	}
-
-	// Set up connection stealing callback
-	db.connMgr.setStealFunc(db.tryStealIdleConnection)
 
 	// Eagerly create all user pools to respect MinIdleConns
 	for _, user := range cfg.Users {

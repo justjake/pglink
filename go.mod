@@ -3,6 +3,7 @@ module github.com/justjake/pglink
 go 1.25.5
 
 require (
+	github.com/awalterschulze/gographviz v2.0.3+incompatible
 	github.com/aws/aws-sdk-go-v2/config v1.32.6
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.0
 	github.com/charmbracelet/glamour v0.10.0

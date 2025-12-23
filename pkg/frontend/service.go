@@ -28,7 +28,7 @@ type Service struct {
 	secrets   *config.SecretCache
 	tlsConfig *tls.Config
 
-	listeners []net.Listener
+	listener net.Listener
 	databases map[*config.DatabaseConfig]*backend.Database
 
 	// Connection tracking
@@ -44,6 +44,7 @@ type Service struct {
 	// When a cancel request arrives, we look up the session by PID,
 	// validate the secret key, and forward the cancel to the backend.
 	cancelRegistry   map[uint32]*Session
+	cancelRegistry2  map[uint32]*Session2 // For Session2 (FSM-based)
 	cancelRegistryMu sync.RWMutex
 }
 
@@ -68,15 +69,14 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 		config:         cfg,
 		secrets:        secrets,
 		tlsConfig:      tlsResult.Config,
-		listeners:      make([]net.Listener, 0, len(cfg.Listen)),
 		databases:      make(map[*config.DatabaseConfig]*backend.Database),
 		sessions:       make(map[*Session]struct{}),
 		cancelRegistry: make(map[uint32]*Session),
 	}, nil
 }
 
-// Listen starts the service and listens for incoming connections on all
-// configured addresses. Returns an error if any listener fails to start.
+// Listen starts the service and listens for incoming connections on the
+// configured address. Returns an error if the listener fails to start.
 // When the service's context is cancelled, all sessions are cancelled and
 // the method waits for them to close cleanly before returning.
 func (s *Service) Listen() error {
@@ -91,67 +91,37 @@ func (s *Service) Listen() error {
 		s.databases[dbConfig] = db
 	}
 
-	// Set up all listeners
-	for _, addr := range s.config.Listen {
-		ln, err := net.Listen("tcp", addr.String())
-		if err != nil {
-			// Close any listeners we already opened
-			for _, l := range s.listeners {
-				_ = l.Close()
-			}
-			return fmt.Errorf("failed to listen on %s: %w", addr, err)
-		}
-		s.listeners = append(s.listeners, ln)
-		s.logger.Info("listening", "addr", addr.String())
+	// Set up listener
+	addr := s.config.Listen
+	ln, err := net.Listen("tcp", addr.String())
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
+	s.listener = ln
+	s.logger.Info("listening", "addr", addr.String())
 
-	// All listeners created successfully, start accept loops
-	var listenerWg sync.WaitGroup
-	errCh := make(chan error, len(s.listeners))
-
-	for i, ln := range s.listeners {
-		listenerWg.Add(1)
-		go func(ln net.Listener) {
-			defer listenerWg.Done()
-			if err := s.acceptLoop(i, ln); err != nil {
-				errCh <- err
-			}
-		}(ln)
-	}
-
-	// Start a goroutine to close listeners and cancel sessions when context is cancelled
+	// Start a goroutine to close listener and cancel sessions when context is cancelled
 	go func() {
 		<-s.ctx.Done()
-		// Close all listeners to stop accept loops
-		for _, ln := range s.listeners {
-			_ = ln.Close()
-		}
-		// Cancel all active sessions
+		_ = s.listener.Close()
 		s.cancelAllSessions()
 	}()
 
-	// Wait for context cancellation or first error
-	var firstErr error
-	select {
-	case <-s.ctx.Done():
-		firstErr = s.ctx.Err()
-	case err := <-errCh:
-		firstErr = err
-		// Cancel context to trigger shutdown
-		s.cancel()
-	}
-
-	// Wait for all listener goroutines to finish
-	listenerWg.Wait()
+	// Run accept loop (blocks until listener is closed or error)
+	acceptErr := s.acceptLoop(ln)
 
 	// Wait for all sessions to finish
 	s.sessionsWg.Wait()
 
-	return firstErr
+	// Return context error if that's why we stopped, otherwise return accept error
+	if s.ctx.Err() != nil {
+		return s.ctx.Err()
+	}
+	return acceptErr
 }
 
 // acceptLoop accepts connections on the given listener until it is closed.
-func (s *Service) acceptLoop(idx int, ln net.Listener) error {
+func (s *Service) acceptLoop(ln net.Listener) error {
 	maxConns := s.config.GetMaxClientConnections()
 
 	for {
@@ -293,30 +263,61 @@ func (s *Service) unregisterForCancel(sess *Session) {
 func (s *Service) handleCancelRequest(req *pgproto3.CancelRequest) error {
 	s.cancelRegistryMu.RLock()
 	sess := s.cancelRegistry[req.ProcessID]
+	sess2 := s.cancelRegistry2[req.ProcessID]
 	s.cancelRegistryMu.RUnlock()
 
-	if sess == nil {
+	if sess == nil && sess2 == nil {
 		// No session found with this PID - silently ignore.
 		// This is expected if the session has already ended.
 		s.logger.Debug("cancel request for unknown PID", "pid", req.ProcessID)
 		return nil
 	}
 
-	// Validate the secret key
-	if sess.state.SecretCancelKey != req.SecretKey {
-		// Invalid secret key - silently ignore for security.
-		// Don't reveal whether the PID exists or not.
-		s.logger.Debug("cancel request with invalid secret", "pid", req.ProcessID)
+	// Handle Session (original)
+	if sess != nil {
+		if sess.state.SecretCancelKey != req.SecretKey {
+			s.logger.Debug("cancel request with invalid secret", "pid", req.ProcessID)
+			return nil
+		}
+		if err := sess.cancelBackendQuery(); err != nil {
+			s.logger.Debug("failed to cancel backend query", "pid", req.ProcessID, "error", err)
+		} else {
+			s.logger.Info("cancelled query", "pid", req.ProcessID)
+		}
 		return nil
 	}
 
-	// Forward the cancel to the backend
-	if err := sess.cancelBackendQuery(); err != nil {
-		s.logger.Debug("failed to cancel backend query", "pid", req.ProcessID, "error", err)
-		// Still return nil - we processed the request, it just failed
-	} else {
-		s.logger.Info("cancelled query", "pid", req.ProcessID)
+	// Handle Session2 (FSM-based)
+	if sess2 != nil {
+		if sess2.protocolState.SecretCancelKey != req.SecretKey {
+			s.logger.Debug("cancel request with invalid secret", "pid", req.ProcessID)
+			return nil
+		}
+		if err := sess2.cancelBackendQuery(); err != nil {
+			s.logger.Debug("failed to cancel backend query", "pid", req.ProcessID, "error", err)
+		} else {
+			s.logger.Info("cancelled query", "pid", req.ProcessID)
+		}
 	}
 
 	return nil
+}
+
+// registerForCancel2 adds a Session2 to the cancel registry.
+func (s *Service) registerForCancel2(sess *Session2) {
+	s.cancelRegistryMu.Lock()
+	defer s.cancelRegistryMu.Unlock()
+	if s.cancelRegistry2 == nil {
+		s.cancelRegistry2 = make(map[uint32]*Session2)
+	}
+	s.cancelRegistry2[sess.protocolState.PID] = sess
+}
+
+// unregisterForCancel2 removes a Session2 from the cancel registry.
+func (s *Service) unregisterForCancel2(sess *Session2) {
+	s.cancelRegistryMu.Lock()
+	defer s.cancelRegistryMu.Unlock()
+	if s.cancelRegistry2 != nil {
+		delete(s.cancelRegistry2, sess.protocolState.PID)
+	}
 }

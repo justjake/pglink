@@ -45,9 +45,9 @@ func (m AuthMethod) Valid() bool {
 
 // Config holds the pglink configuration.
 type Config struct {
-	// Listen is the list of network addresses to listen on.
+	// Listen is the network address to listen on.
 	// Examples: "5432", ":5432", "127.0.0.1:5432", "0.0.0.0:5432"
-	Listen []ListenAddr `json:"listen"`
+	Listen ListenAddr `json:"listen"`
 
 	// TLS configures TLS for incoming client connections.
 	// If not specified, a self-signed certificate is generated in memory.

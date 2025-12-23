@@ -1,5 +1,5 @@
 {
-  "listen": [":16432"],
+  "listen": ":16432",
   "tls": {
     "sslmode": "prefer",
     "generate_cert": true,

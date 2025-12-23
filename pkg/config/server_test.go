@@ -145,7 +145,7 @@ func TestDatabaseConfig_RoundTrip(t *testing.T) {
 func TestConfig_RoundTrip(t *testing.T) {
 	// Note: databases is a map, and Database field has json:"-"
 	// Database-from-map-key behavior is tested in TestParseConfig_MultipleDatabases
-	input := `{"listen":[":5432",":6432"],"databases":{"mydb":{"users":[],"backend":{"host":"db.example.com","port":5432,"database":"mydb","pool_max_conns":100}}}}`
+	input := `{"listen":":5432","databases":{"mydb":{"users":[],"backend":{"host":"db.example.com","port":5432,"database":"mydb","pool_max_conns":100}}}}`
 
 	var c Config
 	if err := json.Unmarshal([]byte(input), &c); err != nil {

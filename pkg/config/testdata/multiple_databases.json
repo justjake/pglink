@@ -1,5 +1,5 @@
 {
-  "listen": [":5432"],
+  "listen": ":5432",
   "databases": {
     "app1": {
       "users": [

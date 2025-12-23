@@ -2,6 +2,12 @@
 
 We are implementing a serious, high-performance PostgreSQL wire protocol proxy intended for use in production called "pglink".
 
+## High standards
+
+You must take your time and think deeply when working on pglink. Do not be lazy. Do not rush.
+
+When you encounter a bug, take a step back and look at the structure of the project. You should fix the underlying issues to make the code correct by design, rather than adding a bandaid to fix the symptom. If you need to add a goroutine to solve a bug, you are probably making a bandaid fix rather than addressing the underlying issue.
+
 ## Structure
 
 - `pkg/frontend`: Interactions between clients and the proxy. Accepts incoming connections, authenticates clients, proxies client requests to the backend.
