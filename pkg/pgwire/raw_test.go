@@ -271,10 +271,10 @@ func TestDecodeFrontendMessage(t *testing.T) {
 	}
 }
 
-func TestLazyServer(t *testing.T) {
+func TestFromServer(t *testing.T) {
 	t.Run("parse from raw", func(t *testing.T) {
 		raw := RawBody{Type: 'Z', Body: []byte{'I'}}
-		lazy := LazyServer[*pgproto3.ReadyForQuery]{source: raw}
+		lazy := FromServer[*pgproto3.ReadyForQuery]{source: raw}
 
 		if lazy.IsParsed() {
 			t.Error("IsParsed() should be false before Parse()")
@@ -312,7 +312,7 @@ func TestLazyServer(t *testing.T) {
 
 	t.Run("raw accessor", func(t *testing.T) {
 		raw := RawBody{Type: 'Z', Body: []byte{'E'}}
-		lazy := LazyServer[*pgproto3.ReadyForQuery]{source: raw}
+		lazy := FromServer[*pgproto3.ReadyForQuery]{source: raw}
 
 		gotRaw := lazy.Raw()
 		if gotRaw.Type != 'Z' || !bytes.Equal(gotRaw.Body, []byte{'E'}) {
@@ -321,10 +321,10 @@ func TestLazyServer(t *testing.T) {
 	})
 }
 
-func TestLazyClient(t *testing.T) {
+func TestFromClient(t *testing.T) {
 	t.Run("parse from raw", func(t *testing.T) {
 		raw := RawBody{Type: 'Q', Body: append([]byte("SELECT 1"), 0)}
-		lazy := LazyClient[*pgproto3.Query]{source: raw}
+		lazy := FromClient[*pgproto3.Query]{source: raw}
 
 		if lazy.IsParsed() {
 			t.Error("IsParsed() should be false before Parse()")
@@ -477,9 +477,9 @@ func TestEncodeFrontendMessage(t *testing.T) {
 	}
 }
 
-func TestLazyServer_EnsureRaw(t *testing.T) {
+func TestFromServer_EnsureRaw(t *testing.T) {
 	t.Run("from parsed", func(t *testing.T) {
-		// Create LazyServer from parsed message (no source initially)
+		// Create FromServer from parsed message (no source initially)
 		parsed := &pgproto3.ReadyForQuery{TxStatus: 'T'}
 		lazy := ServerParsed(parsed)
 
@@ -505,9 +505,9 @@ func TestLazyServer_EnsureRaw(t *testing.T) {
 	})
 
 	t.Run("from raw", func(t *testing.T) {
-		// Create LazyServer from raw bytes
+		// Create FromServer from raw bytes
 		rawBody := RawBody{Type: 'Z', Body: []byte{'I'}}
-		lazy := LazyServer[*pgproto3.ReadyForQuery]{source: rawBody}
+		lazy := FromServer[*pgproto3.ReadyForQuery]{source: rawBody}
 
 		// EnsureRaw should return existing source
 		raw := lazy.EnsureRaw()
@@ -517,9 +517,9 @@ func TestLazyServer_EnsureRaw(t *testing.T) {
 	})
 }
 
-func TestLazyClient_EnsureRaw(t *testing.T) {
+func TestFromClient_EnsureRaw(t *testing.T) {
 	t.Run("from parsed", func(t *testing.T) {
-		// Create LazyClient from parsed message (no source initially)
+		// Create FromClient from parsed message (no source initially)
 		parsed := &pgproto3.Query{String: "SELECT 1"}
 		lazy := ClientParsed(parsed)
 

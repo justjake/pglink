@@ -29,221 +29,221 @@ var (
 )
 
 // ClientStartupGSSEncRequest wraps *pgproto3.GSSEncRequest from the client.
-type ClientStartupGSSEncRequest LazyClient[*pgproto3.GSSEncRequest]
+type ClientStartupGSSEncRequest FromClient[*pgproto3.GSSEncRequest]
 
 func (ClientStartupGSSEncRequest) Startup() {}
 func (t ClientStartupGSSEncRequest) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.GSSEncRequest])(&t).Parse()
+	return (*FromClient[*pgproto3.GSSEncRequest])(&t).Parse()
 }
 func (t ClientStartupGSSEncRequest) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.GSSEncRequest])(&t).Parse()
+	return (*FromClient[*pgproto3.GSSEncRequest])(&t).Parse()
 }
 func (m ClientStartupGSSEncRequest) Raw() RawBody {
-	return LazyClient[*pgproto3.GSSEncRequest](m).Raw()
+	return FromClient[*pgproto3.GSSEncRequest](m).Raw()
 }
 func (m *ClientStartupGSSEncRequest) Parse() *pgproto3.GSSEncRequest {
-	return (*LazyClient[*pgproto3.GSSEncRequest])(m).Parse()
+	return (*FromClient[*pgproto3.GSSEncRequest])(m).Parse()
 }
 func (m ClientStartupGSSEncRequest) IsParsed() bool {
-	return LazyClient[*pgproto3.GSSEncRequest](m).IsParsed()
+	return FromClient[*pgproto3.GSSEncRequest](m).IsParsed()
 }
 func (m ClientStartupGSSEncRequest) Body() []byte {
-	return LazyClient[*pgproto3.GSSEncRequest](m).Body()
+	return FromClient[*pgproto3.GSSEncRequest](m).Body()
 }
 func (m *ClientStartupGSSEncRequest) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.GSSEncRequest])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.GSSEncRequest])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientStartupGSSEncRequest) Retain() ClientStartupGSSEncRequest {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.GSSEncRequest])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.GSSEncRequest])(&m).retainFields()
 	return ClientStartupGSSEncRequest{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ClientStartupGSSResponse wraps *pgproto3.GSSResponse from the client.
-type ClientStartupGSSResponse LazyClient[*pgproto3.GSSResponse]
+type ClientStartupGSSResponse FromClient[*pgproto3.GSSResponse]
 
 func (ClientStartupGSSResponse) Startup() {}
 func (t ClientStartupGSSResponse) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.GSSResponse])(&t).Parse()
+	return (*FromClient[*pgproto3.GSSResponse])(&t).Parse()
 }
 func (t ClientStartupGSSResponse) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.GSSResponse])(&t).Parse()
+	return (*FromClient[*pgproto3.GSSResponse])(&t).Parse()
 }
-func (m ClientStartupGSSResponse) Raw() RawBody { return LazyClient[*pgproto3.GSSResponse](m).Raw() }
+func (m ClientStartupGSSResponse) Raw() RawBody { return FromClient[*pgproto3.GSSResponse](m).Raw() }
 func (m *ClientStartupGSSResponse) Parse() *pgproto3.GSSResponse {
-	return (*LazyClient[*pgproto3.GSSResponse])(m).Parse()
+	return (*FromClient[*pgproto3.GSSResponse])(m).Parse()
 }
 func (m ClientStartupGSSResponse) IsParsed() bool {
-	return LazyClient[*pgproto3.GSSResponse](m).IsParsed()
+	return FromClient[*pgproto3.GSSResponse](m).IsParsed()
 }
-func (m ClientStartupGSSResponse) Body() []byte { return LazyClient[*pgproto3.GSSResponse](m).Body() }
+func (m ClientStartupGSSResponse) Body() []byte { return FromClient[*pgproto3.GSSResponse](m).Body() }
 func (m *ClientStartupGSSResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.GSSResponse])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.GSSResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientStartupGSSResponse) Retain() ClientStartupGSSResponse {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.GSSResponse])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.GSSResponse])(&m).retainFields()
 	return ClientStartupGSSResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ClientStartupPasswordMessage wraps *pgproto3.PasswordMessage from the client.
-type ClientStartupPasswordMessage LazyClient[*pgproto3.PasswordMessage]
+type ClientStartupPasswordMessage FromClient[*pgproto3.PasswordMessage]
 
 func (ClientStartupPasswordMessage) Startup() {}
 func (t ClientStartupPasswordMessage) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.PasswordMessage])(&t).Parse()
+	return (*FromClient[*pgproto3.PasswordMessage])(&t).Parse()
 }
 func (t ClientStartupPasswordMessage) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.PasswordMessage])(&t).Parse()
+	return (*FromClient[*pgproto3.PasswordMessage])(&t).Parse()
 }
 func (m ClientStartupPasswordMessage) Raw() RawBody {
-	return LazyClient[*pgproto3.PasswordMessage](m).Raw()
+	return FromClient[*pgproto3.PasswordMessage](m).Raw()
 }
 func (m *ClientStartupPasswordMessage) Parse() *pgproto3.PasswordMessage {
-	return (*LazyClient[*pgproto3.PasswordMessage])(m).Parse()
+	return (*FromClient[*pgproto3.PasswordMessage])(m).Parse()
 }
 func (m ClientStartupPasswordMessage) IsParsed() bool {
-	return LazyClient[*pgproto3.PasswordMessage](m).IsParsed()
+	return FromClient[*pgproto3.PasswordMessage](m).IsParsed()
 }
 func (m ClientStartupPasswordMessage) Body() []byte {
-	return LazyClient[*pgproto3.PasswordMessage](m).Body()
+	return FromClient[*pgproto3.PasswordMessage](m).Body()
 }
 func (m *ClientStartupPasswordMessage) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.PasswordMessage])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.PasswordMessage])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientStartupPasswordMessage) Retain() ClientStartupPasswordMessage {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.PasswordMessage])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.PasswordMessage])(&m).retainFields()
 	return ClientStartupPasswordMessage{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ClientStartupSASLInitialResponse wraps *pgproto3.SASLInitialResponse from the client.
-type ClientStartupSASLInitialResponse LazyClient[*pgproto3.SASLInitialResponse]
+type ClientStartupSASLInitialResponse FromClient[*pgproto3.SASLInitialResponse]
 
 func (ClientStartupSASLInitialResponse) Startup() {}
 func (t ClientStartupSASLInitialResponse) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.SASLInitialResponse])(&t).Parse()
+	return (*FromClient[*pgproto3.SASLInitialResponse])(&t).Parse()
 }
 func (t ClientStartupSASLInitialResponse) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.SASLInitialResponse])(&t).Parse()
+	return (*FromClient[*pgproto3.SASLInitialResponse])(&t).Parse()
 }
 func (m ClientStartupSASLInitialResponse) Raw() RawBody {
-	return LazyClient[*pgproto3.SASLInitialResponse](m).Raw()
+	return FromClient[*pgproto3.SASLInitialResponse](m).Raw()
 }
 func (m *ClientStartupSASLInitialResponse) Parse() *pgproto3.SASLInitialResponse {
-	return (*LazyClient[*pgproto3.SASLInitialResponse])(m).Parse()
+	return (*FromClient[*pgproto3.SASLInitialResponse])(m).Parse()
 }
 func (m ClientStartupSASLInitialResponse) IsParsed() bool {
-	return LazyClient[*pgproto3.SASLInitialResponse](m).IsParsed()
+	return FromClient[*pgproto3.SASLInitialResponse](m).IsParsed()
 }
 func (m ClientStartupSASLInitialResponse) Body() []byte {
-	return LazyClient[*pgproto3.SASLInitialResponse](m).Body()
+	return FromClient[*pgproto3.SASLInitialResponse](m).Body()
 }
 func (m *ClientStartupSASLInitialResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.SASLInitialResponse])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.SASLInitialResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientStartupSASLInitialResponse) Retain() ClientStartupSASLInitialResponse {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.SASLInitialResponse])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.SASLInitialResponse])(&m).retainFields()
 	return ClientStartupSASLInitialResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ClientStartupSASLResponse wraps *pgproto3.SASLResponse from the client.
-type ClientStartupSASLResponse LazyClient[*pgproto3.SASLResponse]
+type ClientStartupSASLResponse FromClient[*pgproto3.SASLResponse]
 
 func (ClientStartupSASLResponse) Startup() {}
 func (t ClientStartupSASLResponse) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.SASLResponse])(&t).Parse()
+	return (*FromClient[*pgproto3.SASLResponse])(&t).Parse()
 }
 func (t ClientStartupSASLResponse) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.SASLResponse])(&t).Parse()
+	return (*FromClient[*pgproto3.SASLResponse])(&t).Parse()
 }
-func (m ClientStartupSASLResponse) Raw() RawBody { return LazyClient[*pgproto3.SASLResponse](m).Raw() }
+func (m ClientStartupSASLResponse) Raw() RawBody { return FromClient[*pgproto3.SASLResponse](m).Raw() }
 func (m *ClientStartupSASLResponse) Parse() *pgproto3.SASLResponse {
-	return (*LazyClient[*pgproto3.SASLResponse])(m).Parse()
+	return (*FromClient[*pgproto3.SASLResponse])(m).Parse()
 }
 func (m ClientStartupSASLResponse) IsParsed() bool {
-	return LazyClient[*pgproto3.SASLResponse](m).IsParsed()
+	return FromClient[*pgproto3.SASLResponse](m).IsParsed()
 }
-func (m ClientStartupSASLResponse) Body() []byte { return LazyClient[*pgproto3.SASLResponse](m).Body() }
+func (m ClientStartupSASLResponse) Body() []byte { return FromClient[*pgproto3.SASLResponse](m).Body() }
 func (m *ClientStartupSASLResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.SASLResponse])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.SASLResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientStartupSASLResponse) Retain() ClientStartupSASLResponse {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.SASLResponse])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.SASLResponse])(&m).retainFields()
 	return ClientStartupSASLResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ClientStartupSSLRequest wraps *pgproto3.SSLRequest from the client.
-type ClientStartupSSLRequest LazyClient[*pgproto3.SSLRequest]
+type ClientStartupSSLRequest FromClient[*pgproto3.SSLRequest]
 
 func (ClientStartupSSLRequest) Startup() {}
 func (t ClientStartupSSLRequest) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.SSLRequest])(&t).Parse()
+	return (*FromClient[*pgproto3.SSLRequest])(&t).Parse()
 }
 func (t ClientStartupSSLRequest) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.SSLRequest])(&t).Parse()
+	return (*FromClient[*pgproto3.SSLRequest])(&t).Parse()
 }
-func (m ClientStartupSSLRequest) Raw() RawBody { return LazyClient[*pgproto3.SSLRequest](m).Raw() }
+func (m ClientStartupSSLRequest) Raw() RawBody { return FromClient[*pgproto3.SSLRequest](m).Raw() }
 func (m *ClientStartupSSLRequest) Parse() *pgproto3.SSLRequest {
-	return (*LazyClient[*pgproto3.SSLRequest])(m).Parse()
+	return (*FromClient[*pgproto3.SSLRequest])(m).Parse()
 }
 func (m ClientStartupSSLRequest) IsParsed() bool {
-	return LazyClient[*pgproto3.SSLRequest](m).IsParsed()
+	return FromClient[*pgproto3.SSLRequest](m).IsParsed()
 }
-func (m ClientStartupSSLRequest) Body() []byte { return LazyClient[*pgproto3.SSLRequest](m).Body() }
+func (m ClientStartupSSLRequest) Body() []byte { return FromClient[*pgproto3.SSLRequest](m).Body() }
 func (m *ClientStartupSSLRequest) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.SSLRequest])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.SSLRequest])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientStartupSSLRequest) Retain() ClientStartupSSLRequest {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.SSLRequest])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.SSLRequest])(&m).retainFields()
 	return ClientStartupSSLRequest{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ClientStartupStartupMessage wraps *pgproto3.StartupMessage from the client.
-type ClientStartupStartupMessage LazyClient[*pgproto3.StartupMessage]
+type ClientStartupStartupMessage FromClient[*pgproto3.StartupMessage]
 
 func (ClientStartupStartupMessage) Startup() {}
 func (t ClientStartupStartupMessage) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.StartupMessage])(&t).Parse()
+	return (*FromClient[*pgproto3.StartupMessage])(&t).Parse()
 }
 func (t ClientStartupStartupMessage) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.StartupMessage])(&t).Parse()
+	return (*FromClient[*pgproto3.StartupMessage])(&t).Parse()
 }
 func (m ClientStartupStartupMessage) Raw() RawBody {
-	return LazyClient[*pgproto3.StartupMessage](m).Raw()
+	return FromClient[*pgproto3.StartupMessage](m).Raw()
 }
 func (m *ClientStartupStartupMessage) Parse() *pgproto3.StartupMessage {
-	return (*LazyClient[*pgproto3.StartupMessage])(m).Parse()
+	return (*FromClient[*pgproto3.StartupMessage])(m).Parse()
 }
 func (m ClientStartupStartupMessage) IsParsed() bool {
-	return LazyClient[*pgproto3.StartupMessage](m).IsParsed()
+	return FromClient[*pgproto3.StartupMessage](m).IsParsed()
 }
 func (m ClientStartupStartupMessage) Body() []byte {
-	return LazyClient[*pgproto3.StartupMessage](m).Body()
+	return FromClient[*pgproto3.StartupMessage](m).Body()
 }
 func (m *ClientStartupStartupMessage) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.StartupMessage])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.StartupMessage])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientStartupStartupMessage) Retain() ClientStartupStartupMessage {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.StartupMessage])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.StartupMessage])(&m).retainFields()
 	return ClientStartupStartupMessage{source: src, parsed: parsed, isParsed: isParsed}
 }
 

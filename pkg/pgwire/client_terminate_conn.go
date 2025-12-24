@@ -23,31 +23,31 @@ var (
 )
 
 // ClientTerminateConnTerminate wraps *pgproto3.Terminate from the client.
-type ClientTerminateConnTerminate LazyClient[*pgproto3.Terminate]
+type ClientTerminateConnTerminate FromClient[*pgproto3.Terminate]
 
 func (ClientTerminateConnTerminate) TerminateConn() {}
 func (t ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Terminate])(&t).Parse()
+	return (*FromClient[*pgproto3.Terminate])(&t).Parse()
 }
 func (t ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Terminate])(&t).Parse()
+	return (*FromClient[*pgproto3.Terminate])(&t).Parse()
 }
-func (m ClientTerminateConnTerminate) Raw() RawBody { return LazyClient[*pgproto3.Terminate](m).Raw() }
+func (m ClientTerminateConnTerminate) Raw() RawBody { return FromClient[*pgproto3.Terminate](m).Raw() }
 func (m *ClientTerminateConnTerminate) Parse() *pgproto3.Terminate {
-	return (*LazyClient[*pgproto3.Terminate])(m).Parse()
+	return (*FromClient[*pgproto3.Terminate])(m).Parse()
 }
 func (m ClientTerminateConnTerminate) IsParsed() bool {
-	return LazyClient[*pgproto3.Terminate](m).IsParsed()
+	return FromClient[*pgproto3.Terminate](m).IsParsed()
 }
-func (m ClientTerminateConnTerminate) Body() []byte { return LazyClient[*pgproto3.Terminate](m).Body() }
+func (m ClientTerminateConnTerminate) Body() []byte { return FromClient[*pgproto3.Terminate](m).Body() }
 func (m *ClientTerminateConnTerminate) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Terminate])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Terminate])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientTerminateConnTerminate) Retain() ClientTerminateConnTerminate {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Terminate])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Terminate])(&m).retainFields()
 	return ClientTerminateConnTerminate{source: src, parsed: parsed, isParsed: isParsed}
 }
 

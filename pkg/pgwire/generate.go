@@ -338,7 +338,7 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 			fmt.Fprintf(&buf, "// %s wraps %s from the %s.\n", newTypeName, ti.qualified, strings.ToLower(from))
 		}
 
-		// Type definition using type alias for LazyServer/LazyClient
+		// Type definition using type alias for FromServer/FromClient
 		fmt.Fprintf(&buf, "type %s %s[%s]\n\n", newTypeName, lazyType, ti.qualified)
 
 		// Marker methods for interface satisfaction (skip if overridden by return method)

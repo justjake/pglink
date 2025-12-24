@@ -29,56 +29,56 @@ var (
 )
 
 // Extended Query 1: parse text into a prepared statement.
-type ClientExtendedQueryParse LazyClient[*pgproto3.Parse]
+type ClientExtendedQueryParse FromClient[*pgproto3.Parse]
 
 func (ClientExtendedQueryParse) ExtendedQuery() {}
 func (t ClientExtendedQueryParse) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Parse])(&t).Parse()
+	return (*FromClient[*pgproto3.Parse])(&t).Parse()
 }
 func (t ClientExtendedQueryParse) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Parse])(&t).Parse()
+	return (*FromClient[*pgproto3.Parse])(&t).Parse()
 }
-func (m ClientExtendedQueryParse) Raw() RawBody { return LazyClient[*pgproto3.Parse](m).Raw() }
+func (m ClientExtendedQueryParse) Raw() RawBody { return FromClient[*pgproto3.Parse](m).Raw() }
 func (m *ClientExtendedQueryParse) Parse() *pgproto3.Parse {
-	return (*LazyClient[*pgproto3.Parse])(m).Parse()
+	return (*FromClient[*pgproto3.Parse])(m).Parse()
 }
-func (m ClientExtendedQueryParse) IsParsed() bool { return LazyClient[*pgproto3.Parse](m).IsParsed() }
-func (m ClientExtendedQueryParse) Body() []byte   { return LazyClient[*pgproto3.Parse](m).Body() }
+func (m ClientExtendedQueryParse) IsParsed() bool { return FromClient[*pgproto3.Parse](m).IsParsed() }
+func (m ClientExtendedQueryParse) Body() []byte   { return FromClient[*pgproto3.Parse](m).Body() }
 func (m *ClientExtendedQueryParse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Parse])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Parse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientExtendedQueryParse) Retain() ClientExtendedQueryParse {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Parse])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Parse])(&m).retainFields()
 	return ClientExtendedQueryParse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Extended Query 2: Bind parameters to a prepared statement.
-type ClientExtendedQueryBind LazyClient[*pgproto3.Bind]
+type ClientExtendedQueryBind FromClient[*pgproto3.Bind]
 
 func (ClientExtendedQueryBind) ExtendedQuery() {}
 func (t ClientExtendedQueryBind) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Bind])(&t).Parse()
+	return (*FromClient[*pgproto3.Bind])(&t).Parse()
 }
 func (t ClientExtendedQueryBind) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Bind])(&t).Parse()
+	return (*FromClient[*pgproto3.Bind])(&t).Parse()
 }
-func (m ClientExtendedQueryBind) Raw() RawBody { return LazyClient[*pgproto3.Bind](m).Raw() }
+func (m ClientExtendedQueryBind) Raw() RawBody { return FromClient[*pgproto3.Bind](m).Raw() }
 func (m *ClientExtendedQueryBind) Parse() *pgproto3.Bind {
-	return (*LazyClient[*pgproto3.Bind])(m).Parse()
+	return (*FromClient[*pgproto3.Bind])(m).Parse()
 }
-func (m ClientExtendedQueryBind) IsParsed() bool { return LazyClient[*pgproto3.Bind](m).IsParsed() }
-func (m ClientExtendedQueryBind) Body() []byte   { return LazyClient[*pgproto3.Bind](m).Body() }
+func (m ClientExtendedQueryBind) IsParsed() bool { return FromClient[*pgproto3.Bind](m).IsParsed() }
+func (m ClientExtendedQueryBind) Body() []byte   { return FromClient[*pgproto3.Bind](m).Body() }
 func (m *ClientExtendedQueryBind) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Bind])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Bind])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientExtendedQueryBind) Retain() ClientExtendedQueryBind {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Bind])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Bind])(&m).retainFields()
 	return ClientExtendedQueryBind{source: src, parsed: parsed, isParsed: isParsed}
 }
 
@@ -90,31 +90,31 @@ func (m ClientExtendedQueryBind) Retain() ClientExtendedQueryBind {
 // - CommandComplete: success
 // - ErrorResponse: failure
 // - EmptyQueryResponse: the portal was created from an empty query string
-type ClientExtendedQueryExecute LazyClient[*pgproto3.Execute]
+type ClientExtendedQueryExecute FromClient[*pgproto3.Execute]
 
 func (ClientExtendedQueryExecute) ExtendedQuery() {}
 func (t ClientExtendedQueryExecute) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Execute])(&t).Parse()
+	return (*FromClient[*pgproto3.Execute])(&t).Parse()
 }
 func (t ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Execute])(&t).Parse()
+	return (*FromClient[*pgproto3.Execute])(&t).Parse()
 }
-func (m ClientExtendedQueryExecute) Raw() RawBody { return LazyClient[*pgproto3.Execute](m).Raw() }
+func (m ClientExtendedQueryExecute) Raw() RawBody { return FromClient[*pgproto3.Execute](m).Raw() }
 func (m *ClientExtendedQueryExecute) Parse() *pgproto3.Execute {
-	return (*LazyClient[*pgproto3.Execute])(m).Parse()
+	return (*FromClient[*pgproto3.Execute])(m).Parse()
 }
 func (m ClientExtendedQueryExecute) IsParsed() bool {
-	return LazyClient[*pgproto3.Execute](m).IsParsed()
+	return FromClient[*pgproto3.Execute](m).IsParsed()
 }
-func (m ClientExtendedQueryExecute) Body() []byte { return LazyClient[*pgproto3.Execute](m).Body() }
+func (m ClientExtendedQueryExecute) Body() []byte { return FromClient[*pgproto3.Execute](m).Body() }
 func (m *ClientExtendedQueryExecute) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Execute])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Execute])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientExtendedQueryExecute) Retain() ClientExtendedQueryExecute {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Execute])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Execute])(&m).retainFields()
 	return ClientExtendedQueryExecute{source: src, parsed: parsed, isParsed: isParsed}
 }
 
@@ -134,29 +134,29 @@ func (m ClientExtendedQueryExecute) Retain() ClientExtendedQueryExecute {
 // one and only one ReadyForQuery sent for each Sync.)
 // In addition to these fundamental, required operations, there are several
 // optional operations that can be used with extended-query protocol.
-type ClientExtendedQuerySync LazyClient[*pgproto3.Sync]
+type ClientExtendedQuerySync FromClient[*pgproto3.Sync]
 
 func (ClientExtendedQuerySync) ExtendedQuery() {}
 func (t ClientExtendedQuerySync) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Sync])(&t).Parse()
+	return (*FromClient[*pgproto3.Sync])(&t).Parse()
 }
 func (t ClientExtendedQuerySync) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Sync])(&t).Parse()
+	return (*FromClient[*pgproto3.Sync])(&t).Parse()
 }
-func (m ClientExtendedQuerySync) Raw() RawBody { return LazyClient[*pgproto3.Sync](m).Raw() }
+func (m ClientExtendedQuerySync) Raw() RawBody { return FromClient[*pgproto3.Sync](m).Raw() }
 func (m *ClientExtendedQuerySync) Parse() *pgproto3.Sync {
-	return (*LazyClient[*pgproto3.Sync])(m).Parse()
+	return (*FromClient[*pgproto3.Sync])(m).Parse()
 }
-func (m ClientExtendedQuerySync) IsParsed() bool { return LazyClient[*pgproto3.Sync](m).IsParsed() }
-func (m ClientExtendedQuerySync) Body() []byte   { return LazyClient[*pgproto3.Sync](m).Body() }
+func (m ClientExtendedQuerySync) IsParsed() bool { return FromClient[*pgproto3.Sync](m).IsParsed() }
+func (m ClientExtendedQuerySync) Body() []byte   { return FromClient[*pgproto3.Sync](m).Body() }
 func (m *ClientExtendedQuerySync) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Sync])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Sync])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientExtendedQuerySync) Retain() ClientExtendedQuerySync {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Sync])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Sync])(&m).retainFields()
 	return ClientExtendedQuerySync{source: src, parsed: parsed, isParsed: isParsed}
 }
 
@@ -180,60 +180,60 @@ func (m ClientExtendedQuerySync) Retain() ClientExtendedQuerySync {
 // the formats to be used for returned columns are not yet known to the
 // backend; the format code fields in the RowDescription message will be
 // zeroes in this case.
-type ClientExtendedQueryDescribe LazyClient[*pgproto3.Describe]
+type ClientExtendedQueryDescribe FromClient[*pgproto3.Describe]
 
 func (ClientExtendedQueryDescribe) ExtendedQuery() {}
 func (t ClientExtendedQueryDescribe) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Describe])(&t).Parse()
+	return (*FromClient[*pgproto3.Describe])(&t).Parse()
 }
 func (t ClientExtendedQueryDescribe) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Describe])(&t).Parse()
+	return (*FromClient[*pgproto3.Describe])(&t).Parse()
 }
-func (m ClientExtendedQueryDescribe) Raw() RawBody { return LazyClient[*pgproto3.Describe](m).Raw() }
+func (m ClientExtendedQueryDescribe) Raw() RawBody { return FromClient[*pgproto3.Describe](m).Raw() }
 func (m *ClientExtendedQueryDescribe) Parse() *pgproto3.Describe {
-	return (*LazyClient[*pgproto3.Describe])(m).Parse()
+	return (*FromClient[*pgproto3.Describe])(m).Parse()
 }
 func (m ClientExtendedQueryDescribe) IsParsed() bool {
-	return LazyClient[*pgproto3.Describe](m).IsParsed()
+	return FromClient[*pgproto3.Describe](m).IsParsed()
 }
-func (m ClientExtendedQueryDescribe) Body() []byte { return LazyClient[*pgproto3.Describe](m).Body() }
+func (m ClientExtendedQueryDescribe) Body() []byte { return FromClient[*pgproto3.Describe](m).Body() }
 func (m *ClientExtendedQueryDescribe) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Describe])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Describe])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientExtendedQueryDescribe) Retain() ClientExtendedQueryDescribe {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Describe])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Describe])(&m).retainFields()
 	return ClientExtendedQueryDescribe{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Close prepared statement/portal.
 // Note that closing a prepared statement implicitly closes any open
 // portals that were constructed from that statement.
-type ClientExtendedQueryClose LazyClient[*pgproto3.Close]
+type ClientExtendedQueryClose FromClient[*pgproto3.Close]
 
 func (ClientExtendedQueryClose) ExtendedQuery() {}
 func (t ClientExtendedQueryClose) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Close])(&t).Parse()
+	return (*FromClient[*pgproto3.Close])(&t).Parse()
 }
 func (t ClientExtendedQueryClose) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Close])(&t).Parse()
+	return (*FromClient[*pgproto3.Close])(&t).Parse()
 }
-func (m ClientExtendedQueryClose) Raw() RawBody { return LazyClient[*pgproto3.Close](m).Raw() }
+func (m ClientExtendedQueryClose) Raw() RawBody { return FromClient[*pgproto3.Close](m).Raw() }
 func (m *ClientExtendedQueryClose) Parse() *pgproto3.Close {
-	return (*LazyClient[*pgproto3.Close])(m).Parse()
+	return (*FromClient[*pgproto3.Close])(m).Parse()
 }
-func (m ClientExtendedQueryClose) IsParsed() bool { return LazyClient[*pgproto3.Close](m).IsParsed() }
-func (m ClientExtendedQueryClose) Body() []byte   { return LazyClient[*pgproto3.Close](m).Body() }
+func (m ClientExtendedQueryClose) IsParsed() bool { return FromClient[*pgproto3.Close](m).IsParsed() }
+func (m ClientExtendedQueryClose) Body() []byte   { return FromClient[*pgproto3.Close](m).Body() }
 func (m *ClientExtendedQueryClose) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Close])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Close])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientExtendedQueryClose) Retain() ClientExtendedQueryClose {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Close])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Close])(&m).retainFields()
 	return ClientExtendedQueryClose{source: src, parsed: parsed, isParsed: isParsed}
 }
 
@@ -244,29 +244,29 @@ func (m ClientExtendedQueryClose) Retain() ClientExtendedQueryClose {
 // before issuing more commands. Without Flush, messages returned by the
 // backend will be combined into the minimum possible number of packets to
 // minimize network overhead.
-type ClientExtendedQueryFlush LazyClient[*pgproto3.Flush]
+type ClientExtendedQueryFlush FromClient[*pgproto3.Flush]
 
 func (ClientExtendedQueryFlush) ExtendedQuery() {}
 func (t ClientExtendedQueryFlush) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Flush])(&t).Parse()
+	return (*FromClient[*pgproto3.Flush])(&t).Parse()
 }
 func (t ClientExtendedQueryFlush) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Flush])(&t).Parse()
+	return (*FromClient[*pgproto3.Flush])(&t).Parse()
 }
-func (m ClientExtendedQueryFlush) Raw() RawBody { return LazyClient[*pgproto3.Flush](m).Raw() }
+func (m ClientExtendedQueryFlush) Raw() RawBody { return FromClient[*pgproto3.Flush](m).Raw() }
 func (m *ClientExtendedQueryFlush) Parse() *pgproto3.Flush {
-	return (*LazyClient[*pgproto3.Flush])(m).Parse()
+	return (*FromClient[*pgproto3.Flush])(m).Parse()
 }
-func (m ClientExtendedQueryFlush) IsParsed() bool { return LazyClient[*pgproto3.Flush](m).IsParsed() }
-func (m ClientExtendedQueryFlush) Body() []byte   { return LazyClient[*pgproto3.Flush](m).Body() }
+func (m ClientExtendedQueryFlush) IsParsed() bool { return FromClient[*pgproto3.Flush](m).IsParsed() }
+func (m ClientExtendedQueryFlush) Body() []byte   { return FromClient[*pgproto3.Flush](m).Body() }
 func (m *ClientExtendedQueryFlush) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Flush])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Flush])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientExtendedQueryFlush) Retain() ClientExtendedQueryFlush {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Flush])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Flush])(&m).retainFields()
 	return ClientExtendedQueryFlush{source: src, parsed: parsed, isParsed: isParsed}
 }
 

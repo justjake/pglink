@@ -25,101 +25,101 @@ var (
 )
 
 // Warning message.
-type ServerAsyncNoticeResponse LazyServer[*pgproto3.NoticeResponse]
+type ServerAsyncNoticeResponse FromServer[*pgproto3.NoticeResponse]
 
 func (ServerAsyncNoticeResponse) Async() {}
 func (t ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.NoticeResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.NoticeResponse])(&t).Parse()
 }
 func (t ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.NoticeResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.NoticeResponse])(&t).Parse()
 }
 func (m ServerAsyncNoticeResponse) Raw() RawBody {
-	return LazyServer[*pgproto3.NoticeResponse](m).Raw()
+	return FromServer[*pgproto3.NoticeResponse](m).Raw()
 }
 func (m *ServerAsyncNoticeResponse) Parse() *pgproto3.NoticeResponse {
-	return (*LazyServer[*pgproto3.NoticeResponse])(m).Parse()
+	return (*FromServer[*pgproto3.NoticeResponse])(m).Parse()
 }
 func (m ServerAsyncNoticeResponse) IsParsed() bool {
-	return LazyServer[*pgproto3.NoticeResponse](m).IsParsed()
+	return FromServer[*pgproto3.NoticeResponse](m).IsParsed()
 }
 func (m ServerAsyncNoticeResponse) Body() []byte {
-	return LazyServer[*pgproto3.NoticeResponse](m).Body()
+	return FromServer[*pgproto3.NoticeResponse](m).Body()
 }
 func (m *ServerAsyncNoticeResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.NoticeResponse])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.NoticeResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerAsyncNoticeResponse) Retain() ServerAsyncNoticeResponse {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.NoticeResponse])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.NoticeResponse])(&m).retainFields()
 	return ServerAsyncNoticeResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // LISTEN/NOTIFY notification.
-type ServerAsyncNotificationResponse LazyServer[*pgproto3.NotificationResponse]
+type ServerAsyncNotificationResponse FromServer[*pgproto3.NotificationResponse]
 
 func (ServerAsyncNotificationResponse) Async() {}
 func (t ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.NotificationResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.NotificationResponse])(&t).Parse()
 }
 func (t ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.NotificationResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.NotificationResponse])(&t).Parse()
 }
 func (m ServerAsyncNotificationResponse) Raw() RawBody {
-	return LazyServer[*pgproto3.NotificationResponse](m).Raw()
+	return FromServer[*pgproto3.NotificationResponse](m).Raw()
 }
 func (m *ServerAsyncNotificationResponse) Parse() *pgproto3.NotificationResponse {
-	return (*LazyServer[*pgproto3.NotificationResponse])(m).Parse()
+	return (*FromServer[*pgproto3.NotificationResponse])(m).Parse()
 }
 func (m ServerAsyncNotificationResponse) IsParsed() bool {
-	return LazyServer[*pgproto3.NotificationResponse](m).IsParsed()
+	return FromServer[*pgproto3.NotificationResponse](m).IsParsed()
 }
 func (m ServerAsyncNotificationResponse) Body() []byte {
-	return LazyServer[*pgproto3.NotificationResponse](m).Body()
+	return FromServer[*pgproto3.NotificationResponse](m).Body()
 }
 func (m *ServerAsyncNotificationResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.NotificationResponse])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.NotificationResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerAsyncNotificationResponse) Retain() ServerAsyncNotificationResponse {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.NotificationResponse])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.NotificationResponse])(&m).retainFields()
 	return ServerAsyncNotificationResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Informs client that runtime parameter value changed.
-type ServerAsyncParameterStatus LazyServer[*pgproto3.ParameterStatus]
+type ServerAsyncParameterStatus FromServer[*pgproto3.ParameterStatus]
 
 func (ServerAsyncParameterStatus) Async() {}
 func (t ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.ParameterStatus])(&t).Parse()
+	return (*FromServer[*pgproto3.ParameterStatus])(&t).Parse()
 }
 func (t ServerAsyncParameterStatus) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.ParameterStatus])(&t).Parse()
+	return (*FromServer[*pgproto3.ParameterStatus])(&t).Parse()
 }
 func (m ServerAsyncParameterStatus) Raw() RawBody {
-	return LazyServer[*pgproto3.ParameterStatus](m).Raw()
+	return FromServer[*pgproto3.ParameterStatus](m).Raw()
 }
 func (m *ServerAsyncParameterStatus) Parse() *pgproto3.ParameterStatus {
-	return (*LazyServer[*pgproto3.ParameterStatus])(m).Parse()
+	return (*FromServer[*pgproto3.ParameterStatus])(m).Parse()
 }
 func (m ServerAsyncParameterStatus) IsParsed() bool {
-	return LazyServer[*pgproto3.ParameterStatus](m).IsParsed()
+	return FromServer[*pgproto3.ParameterStatus](m).IsParsed()
 }
 func (m ServerAsyncParameterStatus) Body() []byte {
-	return LazyServer[*pgproto3.ParameterStatus](m).Body()
+	return FromServer[*pgproto3.ParameterStatus](m).Body()
 }
 func (m *ServerAsyncParameterStatus) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.ParameterStatus])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.ParameterStatus])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerAsyncParameterStatus) Retain() ServerAsyncParameterStatus {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.ParameterStatus])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.ParameterStatus])(&m).retainFields()
 	return ServerAsyncParameterStatus{source: src, parsed: parsed, isParsed: isParsed}
 }
 

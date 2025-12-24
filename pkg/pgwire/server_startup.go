@@ -31,300 +31,300 @@ var (
 )
 
 // ServerStartupAuthenticationCleartextPassword wraps *pgproto3.AuthenticationCleartextPassword from the server.
-type ServerStartupAuthenticationCleartextPassword LazyServer[*pgproto3.AuthenticationCleartextPassword]
+type ServerStartupAuthenticationCleartextPassword FromServer[*pgproto3.AuthenticationCleartextPassword]
 
 func (ServerStartupAuthenticationCleartextPassword) Startup() {}
 func (t ServerStartupAuthenticationCleartextPassword) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.AuthenticationCleartextPassword])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(&t).Parse()
 }
 func (t ServerStartupAuthenticationCleartextPassword) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.AuthenticationCleartextPassword])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(&t).Parse()
 }
 func (m ServerStartupAuthenticationCleartextPassword) Raw() RawBody {
-	return LazyServer[*pgproto3.AuthenticationCleartextPassword](m).Raw()
+	return FromServer[*pgproto3.AuthenticationCleartextPassword](m).Raw()
 }
 func (m *ServerStartupAuthenticationCleartextPassword) Parse() *pgproto3.AuthenticationCleartextPassword {
-	return (*LazyServer[*pgproto3.AuthenticationCleartextPassword])(m).Parse()
+	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(m).Parse()
 }
 func (m ServerStartupAuthenticationCleartextPassword) IsParsed() bool {
-	return LazyServer[*pgproto3.AuthenticationCleartextPassword](m).IsParsed()
+	return FromServer[*pgproto3.AuthenticationCleartextPassword](m).IsParsed()
 }
 func (m ServerStartupAuthenticationCleartextPassword) Body() []byte {
-	return LazyServer[*pgproto3.AuthenticationCleartextPassword](m).Body()
+	return FromServer[*pgproto3.AuthenticationCleartextPassword](m).Body()
 }
 func (m *ServerStartupAuthenticationCleartextPassword) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.AuthenticationCleartextPassword])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupAuthenticationCleartextPassword) Retain() ServerStartupAuthenticationCleartextPassword {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.AuthenticationCleartextPassword])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationCleartextPassword])(&m).retainFields()
 	return ServerStartupAuthenticationCleartextPassword{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ServerStartupAuthenticationGSS wraps *pgproto3.AuthenticationGSS from the server.
-type ServerStartupAuthenticationGSS LazyServer[*pgproto3.AuthenticationGSS]
+type ServerStartupAuthenticationGSS FromServer[*pgproto3.AuthenticationGSS]
 
 func (ServerStartupAuthenticationGSS) Startup() {}
 func (t ServerStartupAuthenticationGSS) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.AuthenticationGSS])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationGSS])(&t).Parse()
 }
 func (t ServerStartupAuthenticationGSS) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.AuthenticationGSS])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationGSS])(&t).Parse()
 }
 func (m ServerStartupAuthenticationGSS) Raw() RawBody {
-	return LazyServer[*pgproto3.AuthenticationGSS](m).Raw()
+	return FromServer[*pgproto3.AuthenticationGSS](m).Raw()
 }
 func (m *ServerStartupAuthenticationGSS) Parse() *pgproto3.AuthenticationGSS {
-	return (*LazyServer[*pgproto3.AuthenticationGSS])(m).Parse()
+	return (*FromServer[*pgproto3.AuthenticationGSS])(m).Parse()
 }
 func (m ServerStartupAuthenticationGSS) IsParsed() bool {
-	return LazyServer[*pgproto3.AuthenticationGSS](m).IsParsed()
+	return FromServer[*pgproto3.AuthenticationGSS](m).IsParsed()
 }
 func (m ServerStartupAuthenticationGSS) Body() []byte {
-	return LazyServer[*pgproto3.AuthenticationGSS](m).Body()
+	return FromServer[*pgproto3.AuthenticationGSS](m).Body()
 }
 func (m *ServerStartupAuthenticationGSS) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.AuthenticationGSS])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.AuthenticationGSS])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupAuthenticationGSS) Retain() ServerStartupAuthenticationGSS {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.AuthenticationGSS])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationGSS])(&m).retainFields()
 	return ServerStartupAuthenticationGSS{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ServerStartupAuthenticationGSSContinue wraps *pgproto3.AuthenticationGSSContinue from the server.
-type ServerStartupAuthenticationGSSContinue LazyServer[*pgproto3.AuthenticationGSSContinue]
+type ServerStartupAuthenticationGSSContinue FromServer[*pgproto3.AuthenticationGSSContinue]
 
 func (ServerStartupAuthenticationGSSContinue) Startup() {}
 func (t ServerStartupAuthenticationGSSContinue) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.AuthenticationGSSContinue])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(&t).Parse()
 }
 func (t ServerStartupAuthenticationGSSContinue) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.AuthenticationGSSContinue])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(&t).Parse()
 }
 func (m ServerStartupAuthenticationGSSContinue) Raw() RawBody {
-	return LazyServer[*pgproto3.AuthenticationGSSContinue](m).Raw()
+	return FromServer[*pgproto3.AuthenticationGSSContinue](m).Raw()
 }
 func (m *ServerStartupAuthenticationGSSContinue) Parse() *pgproto3.AuthenticationGSSContinue {
-	return (*LazyServer[*pgproto3.AuthenticationGSSContinue])(m).Parse()
+	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(m).Parse()
 }
 func (m ServerStartupAuthenticationGSSContinue) IsParsed() bool {
-	return LazyServer[*pgproto3.AuthenticationGSSContinue](m).IsParsed()
+	return FromServer[*pgproto3.AuthenticationGSSContinue](m).IsParsed()
 }
 func (m ServerStartupAuthenticationGSSContinue) Body() []byte {
-	return LazyServer[*pgproto3.AuthenticationGSSContinue](m).Body()
+	return FromServer[*pgproto3.AuthenticationGSSContinue](m).Body()
 }
 func (m *ServerStartupAuthenticationGSSContinue) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.AuthenticationGSSContinue])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupAuthenticationGSSContinue) Retain() ServerStartupAuthenticationGSSContinue {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.AuthenticationGSSContinue])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationGSSContinue])(&m).retainFields()
 	return ServerStartupAuthenticationGSSContinue{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ServerStartupAuthenticationMD5Password wraps *pgproto3.AuthenticationMD5Password from the server.
-type ServerStartupAuthenticationMD5Password LazyServer[*pgproto3.AuthenticationMD5Password]
+type ServerStartupAuthenticationMD5Password FromServer[*pgproto3.AuthenticationMD5Password]
 
 func (ServerStartupAuthenticationMD5Password) Startup() {}
 func (t ServerStartupAuthenticationMD5Password) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.AuthenticationMD5Password])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationMD5Password])(&t).Parse()
 }
 func (t ServerStartupAuthenticationMD5Password) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.AuthenticationMD5Password])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationMD5Password])(&t).Parse()
 }
 func (m ServerStartupAuthenticationMD5Password) Raw() RawBody {
-	return LazyServer[*pgproto3.AuthenticationMD5Password](m).Raw()
+	return FromServer[*pgproto3.AuthenticationMD5Password](m).Raw()
 }
 func (m *ServerStartupAuthenticationMD5Password) Parse() *pgproto3.AuthenticationMD5Password {
-	return (*LazyServer[*pgproto3.AuthenticationMD5Password])(m).Parse()
+	return (*FromServer[*pgproto3.AuthenticationMD5Password])(m).Parse()
 }
 func (m ServerStartupAuthenticationMD5Password) IsParsed() bool {
-	return LazyServer[*pgproto3.AuthenticationMD5Password](m).IsParsed()
+	return FromServer[*pgproto3.AuthenticationMD5Password](m).IsParsed()
 }
 func (m ServerStartupAuthenticationMD5Password) Body() []byte {
-	return LazyServer[*pgproto3.AuthenticationMD5Password](m).Body()
+	return FromServer[*pgproto3.AuthenticationMD5Password](m).Body()
 }
 func (m *ServerStartupAuthenticationMD5Password) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.AuthenticationMD5Password])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.AuthenticationMD5Password])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupAuthenticationMD5Password) Retain() ServerStartupAuthenticationMD5Password {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.AuthenticationMD5Password])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationMD5Password])(&m).retainFields()
 	return ServerStartupAuthenticationMD5Password{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ServerStartupAuthenticationOk wraps *pgproto3.AuthenticationOk from the server.
-type ServerStartupAuthenticationOk LazyServer[*pgproto3.AuthenticationOk]
+type ServerStartupAuthenticationOk FromServer[*pgproto3.AuthenticationOk]
 
 func (ServerStartupAuthenticationOk) Startup() {}
 func (t ServerStartupAuthenticationOk) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.AuthenticationOk])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationOk])(&t).Parse()
 }
 func (t ServerStartupAuthenticationOk) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.AuthenticationOk])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationOk])(&t).Parse()
 }
 func (m ServerStartupAuthenticationOk) Raw() RawBody {
-	return LazyServer[*pgproto3.AuthenticationOk](m).Raw()
+	return FromServer[*pgproto3.AuthenticationOk](m).Raw()
 }
 func (m *ServerStartupAuthenticationOk) Parse() *pgproto3.AuthenticationOk {
-	return (*LazyServer[*pgproto3.AuthenticationOk])(m).Parse()
+	return (*FromServer[*pgproto3.AuthenticationOk])(m).Parse()
 }
 func (m ServerStartupAuthenticationOk) IsParsed() bool {
-	return LazyServer[*pgproto3.AuthenticationOk](m).IsParsed()
+	return FromServer[*pgproto3.AuthenticationOk](m).IsParsed()
 }
 func (m ServerStartupAuthenticationOk) Body() []byte {
-	return LazyServer[*pgproto3.AuthenticationOk](m).Body()
+	return FromServer[*pgproto3.AuthenticationOk](m).Body()
 }
 func (m *ServerStartupAuthenticationOk) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.AuthenticationOk])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.AuthenticationOk])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupAuthenticationOk) Retain() ServerStartupAuthenticationOk {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.AuthenticationOk])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationOk])(&m).retainFields()
 	return ServerStartupAuthenticationOk{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ServerStartupAuthenticationSASL wraps *pgproto3.AuthenticationSASL from the server.
-type ServerStartupAuthenticationSASL LazyServer[*pgproto3.AuthenticationSASL]
+type ServerStartupAuthenticationSASL FromServer[*pgproto3.AuthenticationSASL]
 
 func (ServerStartupAuthenticationSASL) Startup() {}
 func (t ServerStartupAuthenticationSASL) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.AuthenticationSASL])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASL])(&t).Parse()
 }
 func (t ServerStartupAuthenticationSASL) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.AuthenticationSASL])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASL])(&t).Parse()
 }
 func (m ServerStartupAuthenticationSASL) Raw() RawBody {
-	return LazyServer[*pgproto3.AuthenticationSASL](m).Raw()
+	return FromServer[*pgproto3.AuthenticationSASL](m).Raw()
 }
 func (m *ServerStartupAuthenticationSASL) Parse() *pgproto3.AuthenticationSASL {
-	return (*LazyServer[*pgproto3.AuthenticationSASL])(m).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASL])(m).Parse()
 }
 func (m ServerStartupAuthenticationSASL) IsParsed() bool {
-	return LazyServer[*pgproto3.AuthenticationSASL](m).IsParsed()
+	return FromServer[*pgproto3.AuthenticationSASL](m).IsParsed()
 }
 func (m ServerStartupAuthenticationSASL) Body() []byte {
-	return LazyServer[*pgproto3.AuthenticationSASL](m).Body()
+	return FromServer[*pgproto3.AuthenticationSASL](m).Body()
 }
 func (m *ServerStartupAuthenticationSASL) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.AuthenticationSASL])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.AuthenticationSASL])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupAuthenticationSASL) Retain() ServerStartupAuthenticationSASL {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.AuthenticationSASL])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationSASL])(&m).retainFields()
 	return ServerStartupAuthenticationSASL{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ServerStartupAuthenticationSASLContinue wraps *pgproto3.AuthenticationSASLContinue from the server.
-type ServerStartupAuthenticationSASLContinue LazyServer[*pgproto3.AuthenticationSASLContinue]
+type ServerStartupAuthenticationSASLContinue FromServer[*pgproto3.AuthenticationSASLContinue]
 
 func (ServerStartupAuthenticationSASLContinue) Startup() {}
 func (t ServerStartupAuthenticationSASLContinue) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.AuthenticationSASLContinue])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(&t).Parse()
 }
 func (t ServerStartupAuthenticationSASLContinue) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.AuthenticationSASLContinue])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(&t).Parse()
 }
 func (m ServerStartupAuthenticationSASLContinue) Raw() RawBody {
-	return LazyServer[*pgproto3.AuthenticationSASLContinue](m).Raw()
+	return FromServer[*pgproto3.AuthenticationSASLContinue](m).Raw()
 }
 func (m *ServerStartupAuthenticationSASLContinue) Parse() *pgproto3.AuthenticationSASLContinue {
-	return (*LazyServer[*pgproto3.AuthenticationSASLContinue])(m).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(m).Parse()
 }
 func (m ServerStartupAuthenticationSASLContinue) IsParsed() bool {
-	return LazyServer[*pgproto3.AuthenticationSASLContinue](m).IsParsed()
+	return FromServer[*pgproto3.AuthenticationSASLContinue](m).IsParsed()
 }
 func (m ServerStartupAuthenticationSASLContinue) Body() []byte {
-	return LazyServer[*pgproto3.AuthenticationSASLContinue](m).Body()
+	return FromServer[*pgproto3.AuthenticationSASLContinue](m).Body()
 }
 func (m *ServerStartupAuthenticationSASLContinue) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.AuthenticationSASLContinue])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupAuthenticationSASLContinue) Retain() ServerStartupAuthenticationSASLContinue {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.AuthenticationSASLContinue])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationSASLContinue])(&m).retainFields()
 	return ServerStartupAuthenticationSASLContinue{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ServerStartupAuthenticationSASLFinal wraps *pgproto3.AuthenticationSASLFinal from the server.
-type ServerStartupAuthenticationSASLFinal LazyServer[*pgproto3.AuthenticationSASLFinal]
+type ServerStartupAuthenticationSASLFinal FromServer[*pgproto3.AuthenticationSASLFinal]
 
 func (ServerStartupAuthenticationSASLFinal) Startup() {}
 func (t ServerStartupAuthenticationSASLFinal) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.AuthenticationSASLFinal])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(&t).Parse()
 }
 func (t ServerStartupAuthenticationSASLFinal) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.AuthenticationSASLFinal])(&t).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(&t).Parse()
 }
 func (m ServerStartupAuthenticationSASLFinal) Raw() RawBody {
-	return LazyServer[*pgproto3.AuthenticationSASLFinal](m).Raw()
+	return FromServer[*pgproto3.AuthenticationSASLFinal](m).Raw()
 }
 func (m *ServerStartupAuthenticationSASLFinal) Parse() *pgproto3.AuthenticationSASLFinal {
-	return (*LazyServer[*pgproto3.AuthenticationSASLFinal])(m).Parse()
+	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(m).Parse()
 }
 func (m ServerStartupAuthenticationSASLFinal) IsParsed() bool {
-	return LazyServer[*pgproto3.AuthenticationSASLFinal](m).IsParsed()
+	return FromServer[*pgproto3.AuthenticationSASLFinal](m).IsParsed()
 }
 func (m ServerStartupAuthenticationSASLFinal) Body() []byte {
-	return LazyServer[*pgproto3.AuthenticationSASLFinal](m).Body()
+	return FromServer[*pgproto3.AuthenticationSASLFinal](m).Body()
 }
 func (m *ServerStartupAuthenticationSASLFinal) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.AuthenticationSASLFinal])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupAuthenticationSASLFinal) Retain() ServerStartupAuthenticationSASLFinal {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.AuthenticationSASLFinal])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationSASLFinal])(&m).retainFields()
 	return ServerStartupAuthenticationSASLFinal{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Secret key data for cancel requests.
 // This should be already captured when we establish the connection.
-type ServerStartupBackendKeyData LazyServer[*pgproto3.BackendKeyData]
+type ServerStartupBackendKeyData FromServer[*pgproto3.BackendKeyData]
 
 func (ServerStartupBackendKeyData) Startup() {}
 func (t ServerStartupBackendKeyData) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.BackendKeyData])(&t).Parse()
+	return (*FromServer[*pgproto3.BackendKeyData])(&t).Parse()
 }
 func (t ServerStartupBackendKeyData) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.BackendKeyData])(&t).Parse()
+	return (*FromServer[*pgproto3.BackendKeyData])(&t).Parse()
 }
 func (m ServerStartupBackendKeyData) Raw() RawBody {
-	return LazyServer[*pgproto3.BackendKeyData](m).Raw()
+	return FromServer[*pgproto3.BackendKeyData](m).Raw()
 }
 func (m *ServerStartupBackendKeyData) Parse() *pgproto3.BackendKeyData {
-	return (*LazyServer[*pgproto3.BackendKeyData])(m).Parse()
+	return (*FromServer[*pgproto3.BackendKeyData])(m).Parse()
 }
 func (m ServerStartupBackendKeyData) IsParsed() bool {
-	return LazyServer[*pgproto3.BackendKeyData](m).IsParsed()
+	return FromServer[*pgproto3.BackendKeyData](m).IsParsed()
 }
 func (m ServerStartupBackendKeyData) Body() []byte {
-	return LazyServer[*pgproto3.BackendKeyData](m).Body()
+	return FromServer[*pgproto3.BackendKeyData](m).Body()
 }
 func (m *ServerStartupBackendKeyData) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.BackendKeyData])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.BackendKeyData])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerStartupBackendKeyData) Retain() ServerStartupBackendKeyData {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.BackendKeyData])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.BackendKeyData])(&m).retainFields()
 	return ServerStartupBackendKeyData{source: src, parsed: parsed, isParsed: isParsed}
 }
 

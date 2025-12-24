@@ -23,33 +23,33 @@ var (
 )
 
 // ClientCancelCancelRequest wraps *pgproto3.CancelRequest from the client.
-type ClientCancelCancelRequest LazyClient[*pgproto3.CancelRequest]
+type ClientCancelCancelRequest FromClient[*pgproto3.CancelRequest]
 
 func (ClientCancelCancelRequest) Cancel() {}
 func (t ClientCancelCancelRequest) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.CancelRequest])(&t).Parse()
+	return (*FromClient[*pgproto3.CancelRequest])(&t).Parse()
 }
 func (t ClientCancelCancelRequest) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.CancelRequest])(&t).Parse()
+	return (*FromClient[*pgproto3.CancelRequest])(&t).Parse()
 }
-func (m ClientCancelCancelRequest) Raw() RawBody { return LazyClient[*pgproto3.CancelRequest](m).Raw() }
+func (m ClientCancelCancelRequest) Raw() RawBody { return FromClient[*pgproto3.CancelRequest](m).Raw() }
 func (m *ClientCancelCancelRequest) Parse() *pgproto3.CancelRequest {
-	return (*LazyClient[*pgproto3.CancelRequest])(m).Parse()
+	return (*FromClient[*pgproto3.CancelRequest])(m).Parse()
 }
 func (m ClientCancelCancelRequest) IsParsed() bool {
-	return LazyClient[*pgproto3.CancelRequest](m).IsParsed()
+	return FromClient[*pgproto3.CancelRequest](m).IsParsed()
 }
 func (m ClientCancelCancelRequest) Body() []byte {
-	return LazyClient[*pgproto3.CancelRequest](m).Body()
+	return FromClient[*pgproto3.CancelRequest](m).Body()
 }
 func (m *ClientCancelCancelRequest) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.CancelRequest])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.CancelRequest])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientCancelCancelRequest) Retain() ClientCancelCancelRequest {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.CancelRequest])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.CancelRequest])(&m).retainFields()
 	return ClientCancelCancelRequest{source: src, parsed: parsed, isParsed: isParsed}
 }
 

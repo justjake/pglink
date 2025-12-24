@@ -10,22 +10,10 @@ type Message interface {
 	PgwireMessage() pgproto3.Message
 }
 
-// FromFrontend wraps a message that came from the frontend.
-// Used if message is both Frontend and Backend, to distinguish its origin at runtime.
-type FromClient[T pgproto3.FrontendMessage] struct {
-	T T
-}
-
 type ClientMessage interface {
 	Message
 	Client() pgproto3.FrontendMessage
 	Raw() RawBody // Returns raw bytes for fast forwarding
-}
-
-// FromBackend wraps a message that came from the backend.
-// Used if message is both Frontend and Backend, to distinguish its origin at runtime.
-type FromServer[T pgproto3.BackendMessage] struct {
-	T T
 }
 
 type ServerMessage interface {

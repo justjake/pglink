@@ -30,194 +30,194 @@ var (
 // Start-up completed.
 // Simple Query mode: ready for next query.
 // Extended Query mode: response to Sync; backend no longer ignoring messages, ready for next command.
-type ServerResponseReadyForQuery LazyServer[*pgproto3.ReadyForQuery]
+type ServerResponseReadyForQuery FromServer[*pgproto3.ReadyForQuery]
 
 func (ServerResponseReadyForQuery) Response() {}
 func (t ServerResponseReadyForQuery) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.ReadyForQuery])(&t).Parse()
+	return (*FromServer[*pgproto3.ReadyForQuery])(&t).Parse()
 }
 func (t ServerResponseReadyForQuery) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.ReadyForQuery])(&t).Parse()
+	return (*FromServer[*pgproto3.ReadyForQuery])(&t).Parse()
 }
 func (m ServerResponseReadyForQuery) Raw() RawBody {
-	return LazyServer[*pgproto3.ReadyForQuery](m).Raw()
+	return FromServer[*pgproto3.ReadyForQuery](m).Raw()
 }
 func (m *ServerResponseReadyForQuery) Parse() *pgproto3.ReadyForQuery {
-	return (*LazyServer[*pgproto3.ReadyForQuery])(m).Parse()
+	return (*FromServer[*pgproto3.ReadyForQuery])(m).Parse()
 }
 func (m ServerResponseReadyForQuery) IsParsed() bool {
-	return LazyServer[*pgproto3.ReadyForQuery](m).IsParsed()
+	return FromServer[*pgproto3.ReadyForQuery](m).IsParsed()
 }
 func (m ServerResponseReadyForQuery) Body() []byte {
-	return LazyServer[*pgproto3.ReadyForQuery](m).Body()
+	return FromServer[*pgproto3.ReadyForQuery](m).Body()
 }
 func (m *ServerResponseReadyForQuery) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.ReadyForQuery])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.ReadyForQuery])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerResponseReadyForQuery) Retain() ServerResponseReadyForQuery {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.ReadyForQuery])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.ReadyForQuery])(&m).retainFields()
 	return ServerResponseReadyForQuery{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // SQL command completed normally.
-type ServerResponseCommandComplete LazyServer[*pgproto3.CommandComplete]
+type ServerResponseCommandComplete FromServer[*pgproto3.CommandComplete]
 
 func (ServerResponseCommandComplete) Response() {}
 func (t ServerResponseCommandComplete) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.CommandComplete])(&t).Parse()
+	return (*FromServer[*pgproto3.CommandComplete])(&t).Parse()
 }
 func (t ServerResponseCommandComplete) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.CommandComplete])(&t).Parse()
+	return (*FromServer[*pgproto3.CommandComplete])(&t).Parse()
 }
 func (m ServerResponseCommandComplete) Raw() RawBody {
-	return LazyServer[*pgproto3.CommandComplete](m).Raw()
+	return FromServer[*pgproto3.CommandComplete](m).Raw()
 }
 func (m *ServerResponseCommandComplete) Parse() *pgproto3.CommandComplete {
-	return (*LazyServer[*pgproto3.CommandComplete])(m).Parse()
+	return (*FromServer[*pgproto3.CommandComplete])(m).Parse()
 }
 func (m ServerResponseCommandComplete) IsParsed() bool {
-	return LazyServer[*pgproto3.CommandComplete](m).IsParsed()
+	return FromServer[*pgproto3.CommandComplete](m).IsParsed()
 }
 func (m ServerResponseCommandComplete) Body() []byte {
-	return LazyServer[*pgproto3.CommandComplete](m).Body()
+	return FromServer[*pgproto3.CommandComplete](m).Body()
 }
 func (m *ServerResponseCommandComplete) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.CommandComplete])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.CommandComplete])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerResponseCommandComplete) Retain() ServerResponseCommandComplete {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.CommandComplete])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.CommandComplete])(&m).retainFields()
 	return ServerResponseCommandComplete{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Query results (both query modes)
-type ServerResponseDataRow LazyServer[*pgproto3.DataRow]
+type ServerResponseDataRow FromServer[*pgproto3.DataRow]
 
 func (ServerResponseDataRow) Response() {}
 func (t ServerResponseDataRow) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.DataRow])(&t).Parse()
+	return (*FromServer[*pgproto3.DataRow])(&t).Parse()
 }
 func (t ServerResponseDataRow) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.DataRow])(&t).Parse()
+	return (*FromServer[*pgproto3.DataRow])(&t).Parse()
 }
-func (m ServerResponseDataRow) Raw() RawBody { return LazyServer[*pgproto3.DataRow](m).Raw() }
+func (m ServerResponseDataRow) Raw() RawBody { return FromServer[*pgproto3.DataRow](m).Raw() }
 func (m *ServerResponseDataRow) Parse() *pgproto3.DataRow {
-	return (*LazyServer[*pgproto3.DataRow])(m).Parse()
+	return (*FromServer[*pgproto3.DataRow])(m).Parse()
 }
-func (m ServerResponseDataRow) IsParsed() bool { return LazyServer[*pgproto3.DataRow](m).IsParsed() }
-func (m ServerResponseDataRow) Body() []byte   { return LazyServer[*pgproto3.DataRow](m).Body() }
+func (m ServerResponseDataRow) IsParsed() bool { return FromServer[*pgproto3.DataRow](m).IsParsed() }
+func (m ServerResponseDataRow) Body() []byte   { return FromServer[*pgproto3.DataRow](m).Body() }
 func (m *ServerResponseDataRow) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.DataRow])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.DataRow])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerResponseDataRow) Retain() ServerResponseDataRow {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.DataRow])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.DataRow])(&m).retainFields()
 	return ServerResponseDataRow{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to empty query.
-type ServerResponseEmptyQueryResponse LazyServer[*pgproto3.EmptyQueryResponse]
+type ServerResponseEmptyQueryResponse FromServer[*pgproto3.EmptyQueryResponse]
 
 func (ServerResponseEmptyQueryResponse) Response() {}
 func (t ServerResponseEmptyQueryResponse) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.EmptyQueryResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.EmptyQueryResponse])(&t).Parse()
 }
 func (t ServerResponseEmptyQueryResponse) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.EmptyQueryResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.EmptyQueryResponse])(&t).Parse()
 }
 func (m ServerResponseEmptyQueryResponse) Raw() RawBody {
-	return LazyServer[*pgproto3.EmptyQueryResponse](m).Raw()
+	return FromServer[*pgproto3.EmptyQueryResponse](m).Raw()
 }
 func (m *ServerResponseEmptyQueryResponse) Parse() *pgproto3.EmptyQueryResponse {
-	return (*LazyServer[*pgproto3.EmptyQueryResponse])(m).Parse()
+	return (*FromServer[*pgproto3.EmptyQueryResponse])(m).Parse()
 }
 func (m ServerResponseEmptyQueryResponse) IsParsed() bool {
-	return LazyServer[*pgproto3.EmptyQueryResponse](m).IsParsed()
+	return FromServer[*pgproto3.EmptyQueryResponse](m).IsParsed()
 }
 func (m ServerResponseEmptyQueryResponse) Body() []byte {
-	return LazyServer[*pgproto3.EmptyQueryResponse](m).Body()
+	return FromServer[*pgproto3.EmptyQueryResponse](m).Body()
 }
 func (m *ServerResponseEmptyQueryResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.EmptyQueryResponse])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.EmptyQueryResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerResponseEmptyQueryResponse) Retain() ServerResponseEmptyQueryResponse {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.EmptyQueryResponse])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.EmptyQueryResponse])(&m).retainFields()
 	return ServerResponseEmptyQueryResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Error response.
-type ServerResponseErrorResponse LazyServer[*pgproto3.ErrorResponse]
+type ServerResponseErrorResponse FromServer[*pgproto3.ErrorResponse]
 
 func (ServerResponseErrorResponse) Response() {}
 func (t ServerResponseErrorResponse) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.ErrorResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.ErrorResponse])(&t).Parse()
 }
 func (t ServerResponseErrorResponse) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.ErrorResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.ErrorResponse])(&t).Parse()
 }
 func (m ServerResponseErrorResponse) Raw() RawBody {
-	return LazyServer[*pgproto3.ErrorResponse](m).Raw()
+	return FromServer[*pgproto3.ErrorResponse](m).Raw()
 }
 func (m *ServerResponseErrorResponse) Parse() *pgproto3.ErrorResponse {
-	return (*LazyServer[*pgproto3.ErrorResponse])(m).Parse()
+	return (*FromServer[*pgproto3.ErrorResponse])(m).Parse()
 }
 func (m ServerResponseErrorResponse) IsParsed() bool {
-	return LazyServer[*pgproto3.ErrorResponse](m).IsParsed()
+	return FromServer[*pgproto3.ErrorResponse](m).IsParsed()
 }
 func (m ServerResponseErrorResponse) Body() []byte {
-	return LazyServer[*pgproto3.ErrorResponse](m).Body()
+	return FromServer[*pgproto3.ErrorResponse](m).Body()
 }
 func (m *ServerResponseErrorResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.ErrorResponse])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.ErrorResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerResponseErrorResponse) Retain() ServerResponseErrorResponse {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.ErrorResponse])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.ErrorResponse])(&m).retainFields()
 	return ServerResponseErrorResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to function call.
-type ServerResponseFunctionCallResponse LazyServer[*pgproto3.FunctionCallResponse]
+type ServerResponseFunctionCallResponse FromServer[*pgproto3.FunctionCallResponse]
 
 func (ServerResponseFunctionCallResponse) Response() {}
 func (t ServerResponseFunctionCallResponse) PgwireMessage() pgproto3.Message {
-	return (*LazyServer[*pgproto3.FunctionCallResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.FunctionCallResponse])(&t).Parse()
 }
 func (t ServerResponseFunctionCallResponse) Server() pgproto3.BackendMessage {
-	return (*LazyServer[*pgproto3.FunctionCallResponse])(&t).Parse()
+	return (*FromServer[*pgproto3.FunctionCallResponse])(&t).Parse()
 }
 func (m ServerResponseFunctionCallResponse) Raw() RawBody {
-	return LazyServer[*pgproto3.FunctionCallResponse](m).Raw()
+	return FromServer[*pgproto3.FunctionCallResponse](m).Raw()
 }
 func (m *ServerResponseFunctionCallResponse) Parse() *pgproto3.FunctionCallResponse {
-	return (*LazyServer[*pgproto3.FunctionCallResponse])(m).Parse()
+	return (*FromServer[*pgproto3.FunctionCallResponse])(m).Parse()
 }
 func (m ServerResponseFunctionCallResponse) IsParsed() bool {
-	return LazyServer[*pgproto3.FunctionCallResponse](m).IsParsed()
+	return FromServer[*pgproto3.FunctionCallResponse](m).IsParsed()
 }
 func (m ServerResponseFunctionCallResponse) Body() []byte {
-	return LazyServer[*pgproto3.FunctionCallResponse](m).Body()
+	return FromServer[*pgproto3.FunctionCallResponse](m).Body()
 }
 func (m *ServerResponseFunctionCallResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyServer[*pgproto3.FunctionCallResponse])(m).WriteTo(w)
+	return (*FromServer[*pgproto3.FunctionCallResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ServerResponseFunctionCallResponse) Retain() ServerResponseFunctionCallResponse {
-	src, parsed, isParsed := (*LazyServer[*pgproto3.FunctionCallResponse])(&m).retainFields()
+	src, parsed, isParsed := (*FromServer[*pgproto3.FunctionCallResponse])(&m).retainFields()
 	return ServerResponseFunctionCallResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 

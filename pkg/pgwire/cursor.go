@@ -28,27 +28,30 @@ import (
 //	frontend := NewClientCursor(frontendRing)
 //	backend := NewServerCursor(backendRing)
 //	for {
-//	    // Prioritize server responses over new client requests
-//	    if ok, err := backend.TryNextBatch(); err != nil {
-//	        return err
-//	    } else if ok {
-//	        for backend.NextMsg() { /* process */ }
-//	        continue
+//	    // Check both sides without blocking
+//	    gotFrontend, errF := frontend.TryNextBatch()
+//	    gotBackend, errB := backend.TryNextBatch()
+//	    if errF != nil { return errF }
+//	    if errB != nil { return errB }
+//
+//	    // Process server responses first, then client requests
+//	    if gotBackend {
+//	        for backend.NextMsg() { /* forward to client */ }
 //	    }
-//	    if ok, err := frontend.TryNextBatch(); err != nil {
-//	        return err
-//	    } else if ok {
-//	        for frontend.NextMsg() { /* process */ }
-//	        continue
+//	    if gotFrontend {
+//	        for frontend.NextMsg() { /* forward to server */ }
 //	    }
-//	    // Both empty, wait for either
-//	    select {
-//	    case <-backend.Ready():
-//	    case <-frontend.Ready():
-//	    case <-backend.Done():
-//	        return backend.Err()
-//	    case <-frontend.Done():
-//	        return frontend.Err()
+//
+//	    // If nothing available, wait for either side
+//	    if !gotFrontend && !gotBackend {
+//	        select {
+//	        case <-backend.Ready():
+//	        case <-frontend.Ready():
+//	        case <-backend.Done():
+//	            return backend.Err()
+//	        case <-frontend.Done():
+//	            return frontend.Err()
+//	        }
 //	    }
 //	}
 type Cursor struct {

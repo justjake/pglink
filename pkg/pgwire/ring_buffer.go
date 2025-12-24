@@ -23,7 +23,6 @@ const (
 
 	// spaceCheckMsgs is how often to refresh cached consumer positions
 	spaceCheckMsgs = 32
-
 )
 
 // ErrMessageTooLarge is returned when a message exceeds the buffer capacity
@@ -113,7 +112,6 @@ func NewRingBufferWithSize(dataSize, metaSize int) *RingBuffer {
 		done:       make(chan struct{}),
 	}
 }
-
 
 // === Writer methods ===
 

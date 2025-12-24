@@ -61,7 +61,7 @@ func (f *Frontend) Reader() *backend.ChanReader[pgwire.ClientMessage] {
 // It flushes any buffered data first to ensure correct message ordering.
 func (f *Frontend) ForwardRaw(raw pgwire.RawBody) error {
 	// Flush any pending buffered data to ensure ordering
-	if err := f.Backend.Flush(); err != nil {
+	if err := f.Flush(); err != nil {
 		return fmt.Errorf("flush before forward: %w", err)
 	}
 	// Write raw bytes directly to connection
@@ -73,7 +73,7 @@ func (f *Frontend) ForwardRaw(raw pgwire.RawBody) error {
 // More efficient than multiple ForwardRaw calls as it only flushes once.
 func (f *Frontend) ForwardRawMultiple(raws []pgwire.RawBody) error {
 	// Flush any pending buffered data to ensure ordering
-	if err := f.Backend.Flush(); err != nil {
+	if err := f.Flush(); err != nil {
 		return fmt.Errorf("flush before forward: %w", err)
 	}
 	// Write all raw bytes directly to connection

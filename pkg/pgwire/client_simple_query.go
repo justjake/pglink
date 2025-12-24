@@ -25,62 +25,62 @@ var (
 
 // Simple query.
 // Destroys unnamed prepared statement & portal.
-type ClientSimpleQueryQuery LazyClient[*pgproto3.Query]
+type ClientSimpleQueryQuery FromClient[*pgproto3.Query]
 
 func (ClientSimpleQueryQuery) SimpleQuery() {}
 func (t ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.Query])(&t).Parse()
+	return (*FromClient[*pgproto3.Query])(&t).Parse()
 }
 func (t ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.Query])(&t).Parse()
+	return (*FromClient[*pgproto3.Query])(&t).Parse()
 }
-func (m ClientSimpleQueryQuery) Raw() RawBody { return LazyClient[*pgproto3.Query](m).Raw() }
+func (m ClientSimpleQueryQuery) Raw() RawBody { return FromClient[*pgproto3.Query](m).Raw() }
 func (m *ClientSimpleQueryQuery) Parse() *pgproto3.Query {
-	return (*LazyClient[*pgproto3.Query])(m).Parse()
+	return (*FromClient[*pgproto3.Query])(m).Parse()
 }
-func (m ClientSimpleQueryQuery) IsParsed() bool { return LazyClient[*pgproto3.Query](m).IsParsed() }
-func (m ClientSimpleQueryQuery) Body() []byte   { return LazyClient[*pgproto3.Query](m).Body() }
+func (m ClientSimpleQueryQuery) IsParsed() bool { return FromClient[*pgproto3.Query](m).IsParsed() }
+func (m ClientSimpleQueryQuery) Body() []byte   { return FromClient[*pgproto3.Query](m).Body() }
 func (m *ClientSimpleQueryQuery) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.Query])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.Query])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientSimpleQueryQuery) Retain() ClientSimpleQueryQuery {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.Query])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.Query])(&m).retainFields()
 	return ClientSimpleQueryQuery{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Call a function; seems to work like a simple query? Or maybe it works with both modes?
-type ClientSimpleQueryFunctionCall LazyClient[*pgproto3.FunctionCall]
+type ClientSimpleQueryFunctionCall FromClient[*pgproto3.FunctionCall]
 
 func (ClientSimpleQueryFunctionCall) SimpleQuery() {}
 func (t ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message {
-	return (*LazyClient[*pgproto3.FunctionCall])(&t).Parse()
+	return (*FromClient[*pgproto3.FunctionCall])(&t).Parse()
 }
 func (t ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage {
-	return (*LazyClient[*pgproto3.FunctionCall])(&t).Parse()
+	return (*FromClient[*pgproto3.FunctionCall])(&t).Parse()
 }
 func (m ClientSimpleQueryFunctionCall) Raw() RawBody {
-	return LazyClient[*pgproto3.FunctionCall](m).Raw()
+	return FromClient[*pgproto3.FunctionCall](m).Raw()
 }
 func (m *ClientSimpleQueryFunctionCall) Parse() *pgproto3.FunctionCall {
-	return (*LazyClient[*pgproto3.FunctionCall])(m).Parse()
+	return (*FromClient[*pgproto3.FunctionCall])(m).Parse()
 }
 func (m ClientSimpleQueryFunctionCall) IsParsed() bool {
-	return LazyClient[*pgproto3.FunctionCall](m).IsParsed()
+	return FromClient[*pgproto3.FunctionCall](m).IsParsed()
 }
 func (m ClientSimpleQueryFunctionCall) Body() []byte {
-	return LazyClient[*pgproto3.FunctionCall](m).Body()
+	return FromClient[*pgproto3.FunctionCall](m).Body()
 }
 func (m *ClientSimpleQueryFunctionCall) WriteTo(w io.Writer) (int64, error) {
-	return (*LazyClient[*pgproto3.FunctionCall])(m).WriteTo(w)
+	return (*FromClient[*pgproto3.FunctionCall])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
 func (m ClientSimpleQueryFunctionCall) Retain() ClientSimpleQueryFunctionCall {
-	src, parsed, isParsed := (*LazyClient[*pgproto3.FunctionCall])(&m).retainFields()
+	src, parsed, isParsed := (*FromClient[*pgproto3.FunctionCall])(&m).retainFields()
 	return ClientSimpleQueryFunctionCall{source: src, parsed: parsed, isParsed: isParsed}
 }
 

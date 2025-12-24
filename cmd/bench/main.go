@@ -216,11 +216,6 @@ func makePgbouncerTarget() *BenchmarkTarget {
 	}
 }
 
-// makePglinkTarget creates a target for pglink with specified GOMAXPROCS
-func makePglinkTarget(gomaxprocs int) *BenchmarkTarget {
-	return makePglinkTargetWithLabel(gomaxprocs, "")
-}
-
 // makePglinkTargetWithLabel creates a target for pglink with specified GOMAXPROCS and optional commit label
 func makePglinkTargetWithLabel(gomaxprocs int, commitLabel string) *BenchmarkTarget {
 	var name string
@@ -463,13 +458,13 @@ func (m *WorktreeManager) BuildInWorktree(worktreePath string, outputBinary stri
 	if err != nil {
 		return fmt.Errorf("failed to open built binary: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	dst, err := os.OpenFile(outputBinary, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to create output binary: %w", err)
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, src); err != nil {
 		return fmt.Errorf("failed to copy binary: %w", err)

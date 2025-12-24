@@ -181,10 +181,10 @@ func decodeBackendMessage(raw RawBody) (pgproto3.BackendMessage, error) {
 	return msg, nil
 }
 
-// LazyServer holds a lazily-parsed backend message.
+// FromServer holds a lazily-parsed backend message.
 // It stores a RawMessageSource and only parses when Parse() is called.
 // Once parsed, the result is cached for subsequent calls.
-type LazyServer[T pgproto3.BackendMessage] struct {
+type FromServer[T pgproto3.BackendMessage] struct {
 	source   RawMessageSource
 	parsed   T
 	isParsed bool
@@ -193,7 +193,7 @@ type LazyServer[T pgproto3.BackendMessage] struct {
 // Parse decodes the message body if not already parsed and returns the result.
 // The parsed result is cached for subsequent calls.
 // This is when MessageBody() is called on the source - lazy extraction.
-func (m *LazyServer[T]) Parse() T {
+func (m *FromServer[T]) Parse() T {
 	if m.isParsed {
 		return m.parsed
 	}
@@ -204,7 +204,7 @@ func (m *LazyServer[T]) Parse() T {
 	}
 	msg, err := decodeBackendMessage(raw)
 	if err != nil {
-		panic(fmt.Sprintf("LazyServer.Parse: %v", err))
+		panic(fmt.Sprintf("FromServer.Parse: %v", err))
 	}
 	m.parsed = msg.(T)
 	m.isParsed = true
@@ -212,18 +212,18 @@ func (m *LazyServer[T]) Parse() T {
 }
 
 // IsParsed returns true if the message has already been parsed.
-func (m LazyServer[T]) IsParsed() bool {
+func (m FromServer[T]) IsParsed() bool {
 	return m.isParsed
 }
 
 // Source returns the underlying RawMessageSource.
-func (m LazyServer[T]) Source() RawMessageSource {
+func (m FromServer[T]) Source() RawMessageSource {
 	return m.source
 }
 
 // Body returns the raw message body bytes for direct access.
 // This is useful for fast accessors that read specific fields without full parsing.
-func (m LazyServer[T]) Body() []byte {
+func (m FromServer[T]) Body() []byte {
 	if m.source != nil {
 		return m.source.MessageBody()
 	}
@@ -233,7 +233,7 @@ func (m LazyServer[T]) Body() []byte {
 // Raw returns a RawBody for compatibility with existing interfaces.
 // If the source is already a RawBody, returns it directly.
 // Otherwise, extracts the bytes from the source.
-func (m LazyServer[T]) Raw() RawBody {
+func (m FromServer[T]) Raw() RawBody {
 	if m.source == nil {
 		if m.isParsed {
 			return EncodeBackendMessage(m.parsed)
@@ -250,7 +250,7 @@ func (m LazyServer[T]) Raw() RawBody {
 }
 
 // retainFields returns the retained source and parsed state for use by generated Retain() methods.
-func (m *LazyServer[T]) retainFields() (RawMessageSource, T, bool) {
+func (m *FromServer[T]) retainFields() (RawMessageSource, T, bool) {
 	if m.source != nil {
 		return m.source.Retain(), m.parsed, m.isParsed
 	}
@@ -263,7 +263,7 @@ func (m *LazyServer[T]) retainFields() (RawMessageSource, T, bool) {
 
 // WriteTo writes the message to w. If the message was created from a source,
 // delegates to source.WriteTo(). If created from parsed, encodes and writes.
-func (m *LazyServer[T]) WriteTo(w io.Writer) (int64, error) {
+func (m *FromServer[T]) WriteTo(w io.Writer) (int64, error) {
 	if m.source != nil {
 		return m.source.WriteTo(w)
 	}
@@ -274,10 +274,10 @@ func (m *LazyServer[T]) WriteTo(w io.Writer) (int64, error) {
 	return 0, nil
 }
 
-// LazyClient holds a lazily-parsed frontend message.
+// FromClient holds a lazily-parsed frontend message.
 // It stores a RawMessageSource and only parses when Parse() is called.
 // Once parsed, the result is cached for subsequent calls.
-type LazyClient[T pgproto3.FrontendMessage] struct {
+type FromClient[T pgproto3.FrontendMessage] struct {
 	source   RawMessageSource
 	parsed   T
 	isParsed bool
@@ -286,7 +286,7 @@ type LazyClient[T pgproto3.FrontendMessage] struct {
 // Parse decodes the message body if not already parsed and returns the result.
 // The parsed result is cached for subsequent calls.
 // This is when MessageBody() is called on the source - lazy extraction.
-func (m *LazyClient[T]) Parse() T {
+func (m *FromClient[T]) Parse() T {
 	if m.isParsed {
 		return m.parsed
 	}
@@ -297,7 +297,7 @@ func (m *LazyClient[T]) Parse() T {
 	}
 	msg, err := decodeFrontendMessage(raw)
 	if err != nil {
-		panic(fmt.Sprintf("LazyClient.Parse: %v", err))
+		panic(fmt.Sprintf("FromClient.Parse: %v", err))
 	}
 	m.parsed = msg.(T)
 	m.isParsed = true
@@ -305,18 +305,18 @@ func (m *LazyClient[T]) Parse() T {
 }
 
 // IsParsed returns true if the message has already been parsed.
-func (m LazyClient[T]) IsParsed() bool {
+func (m FromClient[T]) IsParsed() bool {
 	return m.isParsed
 }
 
 // Source returns the underlying RawMessageSource.
-func (m LazyClient[T]) Source() RawMessageSource {
+func (m FromClient[T]) Source() RawMessageSource {
 	return m.source
 }
 
 // Body returns the raw message body bytes for direct access.
 // This is useful for fast accessors that read specific fields without full parsing.
-func (m LazyClient[T]) Body() []byte {
+func (m FromClient[T]) Body() []byte {
 	if m.source != nil {
 		return m.source.MessageBody()
 	}
@@ -326,7 +326,7 @@ func (m LazyClient[T]) Body() []byte {
 // Raw returns a RawBody for compatibility with existing interfaces.
 // If the source is already a RawBody, returns it directly.
 // Otherwise, extracts the bytes from the source.
-func (m LazyClient[T]) Raw() RawBody {
+func (m FromClient[T]) Raw() RawBody {
 	if m.source == nil {
 		if m.isParsed {
 			return EncodeFrontendMessage(m.parsed)
@@ -343,7 +343,7 @@ func (m LazyClient[T]) Raw() RawBody {
 }
 
 // retainFields returns the retained source and parsed state for use by generated Retain() methods.
-func (m *LazyClient[T]) retainFields() (RawMessageSource, T, bool) {
+func (m *FromClient[T]) retainFields() (RawMessageSource, T, bool) {
 	if m.source != nil {
 		return m.source.Retain(), m.parsed, m.isParsed
 	}
@@ -356,7 +356,7 @@ func (m *LazyClient[T]) retainFields() (RawMessageSource, T, bool) {
 
 // WriteTo writes the message to w. If the message was created from a source,
 // delegates to source.WriteTo(). If created from parsed, encodes and writes.
-func (m *LazyClient[T]) WriteTo(w io.Writer) (int64, error) {
+func (m *FromClient[T]) WriteTo(w io.Writer) (int64, error) {
 	if m.source != nil {
 		return m.source.WriteTo(w)
 	}
@@ -367,29 +367,29 @@ func (m *LazyClient[T]) WriteTo(w io.Writer) (int64, error) {
 	return 0, nil
 }
 
-// ServerParsed creates a LazyServer from an already-parsed message.
+// ServerParsed creates a FromServer from an already-parsed message.
 // This is used for backward compatibility with code that already has parsed messages.
-func ServerParsed[T pgproto3.BackendMessage](msg T) LazyServer[T] {
-	return LazyServer[T]{parsed: msg, isParsed: true}
+func ServerParsed[T pgproto3.BackendMessage](msg T) FromServer[T] {
+	return FromServer[T]{parsed: msg, isParsed: true}
 }
 
-// ClientParsed creates a LazyClient from an already-parsed message.
+// ClientParsed creates a FromClient from an already-parsed message.
 // This is used for backward compatibility with code that already has parsed messages.
-func ClientParsed[T pgproto3.FrontendMessage](msg T) LazyClient[T] {
-	return LazyClient[T]{parsed: msg, isParsed: true}
+func ClientParsed[T pgproto3.FrontendMessage](msg T) FromClient[T] {
+	return FromClient[T]{parsed: msg, isParsed: true}
 }
 
 // EnsureRaw returns a RawBody for forwarding.
 // This is equivalent to Raw() - the "ensure" semantics are handled by Raw() which
 // extracts from source or encodes from parsed as needed.
-func (m *LazyServer[T]) EnsureRaw() RawBody {
+func (m *FromServer[T]) EnsureRaw() RawBody {
 	return m.Raw()
 }
 
 // EnsureRaw returns a RawBody for forwarding.
 // This is equivalent to Raw() - the "ensure" semantics are handled by Raw() which
 // extracts from source or encodes from parsed as needed.
-func (m *LazyClient[T]) EnsureRaw() RawBody {
+func (m *FromClient[T]) EnsureRaw() RawBody {
 	return m.Raw()
 }
 
