@@ -93,16 +93,18 @@ type BenchmarkResult struct {
 	P95LatencyUs  float64       `json:"p95_latency_us"`
 	P99LatencyUs  float64       `json:"p99_latency_us"`
 	SampleErrors  []string      `json:"sample_errors,omitempty"`
+	TraceFile     string        `json:"trace_file,omitempty"`
 	Timestamp     time.Time     `json:"timestamp"`
 }
 
 // RunConfig defines the benchmark run parameters
 type RunConfig struct {
-	Duration    time.Duration
-	Warmup      time.Duration
-	MaxConns    []int
-	Concurrency []int
-	GoMaxProcs  []int
+	Duration       time.Duration
+	Warmup         time.Duration
+	MaxConns       []int
+	Concurrency    []int
+	GoMaxProcs     []int
+	FlightRecorder bool
 }
 
 // BenchmarkSuite manages the benchmark execution
@@ -127,6 +129,10 @@ type BenchmarkSuite struct {
 
 	// Current pglink config (set during target setup)
 	currentPglinkConfig *config.Config
+
+	// Flight recorder
+	pglinkTempDir string // Temp dir for pglink config (also contains traces)
+	lastTraceFile string // Path to last captured trace file
 }
 
 // COPY benchmark constants
@@ -550,6 +556,25 @@ func (s *BenchmarkSuite) startPglink(ctx context.Context, cfg *config.Config, go
 	if err != nil {
 		return err
 	}
+	s.pglinkTempDir = tmpDir
+
+	// Configure flight recorder if enabled
+	var args []string
+	if s.runCfg.FlightRecorder {
+		tracesDir := filepath.Join(tmpDir, "traces")
+		if err := os.MkdirAll(tracesDir, 0755); err != nil {
+			_ = os.RemoveAll(tmpDir)
+			return fmt.Errorf("failed to create traces dir: %w", err)
+		}
+		// Use CLI flags to enable flight recorder
+		// Set min_age to benchmark duration + warmup + buffer
+		minAge := s.runCfg.Duration + s.runCfg.Warmup + 30*time.Second
+		args = append(args,
+			"-flight-recorder", tracesDir,
+			"-flight-recorder-min-age", minAge.String(),
+			"-flight-recorder-max-bytes", "52428800", // 50MB for benchmarks
+		)
+	}
 
 	configPath := filepath.Join(tmpDir, "pglink.json")
 	configData, err := json.MarshalIndent(cfg, "", "  ")
@@ -572,7 +597,9 @@ func (s *BenchmarkSuite) startPglink(ctx context.Context, cfg *config.Config, go
 		}
 	}
 
-	s.pglinkCmd = exec.Command(pglinkBinary, "-config", configPath)
+	// Build command with config and optional flight recorder flags
+	cmdArgs := append([]string{"-config", configPath}, args...)
+	s.pglinkCmd = exec.Command(pglinkBinary, cmdArgs...)
 	s.pglinkCmd.Env = append(os.Environ(), fmt.Sprintf("GOMAXPROCS=%d", gomaxprocs))
 	s.pglinkCmd.Dir = tmpDir
 
@@ -586,7 +613,16 @@ func (s *BenchmarkSuite) startPglink(ctx context.Context, cfg *config.Config, go
 }
 
 func (s *BenchmarkSuite) stopPglink() {
+	s.lastTraceFile = ""
+
 	if s.pglinkCmd != nil && s.pglinkCmd.Process != nil {
+		// If flight recorder is enabled, send SIGUSR1 to trigger a snapshot before stopping
+		if s.runCfg.FlightRecorder {
+			_ = s.pglinkCmd.Process.Signal(syscall.SIGUSR1)
+			// Give it a moment to write the snapshot
+			time.Sleep(500 * time.Millisecond)
+		}
+
 		_ = s.pglinkCmd.Process.Signal(syscall.SIGTERM)
 		done := make(chan error, 1)
 		go func() { done <- s.pglinkCmd.Wait() }()
@@ -596,6 +632,46 @@ func (s *BenchmarkSuite) stopPglink() {
 			_ = s.pglinkCmd.Process.Kill()
 		}
 		s.pglinkCmd = nil
+	}
+
+	// If flight recorder was enabled, find and copy the trace file
+	if s.runCfg.FlightRecorder && s.pglinkTempDir != "" {
+		tracesDir := filepath.Join(s.pglinkTempDir, "traces")
+		files, err := os.ReadDir(tracesDir)
+		if err == nil && len(files) > 0 {
+			// Find the most recent trace file
+			var latestFile string
+			var latestTime time.Time
+			for _, f := range files {
+				if strings.HasSuffix(f.Name(), ".trace") {
+					info, err := f.Info()
+					if err == nil && info.ModTime().After(latestTime) {
+						latestTime = info.ModTime()
+						latestFile = f.Name()
+					}
+				}
+			}
+			if latestFile != "" {
+				srcPath := filepath.Join(tracesDir, latestFile)
+				// Copy to output traces directory
+				destDir := filepath.Join(s.outputDir, "traces")
+				_ = os.MkdirAll(destDir, 0755)
+				destPath := filepath.Join(destDir, latestFile)
+
+				if src, err := os.Open(srcPath); err == nil {
+					if dst, err := os.Create(destPath); err == nil {
+						_, _ = io.Copy(dst, src)
+						_ = dst.Close()
+						s.lastTraceFile = destPath
+						log.Printf("    Trace captured: %s", destPath)
+					}
+					_ = src.Close()
+				}
+			}
+		}
+		// Clean up temp dir
+		_ = os.RemoveAll(s.pglinkTempDir)
+		s.pglinkTempDir = ""
 	}
 }
 
@@ -737,8 +813,8 @@ func (s *BenchmarkSuite) Run(ctx context.Context) error {
 	return s.writeResults()
 }
 
-func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, target *BenchmarkTarget) (BenchmarkResult, error) {
-	result := BenchmarkResult{
+func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, target *BenchmarkTarget) (result BenchmarkResult, err error) {
+	result = BenchmarkResult{
 		CaseTitle:   bc.Title,
 		TargetName:  target.Name,
 		MaxConns:    target.MaxConns,
@@ -753,10 +829,14 @@ func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, targe
 		}
 	}
 
-	// Ensure teardown runs
+	// Ensure teardown runs and capture trace file path
 	defer func() {
 		if target.TearDown != nil {
 			_ = target.TearDown(ctx, s)
+		}
+		// Capture the trace file path after teardown (which calls stopPglink)
+		if s.lastTraceFile != "" {
+			result.TraceFile = s.lastTraceFile
 		}
 	}()
 
@@ -1072,6 +1152,7 @@ func main() {
 	maxConnsStr := flag.String("max-conns", "100,500,1000", "Comma-separated max connection values")
 	concurrencyStr := flag.String("concurrency", "100,200,500,600,1000,1500", "Comma-separated concurrency values")
 	gomaxprocsStr := flag.String("gomaxprocs", "1,2,4,8,16", "Comma-separated GOMAXPROCS values for pglink")
+	flightRecorder := flag.Bool("flight-recorder", false, "Enable flight recorder for pglink targets (captures trace on teardown)")
 	flag.Parse()
 
 	parseInts := func(s string) []int {
@@ -1087,11 +1168,12 @@ func main() {
 	}
 
 	cfg := RunConfig{
-		MaxConns:    parseInts(*maxConnsStr),
-		Concurrency: parseInts(*concurrencyStr),
-		GoMaxProcs:  parseInts(*gomaxprocsStr),
-		Duration:    *duration,
-		Warmup:      *warmup,
+		MaxConns:       parseInts(*maxConnsStr),
+		Concurrency:    parseInts(*concurrencyStr),
+		GoMaxProcs:     parseInts(*gomaxprocsStr),
+		Duration:       *duration,
+		Warmup:         *warmup,
+		FlightRecorder: *flightRecorder,
 	}
 
 	projectDir, err := os.Getwd()

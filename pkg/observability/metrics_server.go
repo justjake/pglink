@@ -14,6 +14,7 @@ import (
 // MetricsServer serves Prometheus metrics over HTTP.
 type MetricsServer struct {
 	server *http.Server
+	mux    *http.ServeMux
 	logger *slog.Logger
 }
 
@@ -32,6 +33,7 @@ func NewMetricsServer(cfg *config.PrometheusConfig, logger *slog.Logger) *Metric
 			Addr:    cfg.GetListen(),
 			Handler: mux,
 		},
+		mux:    mux,
 		logger: logger,
 	}
 }
@@ -72,6 +74,15 @@ func (s *MetricsServer) Addr() string {
 // Enabled returns true if the metrics server is configured.
 func (s *MetricsServer) Enabled() bool {
 	return s != nil && s.server != nil
+}
+
+// Mux returns the HTTP mux for registering additional handlers.
+// Returns nil if the server is not configured.
+func (s *MetricsServer) Mux() *http.ServeMux {
+	if s == nil {
+		return nil
+	}
+	return s.mux
 }
 
 // String returns a string representation for logging.

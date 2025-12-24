@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -148,6 +149,9 @@ func main() {
 	configPath := flag.String("config", "", "path to pglink.json config file")
 	listenAddr := flag.String("listen-addr", "", "listen address (overrides config file, e.g. :16432, 0.0.0.0:5432)")
 	prometheusListen := flag.String("prometheus-listen", "", "enable Prometheus metrics (format: :9090 or :9090/metrics)")
+	flightRecorderDir := flag.String("flight-recorder", "", "enable flight recorder, save snapshots to this directory")
+	flightRecorderMinAge := flag.String("flight-recorder-min-age", "", "flight recorder min age (e.g. 10s, 1m)")
+	flightRecorderMaxBytes := flag.Int64("flight-recorder-max-bytes", 0, "flight recorder max bytes (e.g. 10485760 for 10MB)")
 	jsonLogs := flag.Bool("json", false, "output logs in JSON format")
 	showHelp := flag.Bool("help", false, "show full documentation")
 	writePgbouncerDir := flag.String("write-pgbouncer-config-dir", "", "write equivalent pgbouncer config to this directory and exit")
@@ -192,6 +196,24 @@ func main() {
 	// Apply Prometheus CLI override
 	if *prometheusListen != "" {
 		cfg.Prometheus = config.ParsePrometheusListen(*prometheusListen)
+	}
+
+	// Apply flight recorder CLI overrides
+	if *flightRecorderDir != "" {
+		cfg.FlightRecorder = config.ParseFlightRecorderDir(*flightRecorderDir)
+	}
+	if cfg.FlightRecorder != nil {
+		if *flightRecorderMinAge != "" {
+			parsed, err := time.ParseDuration(*flightRecorderMinAge)
+			if err != nil {
+				logger.Error("invalid flight-recorder-min-age", "error", err)
+				os.Exit(1)
+			}
+			cfg.FlightRecorder.MinAge = config.Duration(parsed)
+		}
+		if *flightRecorderMaxBytes > 0 {
+			cfg.FlightRecorder.MaxBytes = *flightRecorderMaxBytes
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -276,6 +298,29 @@ func main() {
 				logger.Error("failed to shutdown metrics server", "error", err)
 			}
 		}()
+	}
+
+	// Initialize flight recorder if configured
+	var flightRecorder *observability.FlightRecorderService
+	if cfg.FlightRecorder != nil && cfg.FlightRecorder.Enabled {
+		var err error
+		flightRecorder, err = observability.NewFlightRecorderService(cfg.FlightRecorder, logger)
+		if err != nil {
+			logger.Error("failed to create flight recorder", "error", err)
+			os.Exit(1)
+		}
+		if flightRecorder != nil {
+			if err := flightRecorder.Start(); err != nil {
+				logger.Error("failed to start flight recorder", "error", err)
+				os.Exit(1)
+			}
+			flightRecorder.SetupSignalHandler(ctx)
+			// Register HTTP endpoints on metrics server if available
+			if metricsServer != nil {
+				flightRecorder.RegisterHTTPHandlers(metricsServer.Mux())
+			}
+			defer flightRecorder.Stop()
+		}
 	}
 
 	svc, err := frontend.NewService(ctx, cfg, fsys, secrets, logger, tracingEnabled, metrics)

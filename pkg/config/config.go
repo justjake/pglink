@@ -85,6 +85,10 @@ type Config struct {
 	// If nil, metrics are disabled. Presence of this config enables metrics.
 	Prometheus *PrometheusConfig `json:"prometheus,omitzero"`
 
+	// FlightRecorder configures the runtime/trace flight recorder.
+	// If nil, flight recording is disabled.
+	FlightRecorder *FlightRecorderConfig `json:"flight_recorder,omitzero"`
+
 	// filePath is the path to the config file on disk (not serialized).
 	// Used for resolving relative paths in the config.
 	filePath string
@@ -291,6 +295,13 @@ func (c *Config) Validate(ctx context.Context, fsys fs.FS, secrets *SecretCache,
 	if c.Prometheus != nil {
 		if err := c.Prometheus.Validate(); err != nil {
 			errs = append(errs, fmt.Errorf("prometheus: %w", err))
+		}
+	}
+
+	// Validate FlightRecorder config if present
+	if c.FlightRecorder != nil {
+		if err := c.FlightRecorder.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("flight_recorder: %w", err))
 		}
 	}
 
