@@ -13,6 +13,7 @@ type ServerStartup interface {
 	Startup()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -29,90 +30,112 @@ var (
 )
 
 // ServerStartupAuthenticationCleartextPassword wraps *pgproto3.AuthenticationCleartextPassword from the server.
-type ServerStartupAuthenticationCleartextPassword FromServer[*pgproto3.AuthenticationCleartextPassword]
+type ServerStartupAuthenticationCleartextPassword struct {
+	LazyServer[*pgproto3.AuthenticationCleartextPassword]
+}
 
-func (ServerStartupAuthenticationCleartextPassword) Startup()                          {}
-func (t ServerStartupAuthenticationCleartextPassword) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupAuthenticationCleartextPassword) Server() pgproto3.BackendMessage { return t.T }
+func (ServerStartupAuthenticationCleartextPassword) Startup() {}
+func (t ServerStartupAuthenticationCleartextPassword) PgwireMessage() pgproto3.Message {
+	return t.Parse()
+}
+func (t ServerStartupAuthenticationCleartextPassword) Server() pgproto3.BackendMessage {
+	return t.Parse()
+}
 
 // ServerStartupAuthenticationGSS wraps *pgproto3.AuthenticationGSS from the server.
-type ServerStartupAuthenticationGSS FromServer[*pgproto3.AuthenticationGSS]
+type ServerStartupAuthenticationGSS struct {
+	LazyServer[*pgproto3.AuthenticationGSS]
+}
 
 func (ServerStartupAuthenticationGSS) Startup()                          {}
-func (t ServerStartupAuthenticationGSS) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupAuthenticationGSS) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerStartupAuthenticationGSS) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerStartupAuthenticationGSS) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ServerStartupAuthenticationGSSContinue wraps *pgproto3.AuthenticationGSSContinue from the server.
-type ServerStartupAuthenticationGSSContinue FromServer[*pgproto3.AuthenticationGSSContinue]
+type ServerStartupAuthenticationGSSContinue struct {
+	LazyServer[*pgproto3.AuthenticationGSSContinue]
+}
 
 func (ServerStartupAuthenticationGSSContinue) Startup()                          {}
-func (t ServerStartupAuthenticationGSSContinue) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupAuthenticationGSSContinue) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerStartupAuthenticationGSSContinue) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerStartupAuthenticationGSSContinue) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ServerStartupAuthenticationMD5Password wraps *pgproto3.AuthenticationMD5Password from the server.
-type ServerStartupAuthenticationMD5Password FromServer[*pgproto3.AuthenticationMD5Password]
+type ServerStartupAuthenticationMD5Password struct {
+	LazyServer[*pgproto3.AuthenticationMD5Password]
+}
 
 func (ServerStartupAuthenticationMD5Password) Startup()                          {}
-func (t ServerStartupAuthenticationMD5Password) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupAuthenticationMD5Password) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerStartupAuthenticationMD5Password) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerStartupAuthenticationMD5Password) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ServerStartupAuthenticationOk wraps *pgproto3.AuthenticationOk from the server.
-type ServerStartupAuthenticationOk FromServer[*pgproto3.AuthenticationOk]
+type ServerStartupAuthenticationOk struct {
+	LazyServer[*pgproto3.AuthenticationOk]
+}
 
 func (ServerStartupAuthenticationOk) Startup()                          {}
-func (t ServerStartupAuthenticationOk) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupAuthenticationOk) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerStartupAuthenticationOk) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerStartupAuthenticationOk) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ServerStartupAuthenticationSASL wraps *pgproto3.AuthenticationSASL from the server.
-type ServerStartupAuthenticationSASL FromServer[*pgproto3.AuthenticationSASL]
+type ServerStartupAuthenticationSASL struct {
+	LazyServer[*pgproto3.AuthenticationSASL]
+}
 
 func (ServerStartupAuthenticationSASL) Startup()                          {}
-func (t ServerStartupAuthenticationSASL) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupAuthenticationSASL) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerStartupAuthenticationSASL) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerStartupAuthenticationSASL) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ServerStartupAuthenticationSASLContinue wraps *pgproto3.AuthenticationSASLContinue from the server.
-type ServerStartupAuthenticationSASLContinue FromServer[*pgproto3.AuthenticationSASLContinue]
+type ServerStartupAuthenticationSASLContinue struct {
+	LazyServer[*pgproto3.AuthenticationSASLContinue]
+}
 
 func (ServerStartupAuthenticationSASLContinue) Startup()                          {}
-func (t ServerStartupAuthenticationSASLContinue) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupAuthenticationSASLContinue) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerStartupAuthenticationSASLContinue) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerStartupAuthenticationSASLContinue) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ServerStartupAuthenticationSASLFinal wraps *pgproto3.AuthenticationSASLFinal from the server.
-type ServerStartupAuthenticationSASLFinal FromServer[*pgproto3.AuthenticationSASLFinal]
+type ServerStartupAuthenticationSASLFinal struct {
+	LazyServer[*pgproto3.AuthenticationSASLFinal]
+}
 
 func (ServerStartupAuthenticationSASLFinal) Startup()                          {}
-func (t ServerStartupAuthenticationSASLFinal) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupAuthenticationSASLFinal) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerStartupAuthenticationSASLFinal) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerStartupAuthenticationSASLFinal) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Secret key data for cancel requests.
 // This should be already captured when we establish the connection.
-type ServerStartupBackendKeyData FromServer[*pgproto3.BackendKeyData]
+type ServerStartupBackendKeyData struct {
+	LazyServer[*pgproto3.BackendKeyData]
+}
 
 func (ServerStartupBackendKeyData) Startup()                          {}
-func (t ServerStartupBackendKeyData) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerStartupBackendKeyData) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerStartupBackendKeyData) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerStartupBackendKeyData) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ToServerStartup converts a pgproto3.BackendMessage to a ServerStartup if it matches one of the known types.
 func ToServerStartup(msg pgproto3.BackendMessage) (ServerStartup, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.AuthenticationCleartextPassword:
-		return ServerStartupAuthenticationCleartextPassword{m}, true
+		return ServerStartupAuthenticationCleartextPassword{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.AuthenticationGSS:
-		return ServerStartupAuthenticationGSS{m}, true
+		return ServerStartupAuthenticationGSS{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.AuthenticationGSSContinue:
-		return ServerStartupAuthenticationGSSContinue{m}, true
+		return ServerStartupAuthenticationGSSContinue{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.AuthenticationMD5Password:
-		return ServerStartupAuthenticationMD5Password{m}, true
+		return ServerStartupAuthenticationMD5Password{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.AuthenticationOk:
-		return ServerStartupAuthenticationOk{m}, true
+		return ServerStartupAuthenticationOk{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.AuthenticationSASL:
-		return ServerStartupAuthenticationSASL{m}, true
+		return ServerStartupAuthenticationSASL{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.AuthenticationSASLContinue:
-		return ServerStartupAuthenticationSASLContinue{m}, true
+		return ServerStartupAuthenticationSASLContinue{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.AuthenticationSASLFinal:
-		return ServerStartupAuthenticationSASLFinal{m}, true
+		return ServerStartupAuthenticationSASLFinal{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.BackendKeyData:
-		return ServerStartupBackendKeyData{m}, true
+		return ServerStartupBackendKeyData{NewLazyServerFromParsed(m)}, true
 	}
 	return nil, false
 }

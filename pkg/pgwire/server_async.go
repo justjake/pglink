@@ -13,6 +13,7 @@ type ServerAsync interface {
 	Async()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -23,35 +24,41 @@ var (
 )
 
 // Warning message.
-type ServerAsyncNoticeResponse FromServer[*pgproto3.NoticeResponse]
+type ServerAsyncNoticeResponse struct {
+	LazyServer[*pgproto3.NoticeResponse]
+}
 
 func (ServerAsyncNoticeResponse) Async()                            {}
-func (t ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // LISTEN/NOTIFY notification.
-type ServerAsyncNotificationResponse FromServer[*pgproto3.NotificationResponse]
+type ServerAsyncNotificationResponse struct {
+	LazyServer[*pgproto3.NotificationResponse]
+}
 
 func (ServerAsyncNotificationResponse) Async()                            {}
-func (t ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Informs client that runtime parameter value changed.
-type ServerAsyncParameterStatus FromServer[*pgproto3.ParameterStatus]
+type ServerAsyncParameterStatus struct {
+	LazyServer[*pgproto3.ParameterStatus]
+}
 
 func (ServerAsyncParameterStatus) Async()                            {}
-func (t ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerAsyncParameterStatus) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerAsyncParameterStatus) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ToServerAsync converts a pgproto3.BackendMessage to a ServerAsync if it matches one of the known types.
 func ToServerAsync(msg pgproto3.BackendMessage) (ServerAsync, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.NoticeResponse:
-		return ServerAsyncNoticeResponse{m}, true
+		return ServerAsyncNoticeResponse{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.NotificationResponse:
-		return ServerAsyncNotificationResponse{m}, true
+		return ServerAsyncNotificationResponse{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.ParameterStatus:
-		return ServerAsyncParameterStatus{m}, true
+		return ServerAsyncParameterStatus{NewLazyServerFromParsed(m)}, true
 	}
 	return nil, false
 }

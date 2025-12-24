@@ -323,3 +323,20 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 
 	return tls.X509KeyPair(certPEM, keyPEM)
 }
+
+// GenerateSelfSignedCertForBenchmark is an exported version of generateSelfSignedCert
+// for use by the benchmark tool.
+func GenerateSelfSignedCertForBenchmark() (tls.Certificate, error) {
+	return generateSelfSignedCert()
+}
+
+// MarshalPrivateKeyForBenchmark marshals a private key to DER format.
+// This is used by the benchmark tool to write keys to files.
+func MarshalPrivateKeyForBenchmark(privateKey any) ([]byte, error) {
+	switch k := privateKey.(type) {
+	case *ecdsa.PrivateKey:
+		return x509.MarshalECPrivateKey(k)
+	default:
+		return nil, fmt.Errorf("unsupported private key type: %T", privateKey)
+	}
+}

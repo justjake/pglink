@@ -13,6 +13,7 @@ type ClientCopy interface {
 	Copy()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -23,35 +24,35 @@ var (
 )
 
 // ClientCopyCopyData wraps *pgproto3.CopyData from the client.
-type ClientCopyCopyData FromClient[*pgproto3.CopyData]
+type ClientCopyCopyData struct{ LazyClient[*pgproto3.CopyData] }
 
 func (ClientCopyCopyData) Copy()                              {}
-func (t ClientCopyCopyData) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientCopyCopyData) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientCopyCopyData) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientCopyCopyData) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ClientCopyCopyDone wraps *pgproto3.CopyDone from the client.
-type ClientCopyCopyDone FromClient[*pgproto3.CopyDone]
+type ClientCopyCopyDone struct{ LazyClient[*pgproto3.CopyDone] }
 
 func (ClientCopyCopyDone) Copy()                              {}
-func (t ClientCopyCopyDone) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientCopyCopyDone) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientCopyCopyDone) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientCopyCopyDone) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ClientCopyCopyFail wraps *pgproto3.CopyFail from the client.
-type ClientCopyCopyFail FromClient[*pgproto3.CopyFail]
+type ClientCopyCopyFail struct{ LazyClient[*pgproto3.CopyFail] }
 
 func (ClientCopyCopyFail) Copy()                              {}
-func (t ClientCopyCopyFail) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientCopyCopyFail) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientCopyCopyFail) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientCopyCopyFail) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ToClientCopy converts a pgproto3.FrontendMessage to a ClientCopy if it matches one of the known types.
 func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyData:
-		return ClientCopyCopyData{m}, true
+		return ClientCopyCopyData{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.CopyDone:
-		return ClientCopyCopyDone{m}, true
+		return ClientCopyCopyDone{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.CopyFail:
-		return ClientCopyCopyFail{m}, true
+		return ClientCopyCopyFail{NewLazyClientFromParsed(m)}, true
 	}
 	return nil, false
 }

@@ -13,6 +13,7 @@ type ClientTerminateConn interface {
 	TerminateConn()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -21,17 +22,19 @@ var (
 )
 
 // ClientTerminateConnTerminate wraps *pgproto3.Terminate from the client.
-type ClientTerminateConnTerminate FromClient[*pgproto3.Terminate]
+type ClientTerminateConnTerminate struct {
+	LazyClient[*pgproto3.Terminate]
+}
 
 func (ClientTerminateConnTerminate) TerminateConn()                     {}
-func (t ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ToClientTerminateConn converts a pgproto3.FrontendMessage to a ClientTerminateConn if it matches one of the known types.
 func ToClientTerminateConn(msg pgproto3.FrontendMessage) (ClientTerminateConn, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Terminate:
-		return ClientTerminateConnTerminate{m}, true
+		return ClientTerminateConnTerminate{NewLazyClientFromParsed(m)}, true
 	}
 	return nil, false
 }

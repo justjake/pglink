@@ -13,6 +13,7 @@ type ServerResponse interface {
 	Response()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -28,62 +29,72 @@ var (
 // Start-up completed.
 // Simple Query mode: ready for next query.
 // Extended Query mode: response to Sync; backend no longer ignoring messages, ready for next command.
-type ServerResponseReadyForQuery FromServer[*pgproto3.ReadyForQuery]
+type ServerResponseReadyForQuery struct {
+	LazyServer[*pgproto3.ReadyForQuery]
+}
 
 func (ServerResponseReadyForQuery) Response()                         {}
-func (t ServerResponseReadyForQuery) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerResponseReadyForQuery) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerResponseReadyForQuery) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerResponseReadyForQuery) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // SQL command completed normally.
-type ServerResponseCommandComplete FromServer[*pgproto3.CommandComplete]
+type ServerResponseCommandComplete struct {
+	LazyServer[*pgproto3.CommandComplete]
+}
 
 func (ServerResponseCommandComplete) Response()                         {}
-func (t ServerResponseCommandComplete) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerResponseCommandComplete) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerResponseCommandComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerResponseCommandComplete) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Query results (both query modes)
-type ServerResponseDataRow FromServer[*pgproto3.DataRow]
+type ServerResponseDataRow struct{ LazyServer[*pgproto3.DataRow] }
 
 func (ServerResponseDataRow) Response()                         {}
-func (t ServerResponseDataRow) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerResponseDataRow) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerResponseDataRow) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerResponseDataRow) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to empty query.
-type ServerResponseEmptyQueryResponse FromServer[*pgproto3.EmptyQueryResponse]
+type ServerResponseEmptyQueryResponse struct {
+	LazyServer[*pgproto3.EmptyQueryResponse]
+}
 
 func (ServerResponseEmptyQueryResponse) Response()                         {}
-func (t ServerResponseEmptyQueryResponse) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerResponseEmptyQueryResponse) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerResponseEmptyQueryResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerResponseEmptyQueryResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Error response.
-type ServerResponseErrorResponse FromServer[*pgproto3.ErrorResponse]
+type ServerResponseErrorResponse struct {
+	LazyServer[*pgproto3.ErrorResponse]
+}
 
 func (ServerResponseErrorResponse) Response()                         {}
-func (t ServerResponseErrorResponse) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerResponseErrorResponse) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerResponseErrorResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerResponseErrorResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to function call.
-type ServerResponseFunctionCallResponse FromServer[*pgproto3.FunctionCallResponse]
+type ServerResponseFunctionCallResponse struct {
+	LazyServer[*pgproto3.FunctionCallResponse]
+}
 
 func (ServerResponseFunctionCallResponse) Response()                         {}
-func (t ServerResponseFunctionCallResponse) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerResponseFunctionCallResponse) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerResponseFunctionCallResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerResponseFunctionCallResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ToServerResponse converts a pgproto3.BackendMessage to a ServerResponse if it matches one of the known types.
 func ToServerResponse(msg pgproto3.BackendMessage) (ServerResponse, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ReadyForQuery:
-		return ServerResponseReadyForQuery{m}, true
+		return ServerResponseReadyForQuery{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.CommandComplete:
-		return ServerResponseCommandComplete{m}, true
+		return ServerResponseCommandComplete{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.DataRow:
-		return ServerResponseDataRow{m}, true
+		return ServerResponseDataRow{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.EmptyQueryResponse:
-		return ServerResponseEmptyQueryResponse{m}, true
+		return ServerResponseEmptyQueryResponse{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.ErrorResponse:
-		return ServerResponseErrorResponse{m}, true
+		return ServerResponseErrorResponse{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.FunctionCallResponse:
-		return ServerResponseFunctionCallResponse{m}, true
+		return ServerResponseFunctionCallResponse{NewLazyServerFromParsed(m)}, true
 	}
 	return nil, false
 }

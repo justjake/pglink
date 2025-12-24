@@ -14,6 +14,39 @@ import (
 	"github.com/justjake/pglink/pkg/config"
 )
 
+// TLS cert/key filenames used in the config directory.
+const (
+	tlsCertFilename = "server.crt"
+	tlsKeyFilename  = "server.key"
+)
+
+// PoolMode specifies the connection pooling mode.
+type PoolMode string
+
+const (
+	// PoolModeTransaction returns connections to the pool after each transaction.
+	PoolModeTransaction PoolMode = "transaction"
+	// PoolModeSession keeps connections assigned to clients for the entire session.
+	PoolModeSession PoolMode = "session"
+)
+
+// TLSConfig configures TLS for PgBouncer.
+type TLSConfig struct {
+	// CertPath is the path to the TLS certificate file.
+	CertPath string
+	// KeyPath is the path to the TLS private key file.
+	KeyPath string
+}
+
+// Options configures PgBouncer behavior.
+type Options struct {
+	// PoolMode controls connection pooling behavior.
+	// Defaults to PoolModeTransaction.
+	PoolMode PoolMode
+	// TLS configures TLS for client connections. If nil, TLS is disabled.
+	TLS *TLSConfig
+}
+
 // Config holds the generated PgBouncer configuration.
 type Config struct {
 	// INI is the main pgbouncer.ini config content.
@@ -24,11 +57,20 @@ type Config struct {
 
 	// ListenPort is the port PgBouncer will listen on.
 	ListenPort int
+
+	// TLS contains TLS certificate data to write, if any.
+	TLS *TLSConfig
 }
 
 // GenerateConfig creates a PgBouncer configuration equivalent to the given pglink config.
 // The secrets parameter is used to resolve usernames and passwords.
+// Uses default options (transaction pooling, no TLS).
 func GenerateConfig(ctx context.Context, cfg *config.Config, secrets *config.SecretCache, listenPort int) (*Config, error) {
+	return GenerateConfigWithOptions(ctx, cfg, secrets, listenPort, Options{})
+}
+
+// GenerateConfigWithOptions creates a PgBouncer configuration with custom options.
+func GenerateConfigWithOptions(ctx context.Context, cfg *config.Config, secrets *config.SecretCache, listenPort int, opts Options) (*Config, error) {
 	var databases strings.Builder
 	var users strings.Builder
 	seenUsers := make(map[string]bool)
@@ -61,17 +103,18 @@ func GenerateConfig(ctx context.Context, cfg *config.Config, secrets *config.Sec
 	}
 
 	// Build the INI file
-	ini := buildINI(cfg, listenPort, databases.String())
+	ini := buildINI(cfg, listenPort, databases.String(), opts)
 
 	return &Config{
 		INI:        ini,
 		Userlist:   users.String(),
 		ListenPort: listenPort,
+		TLS:        opts.TLS,
 	}, nil
 }
 
 // WriteToDir writes the PgBouncer configuration files to the specified directory.
-// Creates pgbouncer.ini and userlist.txt files.
+// Creates pgbouncer.ini, userlist.txt, and TLS cert/key files if configured.
 func (c *Config) WriteToDir(dir string) error {
 	// Create directory if it doesn't exist
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -90,7 +133,55 @@ func (c *Config) WriteToDir(dir string) error {
 		return fmt.Errorf("failed to write userlist.txt: %w", err)
 	}
 
+	// Copy TLS cert/key files if configured
+	if c.TLS != nil {
+		// Copy cert file
+		if c.TLS.CertPath != "" {
+			destCertPath := filepath.Join(dir, "server.crt")
+			if err := copyFile(c.TLS.CertPath, destCertPath); err != nil {
+				return fmt.Errorf("failed to copy TLS cert: %w", err)
+			}
+		}
+		// Copy key file
+		if c.TLS.KeyPath != "" {
+			destKeyPath := filepath.Join(dir, "server.key")
+			if err := copyFile(c.TLS.KeyPath, destKeyPath); err != nil {
+				return fmt.Errorf("failed to copy TLS key: %w", err)
+			}
+			// Ensure key file has restricted permissions
+			if err := os.Chmod(destKeyPath, 0600); err != nil {
+				return fmt.Errorf("failed to set key file permissions: %w", err)
+			}
+		}
+	}
+
 	return nil
+}
+
+// copyFile copies a file from src to dst.
+func copyFile(src, dst string) (err error) {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := srcFile.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := dstFile.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
 }
 
 // buildConnString creates a PgBouncer-compatible connection string from a BackendConfig.
@@ -115,7 +206,7 @@ func buildConnString(backend *config.BackendConfig) string {
 }
 
 // buildINI creates the pgbouncer.ini content.
-func buildINI(cfg *config.Config, listenPort int, databases string) string {
+func buildINI(cfg *config.Config, listenPort int, databases string, opts Options) string {
 	var b strings.Builder
 
 	// [databases] section
@@ -141,8 +232,12 @@ func buildINI(cfg *config.Config, listenPort int, databases string) string {
 	b.WriteString("auth_type = plain\n")
 	b.WriteString("auth_file = userlist.txt\n")
 
-	// Pool mode - transaction pooling like pglink
-	b.WriteString("pool_mode = transaction\n")
+	// Pool mode - defaults to transaction pooling
+	poolMode := opts.PoolMode
+	if poolMode == "" {
+		poolMode = PoolModeTransaction
+	}
+	b.WriteString(fmt.Sprintf("pool_mode = %s\n", poolMode))
 
 	// Connection limits - find max from all databases
 	maxPoolConns := int32(0)
@@ -161,6 +256,14 @@ func buildINI(cfg *config.Config, listenPort int, databases string) string {
 
 	// Disable server-side prepared statements for transaction pooling compatibility
 	b.WriteString("max_prepared_statements = 0\n")
+
+	// TLS configuration
+	if opts.TLS != nil {
+		// Enable client-side TLS
+		b.WriteString("client_tls_sslmode = allow\n")
+		b.WriteString(fmt.Sprintf("client_tls_cert_file = %s\n", tlsCertFilename))
+		b.WriteString(fmt.Sprintf("client_tls_key_file = %s\n", tlsKeyFilename))
+	}
 
 	// Logging
 	b.WriteString("log_connections = 0\n")

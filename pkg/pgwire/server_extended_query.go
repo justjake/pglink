@@ -13,6 +13,7 @@ type ServerExtendedQuery interface {
 	ExtendedQuery()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -27,72 +28,84 @@ var (
 )
 
 // Response to Parse.
-type ServerExtendedQueryParseComplete FromServer[*pgproto3.ParseComplete]
+type ServerExtendedQueryParseComplete struct {
+	LazyServer[*pgproto3.ParseComplete]
+}
 
 func (ServerExtendedQueryParseComplete) ExtendedQuery()                    {}
-func (t ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to Bind.
-type ServerExtendedQueryBindComplete FromServer[*pgproto3.BindComplete]
+type ServerExtendedQueryBindComplete struct {
+	LazyServer[*pgproto3.BindComplete]
+}
 
 func (ServerExtendedQueryBindComplete) ExtendedQuery()                    {}
-func (t ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to Describe of prepared statement.
-type ServerExtendedQueryParameterDescription FromServer[*pgproto3.ParameterDescription]
+type ServerExtendedQueryParameterDescription struct {
+	LazyServer[*pgproto3.ParameterDescription]
+}
 
 func (ServerExtendedQueryParameterDescription) ExtendedQuery()                    {}
-func (t ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to Describe of portal or statement that returns data.
-type ServerExtendedQueryRowDescription FromServer[*pgproto3.RowDescription]
+type ServerExtendedQueryRowDescription struct {
+	LazyServer[*pgproto3.RowDescription]
+}
 
 func (ServerExtendedQueryRowDescription) ExtendedQuery()                    {}
-func (t ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to Describe of portal or statement that doesn't return data.
-type ServerExtendedQueryNoData FromServer[*pgproto3.NoData]
+type ServerExtendedQueryNoData struct{ LazyServer[*pgproto3.NoData] }
 
 func (ServerExtendedQueryNoData) ExtendedQuery()                    {}
-func (t ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerExtendedQueryNoData) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerExtendedQueryNoData) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to Execute if there are additional rows / the execute did not
 // complete during the Execute call, the client should call Execute again.
-type ServerExtendedQueryPortalSuspended FromServer[*pgproto3.PortalSuspended]
+type ServerExtendedQueryPortalSuspended struct {
+	LazyServer[*pgproto3.PortalSuspended]
+}
 
 func (ServerExtendedQueryPortalSuspended) ExtendedQuery()                    {}
-func (t ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to Close of prepared statement or portal.
-type ServerExtendedQueryCloseComplete FromServer[*pgproto3.CloseComplete]
+type ServerExtendedQueryCloseComplete struct {
+	LazyServer[*pgproto3.CloseComplete]
+}
 
 func (ServerExtendedQueryCloseComplete) ExtendedQuery()                    {}
-func (t ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ToServerExtendedQuery converts a pgproto3.BackendMessage to a ServerExtendedQuery if it matches one of the known types.
 func ToServerExtendedQuery(msg pgproto3.BackendMessage) (ServerExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ParseComplete:
-		return ServerExtendedQueryParseComplete{m}, true
+		return ServerExtendedQueryParseComplete{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.BindComplete:
-		return ServerExtendedQueryBindComplete{m}, true
+		return ServerExtendedQueryBindComplete{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.ParameterDescription:
-		return ServerExtendedQueryParameterDescription{m}, true
+		return ServerExtendedQueryParameterDescription{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.RowDescription:
-		return ServerExtendedQueryRowDescription{m}, true
+		return ServerExtendedQueryRowDescription{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.NoData:
-		return ServerExtendedQueryNoData{m}, true
+		return ServerExtendedQueryNoData{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.PortalSuspended:
-		return ServerExtendedQueryPortalSuspended{m}, true
+		return ServerExtendedQueryPortalSuspended{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.CloseComplete:
-		return ServerExtendedQueryCloseComplete{m}, true
+		return ServerExtendedQueryCloseComplete{NewLazyServerFromParsed(m)}, true
 	}
 	return nil, false
 }

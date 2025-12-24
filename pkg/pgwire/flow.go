@@ -204,7 +204,7 @@ type SimpleQueryFlow struct {
 // NewSimpleQueryFlow creates a new SimpleQueryFlow from a Query message.
 func NewSimpleQueryFlow(msg ClientSimpleQueryQuery, onClose func(*SimpleQueryFlow)) *SimpleQueryFlow {
 	return &SimpleQueryFlow{
-		SQL:       msg.T.String,
+		SQL:       msg.Parse().String,
 		StartTime: time.Now(),
 		OnClose:   onClose,
 	}
@@ -216,10 +216,10 @@ func (f *SimpleQueryFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandler
 			Response: func(msg ServerResponse) bool {
 				switch m := msg.(type) {
 				case ServerResponseCommandComplete:
-					f.CommandTag = pgconn.NewCommandTag(string(m.T.CommandTag))
+					f.CommandTag = pgconn.NewCommandTag(string(m.Parse().CommandTag))
 					return true // Continue until ReadyForQuery
 				case ServerResponseErrorResponse:
-					f.Err = m.T
+					f.Err = m.Parse()
 					return true // Continue until ReadyForQuery
 				case ServerResponseReadyForQuery:
 					f.EndTime = time.Now()
@@ -263,10 +263,11 @@ type ExtendedQueryFlow struct {
 
 // NewExtendedQueryFlow creates a new ExtendedQueryFlow from a Parse message.
 func NewExtendedQueryFlow(msg ClientExtendedQueryParse, onClose func(*ExtendedQueryFlow)) *ExtendedQueryFlow {
+	parsed := msg.Parse()
 	return &ExtendedQueryFlow{
 		Type:          FlowTypePrepare, // Will be updated to FlowTypeExecute if we see Bind+Execute
-		SQL:           msg.T.Query,
-		StatementName: msg.T.Name,
+		SQL:           parsed.Query,
+		StatementName: parsed.Name,
 		StartTime:     time.Now(),
 		OnClose:       onClose,
 	}
@@ -279,7 +280,7 @@ func (f *ExtendedQueryFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandl
 				switch m := msg.(type) {
 				case ClientExtendedQueryBind:
 					f.seenBind = true
-					f.PortalName = m.T.DestinationPortal
+					f.PortalName = m.Parse().DestinationPortal
 				case ClientExtendedQueryExecute:
 					f.seenExecute = true
 					if f.seenBind {
@@ -293,10 +294,10 @@ func (f *ExtendedQueryFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandl
 			Response: func(msg ServerResponse) bool {
 				switch m := msg.(type) {
 				case ServerResponseCommandComplete:
-					f.CommandTag = pgconn.NewCommandTag(string(m.T.CommandTag))
+					f.CommandTag = pgconn.NewCommandTag(string(m.Parse().CommandTag))
 					return true
 				case ServerResponseErrorResponse:
-					f.Err = m.T
+					f.Err = m.Parse()
 					return true
 				case ServerResponseReadyForQuery:
 					f.EndTime = time.Now()
@@ -357,7 +358,8 @@ func (f *CopyFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandlers {
 			Copy: func(msg ClientCopy) bool {
 				switch m := msg.(type) {
 				case ClientCopyCopyData:
-					f.ByteCount += int64(len(m.T.Data))
+					// Fast path: use DataSize() to avoid parsing
+					f.ByteCount += int64(m.DataSize())
 				}
 				return true
 			},
@@ -366,17 +368,18 @@ func (f *CopyFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandlers {
 			Copy: func(msg ServerCopy) bool {
 				switch m := msg.(type) {
 				case ServerCopyCopyData:
-					f.ByteCount += int64(len(m.T.Data))
+					// Fast path: use DataSize() to avoid parsing
+					f.ByteCount += int64(m.DataSize())
 				}
 				return true
 			},
 			Response: func(msg ServerResponse) bool {
 				switch m := msg.(type) {
 				case ServerResponseCommandComplete:
-					f.CommandTag = pgconn.NewCommandTag(string(m.T.CommandTag))
+					f.CommandTag = pgconn.NewCommandTag(string(m.Parse().CommandTag))
 					return true
 				case ServerResponseErrorResponse:
-					f.Err = m.T
+					f.Err = m.Parse()
 					return true
 				case ServerResponseReadyForQuery:
 					f.EndTime = time.Now()

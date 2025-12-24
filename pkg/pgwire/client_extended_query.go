@@ -13,6 +13,7 @@ type ClientExtendedQuery interface {
 	ExtendedQuery()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -27,18 +28,18 @@ var (
 )
 
 // Extended Query 1: parse text into a prepared statement.
-type ClientExtendedQueryParse FromClient[*pgproto3.Parse]
+type ClientExtendedQueryParse struct{ LazyClient[*pgproto3.Parse] }
 
 func (ClientExtendedQueryParse) ExtendedQuery()                     {}
-func (t ClientExtendedQueryParse) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientExtendedQueryParse) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientExtendedQueryParse) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientExtendedQueryParse) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // Extended Query 2: Bind parameters to a prepared statement.
-type ClientExtendedQueryBind FromClient[*pgproto3.Bind]
+type ClientExtendedQueryBind struct{ LazyClient[*pgproto3.Bind] }
 
 func (ClientExtendedQueryBind) ExtendedQuery()                     {}
-func (t ClientExtendedQueryBind) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientExtendedQueryBind) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientExtendedQueryBind) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientExtendedQueryBind) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // Extended Query 3: Execute a prepared statement, requesting N or all rows.
 // May need to be called again if server replies PortalSuspended.
@@ -48,11 +49,11 @@ func (t ClientExtendedQueryBind) Client() pgproto3.FrontendMessage { return t.T 
 // - CommandComplete: success
 // - ErrorResponse: failure
 // - EmptyQueryResponse: the portal was created from an empty query string
-type ClientExtendedQueryExecute FromClient[*pgproto3.Execute]
+type ClientExtendedQueryExecute struct{ LazyClient[*pgproto3.Execute] }
 
 func (ClientExtendedQueryExecute) ExtendedQuery()                     {}
-func (t ClientExtendedQueryExecute) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientExtendedQueryExecute) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // Extended Query 4: Command pipeline complete.
 //
@@ -70,11 +71,11 @@ func (t ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage { return t
 // one and only one ReadyForQuery sent for each Sync.)
 // In addition to these fundamental, required operations, there are several
 // optional operations that can be used with extended-query protocol.
-type ClientExtendedQuerySync FromClient[*pgproto3.Sync]
+type ClientExtendedQuerySync struct{ LazyClient[*pgproto3.Sync] }
 
 func (ClientExtendedQuerySync) ExtendedQuery()                     {}
-func (t ClientExtendedQuerySync) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientExtendedQuerySync) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientExtendedQuerySync) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientExtendedQuerySync) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // Extended Query tool: Describe prepared statement or portal.
 //
@@ -96,20 +97,20 @@ func (t ClientExtendedQuerySync) Client() pgproto3.FrontendMessage { return t.T 
 // the formats to be used for returned columns are not yet known to the
 // backend; the format code fields in the RowDescription message will be
 // zeroes in this case.
-type ClientExtendedQueryDescribe FromClient[*pgproto3.Describe]
+type ClientExtendedQueryDescribe struct{ LazyClient[*pgproto3.Describe] }
 
 func (ClientExtendedQueryDescribe) ExtendedQuery()                     {}
-func (t ClientExtendedQueryDescribe) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientExtendedQueryDescribe) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientExtendedQueryDescribe) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientExtendedQueryDescribe) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // Close prepared statement/portal.
 // Note that closing a prepared statement implicitly closes any open
 // portals that were constructed from that statement.
-type ClientExtendedQueryClose FromClient[*pgproto3.Close]
+type ClientExtendedQueryClose struct{ LazyClient[*pgproto3.Close] }
 
 func (ClientExtendedQueryClose) ExtendedQuery()                     {}
-func (t ClientExtendedQueryClose) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientExtendedQueryClose) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientExtendedQueryClose) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientExtendedQueryClose) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // The Flush message does not cause any specific output to be generated,
 // but forces the backend to deliver any data pending in its output
@@ -118,29 +119,29 @@ func (t ClientExtendedQueryClose) Client() pgproto3.FrontendMessage { return t.T
 // before issuing more commands. Without Flush, messages returned by the
 // backend will be combined into the minimum possible number of packets to
 // minimize network overhead.
-type ClientExtendedQueryFlush FromClient[*pgproto3.Flush]
+type ClientExtendedQueryFlush struct{ LazyClient[*pgproto3.Flush] }
 
 func (ClientExtendedQueryFlush) ExtendedQuery()                     {}
-func (t ClientExtendedQueryFlush) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientExtendedQueryFlush) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientExtendedQueryFlush) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientExtendedQueryFlush) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ToClientExtendedQuery converts a pgproto3.FrontendMessage to a ClientExtendedQuery if it matches one of the known types.
 func ToClientExtendedQuery(msg pgproto3.FrontendMessage) (ClientExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Parse:
-		return ClientExtendedQueryParse{m}, true
+		return ClientExtendedQueryParse{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.Bind:
-		return ClientExtendedQueryBind{m}, true
+		return ClientExtendedQueryBind{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.Execute:
-		return ClientExtendedQueryExecute{m}, true
+		return ClientExtendedQueryExecute{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.Sync:
-		return ClientExtendedQuerySync{m}, true
+		return ClientExtendedQuerySync{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.Describe:
-		return ClientExtendedQueryDescribe{m}, true
+		return ClientExtendedQueryDescribe{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.Close:
-		return ClientExtendedQueryClose{m}, true
+		return ClientExtendedQueryClose{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.Flush:
-		return ClientExtendedQueryFlush{m}, true
+		return ClientExtendedQueryFlush{NewLazyClientFromParsed(m)}, true
 	}
 	return nil, false
 }

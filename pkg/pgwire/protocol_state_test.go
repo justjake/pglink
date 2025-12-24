@@ -45,14 +45,14 @@ func TestProtocolState_SimpleQuery(t *testing.T) {
 	}
 
 	// Server sends DataRow
-	state.UpdateForServerMessage(ServerResponseDataRow{T: &pgproto3.DataRow{Values: [][]byte{[]byte("1")}}})
+	state.UpdateForServerMessage(ServerResponseDataRow{NewLazyServerFromParsed(&pgproto3.DataRow{Values: [][]byte{[]byte("1")}})})
 	// No state change expected
 
 	// Server sends CommandComplete
-	state.UpdateForServerMessage(ServerResponseCommandComplete{T: &pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")}})
+	state.UpdateForServerMessage(ServerResponseCommandComplete{NewLazyServerFromParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})})
 
 	// Server sends ReadyForQuery
-	state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: 'I'}})
+	state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})})
 
 	if state.TxStatus != TxIdle {
 		t.Errorf("TxStatus = %v, want %v", state.TxStatus, TxIdle)
@@ -87,7 +87,7 @@ func TestProtocolState_ExtendedQuery(t *testing.T) {
 	}
 
 	// Server: ParseComplete
-	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{T: &pgproto3.ParseComplete{}})
+	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{NewLazyServerFromParsed(&pgproto3.ParseComplete{})})
 
 	if _, ok := state.Statements.Alive["stmt1"]; !ok {
 		t.Error("stmt1 should be Alive after ParseComplete")
@@ -97,13 +97,13 @@ func TestProtocolState_ExtendedQuery(t *testing.T) {
 	}
 
 	// Server: ParameterDescription
-	state.UpdateForServerMessage(ServerExtendedQueryParameterDescription{T: &pgproto3.ParameterDescription{}})
+	state.UpdateForServerMessage(ServerExtendedQueryParameterDescription{NewLazyServerFromParsed(&pgproto3.ParameterDescription{})})
 
 	// Server: RowDescription
-	state.UpdateForServerMessage(ServerExtendedQueryRowDescription{T: &pgproto3.RowDescription{}})
+	state.UpdateForServerMessage(ServerExtendedQueryRowDescription{NewLazyServerFromParsed(&pgproto3.RowDescription{})})
 
 	// Server: ReadyForQuery
-	state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: 'I'}})
+	state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})})
 
 	if state.SyncsInFlight != 0 {
 		t.Errorf("SyncsInFlight = %v, want 0 after ReadyForQuery", state.SyncsInFlight)
@@ -117,8 +117,8 @@ func TestProtocolState_BindExecute(t *testing.T) {
 	// First prepare a statement
 	state.UpdateForFrontentMessage(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})
 	state.UpdateForFrontentMessage(&pgproto3.Sync{})
-	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{T: &pgproto3.ParseComplete{}})
-	state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: 'I'}})
+	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{NewLazyServerFromParsed(&pgproto3.ParseComplete{})})
+	state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})})
 
 	// Now bind and execute
 	state.UpdateForFrontentMessage(&pgproto3.Bind{DestinationPortal: "p1", PreparedStatement: "stmt1"})
@@ -136,15 +136,15 @@ func TestProtocolState_BindExecute(t *testing.T) {
 	state.UpdateForFrontentMessage(&pgproto3.Sync{})
 
 	// Server responses
-	state.UpdateForServerMessage(ServerExtendedQueryBindComplete{T: &pgproto3.BindComplete{}})
+	state.UpdateForServerMessage(ServerExtendedQueryBindComplete{NewLazyServerFromParsed(&pgproto3.BindComplete{})})
 
 	if _, ok := state.Portals.Alive["p1"]; !ok {
 		t.Error("p1 should be Alive after BindComplete")
 	}
 
-	state.UpdateForServerMessage(ServerResponseDataRow{T: &pgproto3.DataRow{}})
-	state.UpdateForServerMessage(ServerResponseCommandComplete{T: &pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")}})
-	state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: 'I'}})
+	state.UpdateForServerMessage(ServerResponseDataRow{NewLazyServerFromParsed(&pgproto3.DataRow{})})
+	state.UpdateForServerMessage(ServerResponseCommandComplete{NewLazyServerFromParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})})
+	state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})})
 
 	if state.Portals.Executing != nil {
 		t.Error("Portals.Executing should be nil after ReadyForQuery")
@@ -168,7 +168,7 @@ func TestProtocolState_CloseStatement(t *testing.T) {
 	state.UpdateForFrontentMessage(&pgproto3.Sync{})
 
 	// Server: CloseComplete
-	state.UpdateForServerMessage(ServerExtendedQueryCloseComplete{T: &pgproto3.CloseComplete{}})
+	state.UpdateForServerMessage(ServerExtendedQueryCloseComplete{NewLazyServerFromParsed(&pgproto3.CloseComplete{})})
 
 	if state.Statements.Alive["stmt1"] {
 		t.Error("stmt1 should not be Alive after CloseComplete")
@@ -180,14 +180,14 @@ func TestProtocolState_CopyIn(t *testing.T) {
 	state := NewProtocolState()
 
 	// Server sends CopyInResponse
-	state.UpdateForServerMessage(ServerCopyCopyInResponse{T: &pgproto3.CopyInResponse{}})
+	state.UpdateForServerMessage(ServerCopyCopyInResponse{NewLazyServerFromParsed(&pgproto3.CopyInResponse{})})
 
 	if state.CopyMode != CopyIn {
 		t.Errorf("CopyMode = %v, want CopyIn", state.CopyMode)
 	}
 
 	// Server sends CopyDone
-	state.UpdateForServerMessage(ServerCopyCopyDone{T: &pgproto3.CopyDone{}})
+	state.UpdateForServerMessage(ServerCopyCopyDone{NewLazyServerFromParsed(&pgproto3.CopyDone{})})
 
 	if state.CopyMode != CopyNone {
 		t.Errorf("CopyMode = %v, want CopyNone after CopyDone", state.CopyMode)
@@ -199,14 +199,14 @@ func TestProtocolState_CopyOut(t *testing.T) {
 	state := NewProtocolState()
 
 	// Server sends CopyOutResponse
-	state.UpdateForServerMessage(ServerCopyCopyOutResponse{T: &pgproto3.CopyOutResponse{}})
+	state.UpdateForServerMessage(ServerCopyCopyOutResponse{NewLazyServerFromParsed(&pgproto3.CopyOutResponse{})})
 
 	if state.CopyMode != CopyOut {
 		t.Errorf("CopyMode = %v, want CopyOut", state.CopyMode)
 	}
 
 	// Server sends CopyData
-	state.UpdateForServerMessage(ServerCopyCopyData{T: &pgproto3.CopyData{Data: []byte("data")}})
+	state.UpdateForServerMessage(ServerCopyCopyData{NewLazyServerFromParsed(&pgproto3.CopyData{Data: []byte("data")})})
 
 	// CopyMode should still be CopyOut
 	if state.CopyMode != CopyOut {
@@ -214,7 +214,7 @@ func TestProtocolState_CopyOut(t *testing.T) {
 	}
 
 	// Server sends CopyDone
-	state.UpdateForServerMessage(ServerCopyCopyDone{T: &pgproto3.CopyDone{}})
+	state.UpdateForServerMessage(ServerCopyCopyDone{NewLazyServerFromParsed(&pgproto3.CopyDone{})})
 
 	if state.CopyMode != CopyNone {
 		t.Errorf("CopyMode = %v, want CopyNone after CopyDone", state.CopyMode)
@@ -230,18 +230,18 @@ func TestProtocolState_ErrorInExtendedQuery(t *testing.T) {
 	state.UpdateForFrontentMessage(&pgproto3.Sync{})
 
 	// Server sends ErrorResponse
-	state.UpdateForServerMessage(ServerResponseErrorResponse{T: &pgproto3.ErrorResponse{
+	state.UpdateForServerMessage(ServerResponseErrorResponse{NewLazyServerFromParsed(&pgproto3.ErrorResponse{
 		Severity: "ERROR",
 		Code:     "42601",
 		Message:  "syntax error",
-	}})
+	})})
 
 	if !state.ServerIgnoringMessagesUntilSync {
 		t.Error("ServerIgnoringMessagesUntilSync should be true after ErrorResponse in extended query mode")
 	}
 
 	// Server sends ReadyForQuery
-	state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: 'I'}})
+	state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})})
 
 	if state.ServerIgnoringMessagesUntilSync {
 		t.Error("ServerIgnoringMessagesUntilSync should be false after ReadyForQuery")
@@ -263,7 +263,7 @@ func TestProtocolState_TransactionStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			state := NewProtocolState()
-			state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: tt.txStatus}})
+			state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: tt.txStatus})})
 
 			if state.TxStatus != tt.want {
 				t.Errorf("TxStatus = %v, want %v", state.TxStatus, tt.want)
@@ -277,30 +277,30 @@ func TestProtocolState_ParameterStatus(t *testing.T) {
 	state := NewProtocolState()
 
 	// Set a parameter
-	state.UpdateForServerMessage(ServerAsyncParameterStatus{T: &pgproto3.ParameterStatus{
+	state.UpdateForServerMessage(ServerAsyncParameterStatus{NewLazyServerFromParsed(&pgproto3.ParameterStatus{
 		Name:  "client_encoding",
 		Value: "UTF8",
-	}})
+	})})
 
 	if v := state.ParameterStatuses["client_encoding"]; v != "UTF8" {
 		t.Errorf("client_encoding = %q, want %q", v, "UTF8")
 	}
 
 	// Update the parameter
-	state.UpdateForServerMessage(ServerAsyncParameterStatus{T: &pgproto3.ParameterStatus{
+	state.UpdateForServerMessage(ServerAsyncParameterStatus{NewLazyServerFromParsed(&pgproto3.ParameterStatus{
 		Name:  "client_encoding",
 		Value: "LATIN1",
-	}})
+	})})
 
 	if v := state.ParameterStatuses["client_encoding"]; v != "LATIN1" {
 		t.Errorf("client_encoding = %q, want %q", v, "LATIN1")
 	}
 
 	// Delete the parameter (empty value)
-	state.UpdateForServerMessage(ServerAsyncParameterStatus{T: &pgproto3.ParameterStatus{
+	state.UpdateForServerMessage(ServerAsyncParameterStatus{NewLazyServerFromParsed(&pgproto3.ParameterStatus{
 		Name:  "client_encoding",
 		Value: "",
-	}})
+	})})
 
 	if _, ok := state.ParameterStatuses["client_encoding"]; ok {
 		t.Error("client_encoding should be deleted after empty value")
@@ -377,16 +377,16 @@ func TestProtocolState_MultipleSyncsInFlight(t *testing.T) {
 	}
 
 	// Server responds to first
-	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{T: &pgproto3.ParseComplete{}})
-	state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: 'I'}})
+	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{NewLazyServerFromParsed(&pgproto3.ParseComplete{})})
+	state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})})
 
 	if state.SyncsInFlight != 1 {
 		t.Errorf("SyncsInFlight = %v, want 1 after first ReadyForQuery", state.SyncsInFlight)
 	}
 
 	// Server responds to second
-	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{T: &pgproto3.ParseComplete{}})
-	state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: 'I'}})
+	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{NewLazyServerFromParsed(&pgproto3.ParseComplete{})})
+	state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})})
 
 	if state.SyncsInFlight != 0 {
 		t.Errorf("SyncsInFlight = %v, want 0 after second ReadyForQuery", state.SyncsInFlight)
@@ -400,8 +400,8 @@ func TestProtocolState_UnnamedStatementOverwrite(t *testing.T) {
 	// Parse unnamed statement
 	state.UpdateForFrontentMessage(&pgproto3.Parse{Name: "", Query: "SELECT 1"})
 	state.UpdateForFrontentMessage(&pgproto3.Sync{})
-	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{T: &pgproto3.ParseComplete{}})
-	state.UpdateForServerMessage(ServerResponseReadyForQuery{T: &pgproto3.ReadyForQuery{TxStatus: 'I'}})
+	state.UpdateForServerMessage(ServerExtendedQueryParseComplete{NewLazyServerFromParsed(&pgproto3.ParseComplete{})})
+	state.UpdateForServerMessage(ServerResponseReadyForQuery{NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})})
 
 	if _, ok := state.Statements.Alive[""]; !ok {
 		t.Error("Unnamed statement should be Alive")

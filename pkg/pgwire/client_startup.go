@@ -13,6 +13,7 @@ type ClientStartup interface {
 	Startup()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -27,71 +28,85 @@ var (
 )
 
 // ClientStartupGSSEncRequest wraps *pgproto3.GSSEncRequest from the client.
-type ClientStartupGSSEncRequest FromClient[*pgproto3.GSSEncRequest]
+type ClientStartupGSSEncRequest struct {
+	LazyClient[*pgproto3.GSSEncRequest]
+}
 
 func (ClientStartupGSSEncRequest) Startup()                           {}
-func (t ClientStartupGSSEncRequest) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientStartupGSSEncRequest) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientStartupGSSEncRequest) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientStartupGSSEncRequest) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ClientStartupGSSResponse wraps *pgproto3.GSSResponse from the client.
-type ClientStartupGSSResponse FromClient[*pgproto3.GSSResponse]
+type ClientStartupGSSResponse struct {
+	LazyClient[*pgproto3.GSSResponse]
+}
 
 func (ClientStartupGSSResponse) Startup()                           {}
-func (t ClientStartupGSSResponse) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientStartupGSSResponse) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientStartupGSSResponse) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientStartupGSSResponse) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ClientStartupPasswordMessage wraps *pgproto3.PasswordMessage from the client.
-type ClientStartupPasswordMessage FromClient[*pgproto3.PasswordMessage]
+type ClientStartupPasswordMessage struct {
+	LazyClient[*pgproto3.PasswordMessage]
+}
 
 func (ClientStartupPasswordMessage) Startup()                           {}
-func (t ClientStartupPasswordMessage) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientStartupPasswordMessage) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientStartupPasswordMessage) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientStartupPasswordMessage) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ClientStartupSASLInitialResponse wraps *pgproto3.SASLInitialResponse from the client.
-type ClientStartupSASLInitialResponse FromClient[*pgproto3.SASLInitialResponse]
+type ClientStartupSASLInitialResponse struct {
+	LazyClient[*pgproto3.SASLInitialResponse]
+}
 
 func (ClientStartupSASLInitialResponse) Startup()                           {}
-func (t ClientStartupSASLInitialResponse) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientStartupSASLInitialResponse) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientStartupSASLInitialResponse) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientStartupSASLInitialResponse) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ClientStartupSASLResponse wraps *pgproto3.SASLResponse from the client.
-type ClientStartupSASLResponse FromClient[*pgproto3.SASLResponse]
+type ClientStartupSASLResponse struct {
+	LazyClient[*pgproto3.SASLResponse]
+}
 
 func (ClientStartupSASLResponse) Startup()                           {}
-func (t ClientStartupSASLResponse) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientStartupSASLResponse) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientStartupSASLResponse) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientStartupSASLResponse) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ClientStartupSSLRequest wraps *pgproto3.SSLRequest from the client.
-type ClientStartupSSLRequest FromClient[*pgproto3.SSLRequest]
+type ClientStartupSSLRequest struct {
+	LazyClient[*pgproto3.SSLRequest]
+}
 
 func (ClientStartupSSLRequest) Startup()                           {}
-func (t ClientStartupSSLRequest) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientStartupSSLRequest) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientStartupSSLRequest) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientStartupSSLRequest) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ClientStartupStartupMessage wraps *pgproto3.StartupMessage from the client.
-type ClientStartupStartupMessage FromClient[*pgproto3.StartupMessage]
+type ClientStartupStartupMessage struct {
+	LazyClient[*pgproto3.StartupMessage]
+}
 
 func (ClientStartupStartupMessage) Startup()                           {}
-func (t ClientStartupStartupMessage) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientStartupStartupMessage) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientStartupStartupMessage) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientStartupStartupMessage) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ToClientStartup converts a pgproto3.FrontendMessage to a ClientStartup if it matches one of the known types.
 func ToClientStartup(msg pgproto3.FrontendMessage) (ClientStartup, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.GSSEncRequest:
-		return ClientStartupGSSEncRequest{m}, true
+		return ClientStartupGSSEncRequest{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.GSSResponse:
-		return ClientStartupGSSResponse{m}, true
+		return ClientStartupGSSResponse{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.PasswordMessage:
-		return ClientStartupPasswordMessage{m}, true
+		return ClientStartupPasswordMessage{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.SASLInitialResponse:
-		return ClientStartupSASLInitialResponse{m}, true
+		return ClientStartupSASLInitialResponse{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.SASLResponse:
-		return ClientStartupSASLResponse{m}, true
+		return ClientStartupSASLResponse{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.SSLRequest:
-		return ClientStartupSSLRequest{m}, true
+		return ClientStartupSSLRequest{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.StartupMessage:
-		return ClientStartupStartupMessage{m}, true
+		return ClientStartupStartupMessage{NewLazyClientFromParsed(m)}, true
 	}
 	return nil, false
 }

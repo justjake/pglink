@@ -195,7 +195,7 @@ func (s *Session) Run() {
 	defer s.Close()
 
 	// Create pgproto3 backend for protocol handling
-	s.frontend = Frontend{ctx: s.ctx, Backend: pgproto3.NewBackend(s.conn, s.conn)}
+	s.frontend = Frontend{ctx: s.ctx, Backend: pgproto3.NewBackend(s.conn, s.conn), conn: s.conn}
 	s.enableTracing()
 
 	// Handle TLS and startup
@@ -529,44 +529,49 @@ func (s *Session) runSimpleQueryWithBackend(msg pgwire.ClientSimpleQuery) (bool,
 func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (bool, error) {
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
 		Bind: func(msg pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
+			parsed := msg.Parse()
 			return &pgproto3.Bind{
-				PreparedStatement:    s.clientToServerPreparedStatementName(msg.T.PreparedStatement),
-				DestinationPortal:    s.clientToServerPortalName(msg.T.DestinationPortal),
-				ParameterFormatCodes: msg.T.ParameterFormatCodes,
-				Parameters:           msg.T.Parameters,
-				ResultFormatCodes:    msg.T.ResultFormatCodes,
+				PreparedStatement:    s.clientToServerPreparedStatementName(parsed.PreparedStatement),
+				DestinationPortal:    s.clientToServerPortalName(parsed.DestinationPortal),
+				ParameterFormatCodes: parsed.ParameterFormatCodes,
+				Parameters:           parsed.Parameters,
+				ResultFormatCodes:    parsed.ResultFormatCodes,
 			}, nil
 		},
 		Parse: func(msg pgwire.ClientExtendedQueryParse) (pgproto3.FrontendMessage, error) {
+			parsed := msg.Parse()
 			return &pgproto3.Parse{
-				Name:          s.clientToServerPreparedStatementName(msg.T.Name),
-				Query:         msg.T.Query,
-				ParameterOIDs: msg.T.ParameterOIDs,
+				Name:          s.clientToServerPreparedStatementName(parsed.Name),
+				Query:         parsed.Query,
+				ParameterOIDs: parsed.ParameterOIDs,
 			}, nil
 		},
 		Execute: func(msg pgwire.ClientExtendedQueryExecute) (pgproto3.FrontendMessage, error) {
+			parsed := msg.Parse()
 			return &pgproto3.Execute{
-				Portal:  s.clientToServerPortalName(msg.T.Portal),
-				MaxRows: msg.T.MaxRows,
+				Portal:  s.clientToServerPortalName(parsed.Portal),
+				MaxRows: parsed.MaxRows,
 			}, nil
 		},
 		Describe: func(msg pgwire.ClientExtendedQueryDescribe) (pgproto3.FrontendMessage, error) {
+			parsed := msg.Parse()
 			return &pgproto3.Describe{
-				ObjectType: msg.T.ObjectType,
-				Name:       s.clientToServerObjectName(msg.T.ObjectType, msg.T.Name),
+				ObjectType: parsed.ObjectType,
+				Name:       s.clientToServerObjectName(parsed.ObjectType, parsed.Name),
 			}, nil
 		},
 		Close: func(msg pgwire.ClientExtendedQueryClose) (pgproto3.FrontendMessage, error) {
+			parsed := msg.Parse()
 			return &pgproto3.Close{
-				ObjectType: msg.T.ObjectType,
-				Name:       s.clientToServerObjectName(msg.T.ObjectType, msg.T.Name),
+				ObjectType: parsed.ObjectType,
+				Name:       s.clientToServerObjectName(parsed.ObjectType, parsed.Name),
 			}, nil
 		},
 		Sync: func(msg pgwire.ClientExtendedQuerySync) (pgproto3.FrontendMessage, error) {
-			return msg.T, nil
+			return msg.Parse(), nil
 		},
 		Flush: func(msg pgwire.ClientExtendedQueryFlush) (pgproto3.FrontendMessage, error) {
-			return msg.T, nil
+			return msg.Parse(), nil
 		},
 	}
 
@@ -593,23 +598,56 @@ func (s *Session) handleServerResponse(msg pgwire.ServerResponse) (bool, error) 
 		}
 	}
 
-	s.frontend.Send(msg.Server())
+	// Use fast path for DataRow, CommandComplete, etc.
+	// ReadyForQuery and ErrorResponse will use slow path (not fast-forwardable)
+	s.forwardServerMessage(msg)
 	return continueWithBackend, nil
 }
 
 func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery) (bool, error) {
-	s.frontend.Send(msg.Server())
+	s.forwardServerMessage(msg)
 	return true, nil
 }
 
 func (s *Session) handleServerAsync(msg pgwire.ServerAsync) (bool, error) {
-	s.frontend.Send(msg.Server())
+	s.forwardServerMessage(msg)
 	return true, nil
 }
 
 func (s *Session) handleServerCopy(msg pgwire.ServerCopy) (bool, error) {
-	s.frontend.Send(msg.Server())
+	s.forwardServerMessage(msg)
 	return true, nil
+}
+
+// forwardServerMessage sends a server message to the client.
+// For fast-forwardable message types, it uses raw byte forwarding to avoid
+// re-encoding overhead. For other messages, it uses the standard Send path.
+func (s *Session) forwardServerMessage(msg pgwire.ServerMessage) {
+	// Check if we have raw bytes available (from RawReader)
+	raw := msg.Raw()
+	if !raw.IsZero() && raw.IsFastForwardable() {
+		// Fast path: forward raw bytes directly
+		if err := s.frontend.ForwardRaw(raw); err != nil {
+			// Fall back to slow path on error
+			s.frontend.Send(msg.Server())
+		}
+		return
+	}
+
+	// Check if this message type is fast-forwardable
+	// Even without raw bytes, we can encode and forward to bypass pgproto3 buffering
+	serverMsg := msg.Server()
+	raw = pgwire.EncodeBackendMessage(serverMsg)
+	if !raw.IsZero() && raw.IsFastForwardable() {
+		if err := s.frontend.ForwardRaw(raw); err != nil {
+			// Fall back to slow path on error
+			s.frontend.Send(serverMsg)
+		}
+		return
+	}
+
+	// Slow path: use standard Send
+	s.frontend.Send(serverMsg)
 }
 
 func (s *Session) clientToServerObjectName(objectType byte, name string) string {
@@ -781,7 +819,7 @@ func (s *Session) handleSSLRequest() error {
 	s.tlsState = &state
 
 	// Recreate the pgproto3 backend with the TLS connection
-	s.frontend = Frontend{ctx: s.ctx, Backend: pgproto3.NewBackend(s.conn, s.conn)}
+	s.frontend = Frontend{ctx: s.ctx, Backend: pgproto3.NewBackend(s.conn, s.conn), conn: s.conn}
 	s.enableTracing()
 
 	return nil
@@ -976,7 +1014,8 @@ func (s *Session) setupFlowRecognizers() {
 	// SimpleQuery recognizer
 	s.state.AddRecognizer(&pgwire.SimpleQueryRecognizer{
 		OnStart: func(msg pgwire.ClientSimpleQueryQuery) func(*pgwire.SimpleQueryFlow) {
-			s.lastSQL = msg.T.String // Track for CopyRecognizer
+			parsed := msg.Parse()
+			s.lastSQL = parsed.String // Track for CopyRecognizer
 
 			// Start span if tracing enabled
 			var span trace.Span
@@ -984,14 +1023,14 @@ func (s *Session) setupFlowRecognizers() {
 				ctx := s.ctx
 				// Extract trace context from SQL if configured
 				if traceparentRegex != nil {
-					ctx = s.extractTraceContextFromSQL(ctx, msg.T.String, traceparentRegex)
+					ctx = s.extractTraceContextFromSQL(ctx, parsed.String, traceparentRegex)
 				}
 				_, span = tracer.Start(ctx, "pglink.query.simple",
 					trace.WithAttributes(observability.SessionAttributes(s.userName, s.databaseName, appName)...),
 				)
 				// Extract per-query application_name if configured
 				if appNameRegex != nil {
-					if queryAppName := extractRegexMatch(msg.T.String, appNameRegex); queryAppName != "" {
+					if queryAppName := extractRegexMatch(parsed.String, appNameRegex); queryAppName != "" {
 						span.SetAttributes(attribute.String(observability.AttrApplicationNameQ, queryAppName))
 					}
 				}
@@ -1029,7 +1068,8 @@ func (s *Session) setupFlowRecognizers() {
 	// ExtendedQuery recognizer
 	s.state.AddRecognizer(&pgwire.ExtendedQueryRecognizer{
 		OnStart: func(msg pgwire.ClientExtendedQueryParse) func(*pgwire.ExtendedQueryFlow) {
-			s.lastSQL = msg.T.Query // Track for CopyRecognizer
+			parsed := msg.Parse()
+			s.lastSQL = parsed.Query // Track for CopyRecognizer
 
 			// Start span if tracing enabled
 			var span trace.Span
@@ -1037,19 +1077,19 @@ func (s *Session) setupFlowRecognizers() {
 				ctx := s.ctx
 				// Extract trace context from SQL if configured
 				if traceparentRegex != nil {
-					ctx = s.extractTraceContextFromSQL(ctx, msg.T.Query, traceparentRegex)
+					ctx = s.extractTraceContextFromSQL(ctx, parsed.Query, traceparentRegex)
 				}
 				_, span = tracer.Start(ctx, "pglink.query.extended",
 					trace.WithAttributes(observability.SessionAttributes(s.userName, s.databaseName, appName)...),
 				)
 				// Extract per-query application_name if configured
 				if appNameRegex != nil {
-					if queryAppName := extractRegexMatch(msg.T.Query, appNameRegex); queryAppName != "" {
+					if queryAppName := extractRegexMatch(parsed.Query, appNameRegex); queryAppName != "" {
 						span.SetAttributes(attribute.String(observability.AttrApplicationNameQ, queryAppName))
 					}
 				}
-				if msg.T.Name != "" {
-					span.SetAttributes(attribute.String(observability.AttrStatementName, msg.T.Name))
+				if parsed.Name != "" {
+					span.SetAttributes(attribute.String(observability.AttrStatementName, parsed.Name))
 				}
 			}
 

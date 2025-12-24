@@ -13,6 +13,7 @@ type ServerCopy interface {
 	Copy()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -27,55 +28,61 @@ var (
 // Response to COPY FROM STDIN.
 // Backend ready to copy data from client to server.
 // Starts CopyIn mode.
-type ServerCopyCopyInResponse FromServer[*pgproto3.CopyInResponse]
+type ServerCopyCopyInResponse struct {
+	LazyServer[*pgproto3.CopyInResponse]
+}
 
 func (ServerCopyCopyInResponse) Copy()                             {}
-func (t ServerCopyCopyInResponse) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerCopyCopyInResponse) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerCopyCopyInResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerCopyCopyInResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to COPY TO STDOUT.
 // Backend ready to copy data from server to client.
 // Starts CopyOut mode.
-type ServerCopyCopyOutResponse FromServer[*pgproto3.CopyOutResponse]
+type ServerCopyCopyOutResponse struct {
+	LazyServer[*pgproto3.CopyOutResponse]
+}
 
 func (ServerCopyCopyOutResponse) Copy()                             {}
-func (t ServerCopyCopyOutResponse) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerCopyCopyOutResponse) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerCopyCopyOutResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerCopyCopyOutResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Response to Replication.
-type ServerCopyCopyBothResponse FromServer[*pgproto3.CopyBothResponse]
+type ServerCopyCopyBothResponse struct {
+	LazyServer[*pgproto3.CopyBothResponse]
+}
 
 func (ServerCopyCopyBothResponse) Copy()                             {}
-func (t ServerCopyCopyBothResponse) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerCopyCopyBothResponse) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerCopyCopyBothResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerCopyCopyBothResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Copy Mode: data row.
-type ServerCopyCopyData FromServer[*pgproto3.CopyData]
+type ServerCopyCopyData struct{ LazyServer[*pgproto3.CopyData] }
 
 func (ServerCopyCopyData) Copy()                             {}
-func (t ServerCopyCopyData) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerCopyCopyData) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerCopyCopyData) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerCopyCopyData) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // Copy Mode: copy completed.
-type ServerCopyCopyDone FromServer[*pgproto3.CopyDone]
+type ServerCopyCopyDone struct{ LazyServer[*pgproto3.CopyDone] }
 
 func (ServerCopyCopyDone) Copy()                             {}
-func (t ServerCopyCopyDone) PgwireMessage() pgproto3.Message { return t.T }
-func (t ServerCopyCopyDone) Server() pgproto3.BackendMessage { return t.T }
+func (t ServerCopyCopyDone) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t ServerCopyCopyDone) Server() pgproto3.BackendMessage { return t.Parse() }
 
 // ToServerCopy converts a pgproto3.BackendMessage to a ServerCopy if it matches one of the known types.
 func ToServerCopy(msg pgproto3.BackendMessage) (ServerCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyInResponse:
-		return ServerCopyCopyInResponse{m}, true
+		return ServerCopyCopyInResponse{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.CopyOutResponse:
-		return ServerCopyCopyOutResponse{m}, true
+		return ServerCopyCopyOutResponse{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.CopyBothResponse:
-		return ServerCopyCopyBothResponse{m}, true
+		return ServerCopyCopyBothResponse{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.CopyData:
-		return ServerCopyCopyData{m}, true
+		return ServerCopyCopyData{NewLazyServerFromParsed(m)}, true
 	case *pgproto3.CopyDone:
-		return ServerCopyCopyDone{m}, true
+		return ServerCopyCopyDone{NewLazyServerFromParsed(m)}, true
 	}
 	return nil, false
 }

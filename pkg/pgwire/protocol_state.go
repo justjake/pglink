@@ -133,22 +133,25 @@ func (s *ProtocolState) UpdateForExtendedQueryMessage(msg ClientExtendedQuery) {
 	case ClientExtendedQueryParse:
 		s.clearPendingExecute()
 		s.ExtendedQueryMode = true
-		s.Statements.PendingCreate[msg.T.Name] = true
-		name := msg.T.Name
+		parsed := msg.Parse()
+		s.Statements.PendingCreate[parsed.Name] = true
+		name := parsed.Name
 		s.Statements.PendingExecute = &name
 	case ClientExtendedQueryClose:
 		s.clearPendingExecute()
 		s.ExtendedQueryMode = true
-		if msg.T.ObjectType == ObjectTypePreparedStatement {
-			s.Statements.PendingClose[msg.T.Name] = true
+		parsed := msg.Parse()
+		if parsed.ObjectType == ObjectTypePreparedStatement {
+			s.Statements.PendingClose[parsed.Name] = true
 		} else {
-			s.Portals.PendingClose[msg.T.Name] = true
+			s.Portals.PendingClose[parsed.Name] = true
 		}
 	case ClientExtendedQueryBind:
 		s.ExtendedQueryMode = true
-		s.Portals.PendingCreate[msg.T.DestinationPortal] = true
-		if s.Statements.PendingExecute != nil && *s.Statements.PendingExecute == msg.T.PreparedStatement {
-			dest := msg.T.DestinationPortal
+		parsed := msg.Parse()
+		s.Portals.PendingCreate[parsed.DestinationPortal] = true
+		if s.Statements.PendingExecute != nil && *s.Statements.PendingExecute == parsed.PreparedStatement {
+			dest := parsed.DestinationPortal
 			s.Portals.PendingExecute = &dest
 		} else {
 			s.clearPendingExecute()
@@ -157,9 +160,10 @@ func (s *ProtocolState) UpdateForExtendedQueryMessage(msg ClientExtendedQuery) {
 		s.ExtendedQueryMode = true
 	case ClientExtendedQueryExecute:
 		s.ExtendedQueryMode = true
-		name := msg.T.Portal
+		parsed := msg.Parse()
+		name := parsed.Portal
 		s.Portals.Executing = &name
-		if s.Portals.PendingExecute != nil && *s.Portals.PendingExecute == msg.T.Portal {
+		if s.Portals.PendingExecute != nil && *s.Portals.PendingExecute == parsed.Portal {
 			s.Statements.Executing = s.Statements.PendingExecute
 		} else {
 			stmtName := ""
@@ -229,7 +233,8 @@ func (s *ProtocolState) UpdateForServerResponseMessage(msg ServerResponse) {
 	switch msg := msg.(type) {
 	case ServerResponseReadyForQuery:
 		s.CopyMode = CopyNone
-		s.TxStatus = TxStatus(msg.T.TxStatus)
+		// Fast path: use TxStatusByte() to avoid full parsing
+		s.TxStatus = TxStatus(msg.TxStatusByte())
 		s.ServerIgnoringMessagesUntilSync = false
 		if s.SyncsInFlight > 0 {
 			s.SyncsInFlight--
@@ -258,10 +263,11 @@ func (s *ProtocolState) UpdateForServerAsyncMessage(msg ServerAsync) {
 	case ServerAsyncNoticeResponse:
 	case ServerAsyncNotificationResponse:
 	case ServerAsyncParameterStatus:
-		if msg.T.Value == "" {
-			delete(s.ParameterStatuses, msg.T.Name)
+		parsed := msg.Parse()
+		if parsed.Value == "" {
+			delete(s.ParameterStatuses, parsed.Name)
 		} else {
-			s.ParameterStatuses[msg.T.Name] = msg.T.Value
+			s.ParameterStatuses[parsed.Name] = parsed.Value
 		}
 	default:
 		panic(fmt.Sprintf("unexpected pgwire.ServerAsync: %T", msg))

@@ -13,6 +13,7 @@ type ClientSimpleQuery interface {
 	SimpleQuery()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -23,26 +24,28 @@ var (
 
 // Simple query.
 // Destroys unnamed prepared statement & portal.
-type ClientSimpleQueryQuery FromClient[*pgproto3.Query]
+type ClientSimpleQueryQuery struct{ LazyClient[*pgproto3.Query] }
 
 func (ClientSimpleQueryQuery) SimpleQuery()                       {}
-func (t ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // Call a function; seems to work like a simple query? Or maybe it works with both modes?
-type ClientSimpleQueryFunctionCall FromClient[*pgproto3.FunctionCall]
+type ClientSimpleQueryFunctionCall struct {
+	LazyClient[*pgproto3.FunctionCall]
+}
 
 func (ClientSimpleQueryFunctionCall) SimpleQuery()                       {}
-func (t ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ToClientSimpleQuery converts a pgproto3.FrontendMessage to a ClientSimpleQuery if it matches one of the known types.
 func ToClientSimpleQuery(msg pgproto3.FrontendMessage) (ClientSimpleQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Query:
-		return ClientSimpleQueryQuery{m}, true
+		return ClientSimpleQueryQuery{NewLazyClientFromParsed(m)}, true
 	case *pgproto3.FunctionCall:
-		return ClientSimpleQueryFunctionCall{m}, true
+		return ClientSimpleQueryFunctionCall{NewLazyClientFromParsed(m)}, true
 	}
 	return nil, false
 }

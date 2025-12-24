@@ -288,6 +288,9 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 		returnMethodNames[rm.name] = true
 	}
 
+	// Determine the lazy wrapper type based on from (Server or Client)
+	lazyType := "Lazy" + from
+
 	// Interface
 	interfaceName := from + prefix
 	fmt.Fprintf(&buf, "// %s is implemented by all %s %s message wrapper types.\n", interfaceName, from, prefix)
@@ -307,6 +310,8 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	for _, rm := range returnMethods {
 		fmt.Fprintf(&buf, "\t%s() %s\n", rm.name, rm.returnType)
 	}
+	// Add Raw() method for fast forwarding
+	buf.WriteString("\tRaw() RawBody\n")
 	buf.WriteString("}\n\n")
 
 	// Compile-time interface checks
@@ -332,8 +337,8 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 			fmt.Fprintf(&buf, "// %s wraps %s from the %s.\n", newTypeName, ti.qualified, strings.ToLower(from))
 		}
 
-		// Type definition (defined type, not alias, so we can add methods)
-		fmt.Fprintf(&buf, "type %s From%s[%s]\n\n", newTypeName, from, ti.qualified)
+		// Type definition using embedded LazyServer/LazyClient for lazy parsing
+		fmt.Fprintf(&buf, "type %s struct { %s[%s] }\n\n", newTypeName, lazyType, ti.qualified)
 
 		// Marker methods for interface satisfaction (skip if overridden by return method)
 		if !returnMethodNames[from] {
@@ -347,22 +352,26 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 				fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, method)
 			}
 		}
-		// Methods with return values
+		// Methods with return values - now call Parse() to get the underlying message
 		for _, rm := range returnMethods {
-			fmt.Fprintf(&buf, "func (t %s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, rm.expr)
+			// Replace t.T with t.Parse() in the expression
+			expr := strings.ReplaceAll(rm.expr, "t.T", "t.Parse()")
+			fmt.Fprintf(&buf, "func (t %s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, expr)
 		}
 		buf.WriteString("\n")
 	}
 
 	// Conversion function: To<From><Prefix>(inputType) -> (interface, bool)
+	// This now uses NewLazy*FromParsed for backward compatibility
 	funcName := "To" + from + prefix
+	newLazyFunc := "NewLazy" + from + "FromParsed"
 	fmt.Fprintf(&buf, "// %s converts a %s to a %s if it matches one of the known types.\n", funcName, inputType, interfaceName)
 	fmt.Fprintf(&buf, "func %s(msg %s) (%s, bool) {\n", funcName, inputType, interfaceName)
 	buf.WriteString("\tswitch m := msg.(type) {\n")
 	for _, ti := range types {
 		newTypeName := from + prefix + ti.shortName
 		fmt.Fprintf(&buf, "\tcase %s:\n", ti.qualified)
-		fmt.Fprintf(&buf, "\t\treturn %s{m}, true\n", newTypeName)
+		fmt.Fprintf(&buf, "\t\treturn %s{%s(m)}, true\n", newTypeName, newLazyFunc)
 	}
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn nil, false\n")

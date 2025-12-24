@@ -13,6 +13,7 @@ type ClientCancel interface {
 	Cancel()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
+	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -21,17 +22,19 @@ var (
 )
 
 // ClientCancelCancelRequest wraps *pgproto3.CancelRequest from the client.
-type ClientCancelCancelRequest FromClient[*pgproto3.CancelRequest]
+type ClientCancelCancelRequest struct {
+	LazyClient[*pgproto3.CancelRequest]
+}
 
 func (ClientCancelCancelRequest) Cancel()                            {}
-func (t ClientCancelCancelRequest) PgwireMessage() pgproto3.Message  { return t.T }
-func (t ClientCancelCancelRequest) Client() pgproto3.FrontendMessage { return t.T }
+func (t ClientCancelCancelRequest) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t ClientCancelCancelRequest) Client() pgproto3.FrontendMessage { return t.Parse() }
 
 // ToClientCancel converts a pgproto3.FrontendMessage to a ClientCancel if it matches one of the known types.
 func ToClientCancel(msg pgproto3.FrontendMessage) (ClientCancel, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CancelRequest:
-		return ClientCancelCancelRequest{m}, true
+		return ClientCancelCancelRequest{NewLazyClientFromParsed(m)}, true
 	}
 	return nil, false
 }
