@@ -4,7 +4,7 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
+
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +14,6 @@ type ServerResponse interface {
 	Response()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -105,12 +104,9 @@ func (t ServerResponseDataRow) PgwireMessage() pgproto3.Message {
 func (t ServerResponseDataRow) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.DataRow])(&t).Parse()
 }
-func (m ServerResponseDataRow) Raw() RawBody { return FromServer[*pgproto3.DataRow](m).Raw() }
 func (m *ServerResponseDataRow) Parse() *pgproto3.DataRow {
 	return (*FromServer[*pgproto3.DataRow])(m).Parse()
 }
-func (m ServerResponseDataRow) IsParsed() bool { return FromServer[*pgproto3.DataRow](m).IsParsed() }
-func (m ServerResponseDataRow) Body() []byte   { return FromServer[*pgproto3.DataRow](m).Body() }
 func (m *ServerResponseDataRow) WriteTo(w io.Writer) (int64, error) {
 	return (*FromServer[*pgproto3.DataRow])(m).WriteTo(w)
 }

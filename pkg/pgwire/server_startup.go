@@ -4,7 +4,7 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
+
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +14,6 @@ type ServerStartup interface {
 	Startup()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.

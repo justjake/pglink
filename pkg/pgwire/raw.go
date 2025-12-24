@@ -211,42 +211,9 @@ func (m *FromServer[T]) Parse() T {
 	return m.parsed
 }
 
-// IsParsed returns true if the message has already been parsed.
-func (m FromServer[T]) IsParsed() bool {
-	return m.isParsed
-}
-
 // Source returns the underlying RawMessageSource.
 func (m FromServer[T]) Source() RawMessageSource {
 	return m.source
-}
-
-// Body returns the raw message body bytes for direct access.
-// This is useful for fast accessors that read specific fields without full parsing.
-func (m FromServer[T]) Body() []byte {
-	if m.source != nil {
-		return m.source.MessageBody()
-	}
-	return nil
-}
-
-// Raw returns a RawBody for compatibility with existing interfaces.
-// If the source is already a RawBody, returns it directly.
-// Otherwise, extracts the bytes from the source.
-func (m FromServer[T]) Raw() RawBody {
-	if m.source == nil {
-		if m.isParsed {
-			return EncodeBackendMessage(m.parsed)
-		}
-		return RawBody{}
-	}
-	if raw, ok := m.source.(RawBody); ok {
-		return raw
-	}
-	return RawBody{
-		Type: m.source.MessageType(),
-		Body: m.source.MessageBody(),
-	}
 }
 
 // retainFields returns the retained source and parsed state for use by generated Retain() methods.
@@ -259,19 +226,6 @@ func (m *FromServer[T]) retainFields() (RawMessageSource, T, bool) {
 		return EncodeBackendMessage(m.parsed), m.parsed, m.isParsed
 	}
 	return nil, m.parsed, m.isParsed
-}
-
-// WriteTo writes the message to w. If the message was created from a source,
-// delegates to source.WriteTo(). If created from parsed, encodes and writes.
-func (m *FromServer[T]) WriteTo(w io.Writer) (int64, error) {
-	if m.source != nil {
-		return m.source.WriteTo(w)
-	}
-	if m.isParsed {
-		raw := EncodeBackendMessage(m.parsed)
-		return raw.WriteTo(w)
-	}
-	return 0, nil
 }
 
 // FromClient holds a lazily-parsed frontend message.
@@ -304,42 +258,9 @@ func (m *FromClient[T]) Parse() T {
 	return m.parsed
 }
 
-// IsParsed returns true if the message has already been parsed.
-func (m FromClient[T]) IsParsed() bool {
-	return m.isParsed
-}
-
 // Source returns the underlying RawMessageSource.
 func (m FromClient[T]) Source() RawMessageSource {
 	return m.source
-}
-
-// Body returns the raw message body bytes for direct access.
-// This is useful for fast accessors that read specific fields without full parsing.
-func (m FromClient[T]) Body() []byte {
-	if m.source != nil {
-		return m.source.MessageBody()
-	}
-	return nil
-}
-
-// Raw returns a RawBody for compatibility with existing interfaces.
-// If the source is already a RawBody, returns it directly.
-// Otherwise, extracts the bytes from the source.
-func (m FromClient[T]) Raw() RawBody {
-	if m.source == nil {
-		if m.isParsed {
-			return EncodeFrontendMessage(m.parsed)
-		}
-		return RawBody{}
-	}
-	if raw, ok := m.source.(RawBody); ok {
-		return raw
-	}
-	return RawBody{
-		Type: m.source.MessageType(),
-		Body: m.source.MessageBody(),
-	}
 }
 
 // retainFields returns the retained source and parsed state for use by generated Retain() methods.
@@ -354,19 +275,6 @@ func (m *FromClient[T]) retainFields() (RawMessageSource, T, bool) {
 	return nil, m.parsed, m.isParsed
 }
 
-// WriteTo writes the message to w. If the message was created from a source,
-// delegates to source.WriteTo(). If created from parsed, encodes and writes.
-func (m *FromClient[T]) WriteTo(w io.Writer) (int64, error) {
-	if m.source != nil {
-		return m.source.WriteTo(w)
-	}
-	if m.isParsed {
-		raw := EncodeFrontendMessage(m.parsed)
-		return raw.WriteTo(w)
-	}
-	return 0, nil
-}
-
 // ServerParsed creates a FromServer from an already-parsed message.
 // This is used for backward compatibility with code that already has parsed messages.
 func ServerParsed[T pgproto3.BackendMessage](msg T) FromServer[T] {
@@ -377,20 +285,6 @@ func ServerParsed[T pgproto3.BackendMessage](msg T) FromServer[T] {
 // This is used for backward compatibility with code that already has parsed messages.
 func ClientParsed[T pgproto3.FrontendMessage](msg T) FromClient[T] {
 	return FromClient[T]{parsed: msg, isParsed: true}
-}
-
-// EnsureRaw returns a RawBody for forwarding.
-// This is equivalent to Raw() - the "ensure" semantics are handled by Raw() which
-// extracts from source or encodes from parsed as needed.
-func (m *FromServer[T]) EnsureRaw() RawBody {
-	return m.Raw()
-}
-
-// EnsureRaw returns a RawBody for forwarding.
-// This is equivalent to Raw() - the "ensure" semantics are handled by Raw() which
-// extracts from source or encodes from parsed as needed.
-func (m *FromClient[T]) EnsureRaw() RawBody {
-	return m.Raw()
 }
 
 // EncodeBackendMessage encodes a pgproto3.BackendMessage to RawBody.

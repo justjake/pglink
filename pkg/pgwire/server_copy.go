@@ -4,7 +4,7 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
+
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +14,6 @@ type ServerCopy interface {
 	Copy()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -38,7 +37,6 @@ func (t ServerCopyCopyInResponse) PgwireMessage() pgproto3.Message {
 func (t ServerCopyCopyInResponse) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.CopyInResponse])(&t).Parse()
 }
-func (m ServerCopyCopyInResponse) Raw() RawBody { return FromServer[*pgproto3.CopyInResponse](m).Raw() }
 func (m *ServerCopyCopyInResponse) Parse() *pgproto3.CopyInResponse {
 	return (*FromServer[*pgproto3.CopyInResponse])(m).Parse()
 }
@@ -137,12 +135,9 @@ func (t ServerCopyCopyData) PgwireMessage() pgproto3.Message {
 func (t ServerCopyCopyData) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.CopyData])(&t).Parse()
 }
-func (m ServerCopyCopyData) Raw() RawBody { return FromServer[*pgproto3.CopyData](m).Raw() }
 func (m *ServerCopyCopyData) Parse() *pgproto3.CopyData {
 	return (*FromServer[*pgproto3.CopyData])(m).Parse()
 }
-func (m ServerCopyCopyData) IsParsed() bool { return FromServer[*pgproto3.CopyData](m).IsParsed() }
-func (m ServerCopyCopyData) Body() []byte   { return FromServer[*pgproto3.CopyData](m).Body() }
 func (m *ServerCopyCopyData) WriteTo(w io.Writer) (int64, error) {
 	return (*FromServer[*pgproto3.CopyData])(m).WriteTo(w)
 }
@@ -164,12 +159,9 @@ func (t ServerCopyCopyDone) PgwireMessage() pgproto3.Message {
 func (t ServerCopyCopyDone) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.CopyDone])(&t).Parse()
 }
-func (m ServerCopyCopyDone) Raw() RawBody { return FromServer[*pgproto3.CopyDone](m).Raw() }
 func (m *ServerCopyCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromServer[*pgproto3.CopyDone])(m).Parse()
 }
-func (m ServerCopyCopyDone) IsParsed() bool { return FromServer[*pgproto3.CopyDone](m).IsParsed() }
-func (m ServerCopyCopyDone) Body() []byte   { return FromServer[*pgproto3.CopyDone](m).Body() }
 func (m *ServerCopyCopyDone) WriteTo(w io.Writer) (int64, error) {
 	return (*FromServer[*pgproto3.CopyDone])(m).WriteTo(w)
 }

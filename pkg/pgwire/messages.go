@@ -13,13 +13,11 @@ type Message interface {
 type ClientMessage interface {
 	Message
 	Client() pgproto3.FrontendMessage
-	Raw() RawBody // Returns raw bytes for fast forwarding
 }
 
 type ServerMessage interface {
 	Message
 	Server() pgproto3.BackendMessage
-	Raw() RawBody // Returns raw bytes for fast forwarding
 }
 
 func ToClientMessage(msg pgproto3.FrontendMessage) (ClientMessage, bool) {

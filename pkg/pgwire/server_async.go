@@ -4,7 +4,6 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +13,6 @@ type ServerAsync interface {
 	Async()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -34,20 +32,8 @@ func (t ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message {
 func (t ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.NoticeResponse])(&t).Parse()
 }
-func (m ServerAsyncNoticeResponse) Raw() RawBody {
-	return FromServer[*pgproto3.NoticeResponse](m).Raw()
-}
 func (m *ServerAsyncNoticeResponse) Parse() *pgproto3.NoticeResponse {
 	return (*FromServer[*pgproto3.NoticeResponse])(m).Parse()
-}
-func (m ServerAsyncNoticeResponse) IsParsed() bool {
-	return FromServer[*pgproto3.NoticeResponse](m).IsParsed()
-}
-func (m ServerAsyncNoticeResponse) Body() []byte {
-	return FromServer[*pgproto3.NoticeResponse](m).Body()
-}
-func (m *ServerAsyncNoticeResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.NoticeResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -67,20 +53,8 @@ func (t ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message {
 func (t ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.NotificationResponse])(&t).Parse()
 }
-func (m ServerAsyncNotificationResponse) Raw() RawBody {
-	return FromServer[*pgproto3.NotificationResponse](m).Raw()
-}
 func (m *ServerAsyncNotificationResponse) Parse() *pgproto3.NotificationResponse {
 	return (*FromServer[*pgproto3.NotificationResponse])(m).Parse()
-}
-func (m ServerAsyncNotificationResponse) IsParsed() bool {
-	return FromServer[*pgproto3.NotificationResponse](m).IsParsed()
-}
-func (m ServerAsyncNotificationResponse) Body() []byte {
-	return FromServer[*pgproto3.NotificationResponse](m).Body()
-}
-func (m *ServerAsyncNotificationResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.NotificationResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -100,20 +74,8 @@ func (t ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message {
 func (t ServerAsyncParameterStatus) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.ParameterStatus])(&t).Parse()
 }
-func (m ServerAsyncParameterStatus) Raw() RawBody {
-	return FromServer[*pgproto3.ParameterStatus](m).Raw()
-}
 func (m *ServerAsyncParameterStatus) Parse() *pgproto3.ParameterStatus {
 	return (*FromServer[*pgproto3.ParameterStatus])(m).Parse()
-}
-func (m ServerAsyncParameterStatus) IsParsed() bool {
-	return FromServer[*pgproto3.ParameterStatus](m).IsParsed()
-}
-func (m ServerAsyncParameterStatus) Body() []byte {
-	return FromServer[*pgproto3.ParameterStatus](m).Body()
-}
-func (m *ServerAsyncParameterStatus) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.ParameterStatus])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

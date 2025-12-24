@@ -4,7 +4,7 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
+
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +14,6 @@ type ServerExtendedQuery interface {
 	ExtendedQuery()
 	PgwireMessage() pgproto3.Message
 	Server() pgproto3.BackendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -170,12 +169,9 @@ func (t ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message {
 func (t ServerExtendedQueryNoData) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.NoData])(&t).Parse()
 }
-func (m ServerExtendedQueryNoData) Raw() RawBody { return FromServer[*pgproto3.NoData](m).Raw() }
 func (m *ServerExtendedQueryNoData) Parse() *pgproto3.NoData {
 	return (*FromServer[*pgproto3.NoData])(m).Parse()
 }
-func (m ServerExtendedQueryNoData) IsParsed() bool { return FromServer[*pgproto3.NoData](m).IsParsed() }
-func (m ServerExtendedQueryNoData) Body() []byte   { return FromServer[*pgproto3.NoData](m).Body() }
 func (m *ServerExtendedQueryNoData) WriteTo(w io.Writer) (int64, error) {
 	return (*FromServer[*pgproto3.NoData])(m).WriteTo(w)
 }
