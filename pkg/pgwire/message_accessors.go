@@ -20,8 +20,8 @@ func (r ServerResponseReadyForQuery) TxStatusByte() byte {
 	if r.IsParsed() {
 		return r.Parse().TxStatus
 	}
-	if len(r.Body) >= 1 {
-		return r.Body[0]
+	if len(r.Body()) >= 1 {
+		return r.Body()[0]
 	}
 	return 0
 }
@@ -37,8 +37,8 @@ func (d ServerResponseDataRow) ColumnCount() int16 {
 	if d.IsParsed() {
 		return int16(len(d.Parse().Values))
 	}
-	if len(d.Body) >= 2 {
-		return int16(binary.BigEndian.Uint16(d.Body[0:2]))
+	if len(d.Body()) >= 2 {
+		return int16(binary.BigEndian.Uint16(d.Body()[0:2]))
 	}
 	return 0
 }
@@ -59,7 +59,7 @@ func (d ServerResponseDataRow) BodySize() int {
 		}
 		return size
 	}
-	return len(d.Body)
+	return len(d.Body())
 }
 
 // =============================================================================
@@ -72,7 +72,7 @@ func (c ServerCopyCopyData) DataBytes() []byte {
 	if c.IsParsed() {
 		return c.Parse().Data
 	}
-	return c.Body
+	return c.Body()
 }
 
 // DataSize returns the size of the COPY data in bytes.
@@ -80,7 +80,7 @@ func (c ServerCopyCopyData) DataSize() int {
 	if c.IsParsed() {
 		return len(c.Parse().Data)
 	}
-	return len(c.Body)
+	return len(c.Body())
 }
 
 // ClientCopyCopyData accessors
@@ -90,7 +90,7 @@ func (c ClientCopyCopyData) DataBytes() []byte {
 	if c.IsParsed() {
 		return c.Parse().Data
 	}
-	return c.Body
+	return c.Body()
 }
 
 // DataSize returns the size of the COPY data in bytes.
@@ -98,7 +98,7 @@ func (c ClientCopyCopyData) DataSize() int {
 	if c.IsParsed() {
 		return len(c.Parse().Data)
 	}
-	return len(c.Body)
+	return len(c.Body())
 }
 
 // =============================================================================
@@ -111,7 +111,7 @@ func (c ServerResponseCommandComplete) CommandTagBytes() []byte {
 	if c.IsParsed() {
 		return c.Parse().CommandTag
 	}
-	return c.Body
+	return c.Body()
 }
 
 // =============================================================================
@@ -124,8 +124,8 @@ func (c ServerCopyCopyInResponse) Format() byte {
 	if c.IsParsed() {
 		return byte(c.Parse().OverallFormat)
 	}
-	if len(c.Body) >= 1 {
-		return c.Body[0]
+	if len(c.Body()) >= 1 {
+		return c.Body()[0]
 	}
 	return 0
 }
@@ -135,8 +135,8 @@ func (c ServerCopyCopyOutResponse) Format() byte {
 	if c.IsParsed() {
 		return byte(c.Parse().OverallFormat)
 	}
-	if len(c.Body) >= 1 {
-		return c.Body[0]
+	if len(c.Body()) >= 1 {
+		return c.Body()[0]
 	}
 	return 0
 }
@@ -151,8 +151,8 @@ func (r ServerExtendedQueryRowDescription) FieldCount() int16 {
 	if r.IsParsed() {
 		return int16(len(r.Parse().Fields))
 	}
-	if len(r.Body) >= 2 {
-		return int16(binary.BigEndian.Uint16(r.Body[0:2]))
+	if len(r.Body()) >= 2 {
+		return int16(binary.BigEndian.Uint16(r.Body()[0:2]))
 	}
 	return 0
 }
@@ -167,8 +167,8 @@ func (p ServerExtendedQueryParameterDescription) ParameterCount() int16 {
 	if p.IsParsed() {
 		return int16(len(p.Parse().ParameterOIDs))
 	}
-	if len(p.Body) >= 2 {
-		return int16(binary.BigEndian.Uint16(p.Body[0:2]))
+	if len(p.Body()) >= 2 {
+		return int16(binary.BigEndian.Uint16(p.Body()[0:2]))
 	}
 	return 0
 }
@@ -183,7 +183,7 @@ func (q ClientSimpleQueryQuery) QueryBytes() []byte {
 	if q.IsParsed() {
 		return []byte(q.Parse().String)
 	}
-	return q.Body
+	return q.Body()
 }
 
 // =============================================================================
@@ -198,9 +198,10 @@ func (p ClientExtendedQueryParse) StatementNameBytes() []byte {
 		return []byte(p.Parse().Name)
 	}
 	// Find the first null byte (end of name)
-	for i, b := range p.Body {
+	body := p.Body()
+	for i, b := range body {
 		if b == 0 {
-			return p.Body[:i]
+			return body[:i]
 		}
 	}
 	return nil
@@ -217,9 +218,10 @@ func (b ClientExtendedQueryBind) PortalNameBytes() []byte {
 		return []byte(b.Parse().DestinationPortal)
 	}
 	// Find the first null byte (end of portal name)
-	for i, c := range b.Body {
+	body := b.Body()
+	for i, c := range body {
 		if c == 0 {
-			return b.Body[:i]
+			return body[:i]
 		}
 	}
 	return nil
@@ -232,13 +234,14 @@ func (b ClientExtendedQueryBind) StatementNameBytes() []byte {
 		return []byte(b.Parse().PreparedStatement)
 	}
 	// Find first null (end of portal name), then find second null (end of statement name)
+	body := b.Body()
 	start := -1
-	for i, c := range b.Body {
+	for i, c := range body {
 		if c == 0 {
 			if start == -1 {
 				start = i + 1
 			} else {
-				return b.Body[start:i]
+				return body[start:i]
 			}
 		}
 	}
@@ -255,9 +258,10 @@ func (e ClientExtendedQueryExecute) PortalNameBytes() []byte {
 		return []byte(e.Parse().Portal)
 	}
 	// Find the first null byte (end of portal name)
-	for i, c := range e.Body {
+	body := e.Body()
+	for i, c := range body {
 		if c == 0 {
-			return e.Body[:i]
+			return body[:i]
 		}
 	}
 	return nil
@@ -270,9 +274,10 @@ func (e ClientExtendedQueryExecute) MaxRows() int32 {
 		return int32(e.Parse().MaxRows)
 	}
 	// Find null terminator, then read 4 bytes
-	for i, c := range e.Body {
-		if c == 0 && len(e.Body) >= i+5 {
-			return int32(binary.BigEndian.Uint32(e.Body[i+1 : i+5]))
+	body := e.Body()
+	for i, c := range body {
+		if c == 0 && len(body) >= i+5 {
+			return int32(binary.BigEndian.Uint32(body[i+1 : i+5]))
 		}
 	}
 	return 0
@@ -287,8 +292,9 @@ func (d ClientExtendedQueryDescribe) ObjectType() byte {
 	if d.IsParsed() {
 		return d.Parse().ObjectType
 	}
-	if len(d.Body) >= 1 {
-		return d.Body[0]
+	body := d.Body()
+	if len(body) >= 1 {
+		return body[0]
 	}
 	return 0
 }
@@ -298,11 +304,12 @@ func (d ClientExtendedQueryDescribe) ObjectNameBytes() []byte {
 	if d.IsParsed() {
 		return []byte(d.Parse().Name)
 	}
-	if len(d.Body) >= 2 {
+	body := d.Body()
+	if len(body) >= 2 {
 		// Name starts after the object type byte, null-terminated
-		for i := 1; i < len(d.Body); i++ {
-			if d.Body[i] == 0 {
-				return d.Body[1:i]
+		for i := 1; i < len(body); i++ {
+			if body[i] == 0 {
+				return body[1:i]
 			}
 		}
 	}
@@ -318,8 +325,9 @@ func (c ClientExtendedQueryClose) ObjectType() byte {
 	if c.IsParsed() {
 		return c.Parse().ObjectType
 	}
-	if len(c.Body) >= 1 {
-		return c.Body[0]
+	body := c.Body()
+	if len(body) >= 1 {
+		return body[0]
 	}
 	return 0
 }
@@ -329,11 +337,12 @@ func (c ClientExtendedQueryClose) ObjectNameBytes() []byte {
 	if c.IsParsed() {
 		return []byte(c.Parse().Name)
 	}
-	if len(c.Body) >= 2 {
+	body := c.Body()
+	if len(body) >= 2 {
 		// Name starts after the object type byte, null-terminated
-		for i := 1; i < len(c.Body); i++ {
-			if c.Body[i] == 0 {
-				return c.Body[1:i]
+		for i := 1; i < len(body); i++ {
+			if body[i] == 0 {
+				return body[1:i]
 			}
 		}
 	}

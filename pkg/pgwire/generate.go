@@ -276,7 +276,8 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 
 	// Imports
 	buf.WriteString("import (\n")
-	buf.WriteString("\t\"fmt\"\n\n")
+	buf.WriteString("\t\"fmt\"\n")
+	buf.WriteString("\t\"io\"\n\n")
 	for _, imp := range imports {
 		fmt.Fprintf(&buf, "\t%s\n", imp)
 	}
@@ -337,8 +338,8 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 			fmt.Fprintf(&buf, "// %s wraps %s from the %s.\n", newTypeName, ti.qualified, strings.ToLower(from))
 		}
 
-		// Type definition using embedded LazyServer/LazyClient for lazy parsing
-		fmt.Fprintf(&buf, "type %s struct { %s[%s] }\n\n", newTypeName, lazyType, ti.qualified)
+		// Type definition using type alias for LazyServer/LazyClient
+		fmt.Fprintf(&buf, "type %s %s[%s]\n\n", newTypeName, lazyType, ti.qualified)
 
 		// Marker methods for interface satisfaction (skip if overridden by return method)
 		if !returnMethodNames[from] {
@@ -354,10 +355,35 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 		}
 		// Methods with return values - now call Parse() to get the underlying message
 		for _, rm := range returnMethods {
-			// Replace t.T with t.Parse() in the expression
-			expr := strings.ReplaceAll(rm.expr, "t.T", "t.Parse()")
+			// Replace t.T with (*LazyType)(&t).Parse() to call through to the underlying type
+			expr := strings.ReplaceAll(rm.expr, "t.T", fmt.Sprintf("(*%s[%s])(&t).Parse()", lazyType, ti.qualified))
 			fmt.Fprintf(&buf, "func (t %s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, expr)
 		}
+
+		// Raw() method wrapper - required by interface, delegates to underlying type
+		fmt.Fprintf(&buf, "func (m %s) Raw() RawBody { return %s[%s](m).Raw() }\n", newTypeName, lazyType, ti.qualified)
+
+		// Parse() method wrapper - delegates to underlying type (needs pointer receiver for caching)
+		fmt.Fprintf(&buf, "func (m *%s) Parse() %s { return (*%s[%s])(m).Parse() }\n", newTypeName, ti.qualified, lazyType, ti.qualified)
+
+		// IsParsed() method wrapper - delegates to underlying type
+		fmt.Fprintf(&buf, "func (m %s) IsParsed() bool { return %s[%s](m).IsParsed() }\n", newTypeName, lazyType, ti.qualified)
+
+		// Body() method wrapper - delegates to underlying type
+		fmt.Fprintf(&buf, "func (m %s) Body() []byte { return %s[%s](m).Body() }\n", newTypeName, lazyType, ti.qualified)
+
+		// WriteTo() method wrapper - delegates to underlying type (needs pointer receiver)
+		fmt.Fprintf(&buf, "func (m *%s) WriteTo(w io.Writer) (int64, error) { return (*%s[%s])(m).WriteTo(w) }\n", newTypeName, lazyType, ti.qualified)
+
+		// Retain method - returns a copy with retained source bytes
+		// This is needed for messages that must outlive cursor iteration
+		fmt.Fprintf(&buf, "\n// Retain returns a copy of this message with retained source bytes.\n")
+		fmt.Fprintf(&buf, "// Use this when the message must outlive the current iteration.\n")
+		fmt.Fprintf(&buf, "func (m %s) Retain() %s {\n", newTypeName, newTypeName)
+		fmt.Fprintf(&buf, "\tsrc, parsed, isParsed := (*%s[%s])(&m).retainFields()\n", lazyType, ti.qualified)
+		fmt.Fprintf(&buf, "\treturn %s{source: src, parsed: parsed, isParsed: isParsed}\n", newTypeName)
+		fmt.Fprintf(&buf, "}\n")
+
 		buf.WriteString("\n")
 	}
 
@@ -371,7 +397,7 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	for _, ti := range types {
 		newTypeName := from + prefix + ti.shortName
 		fmt.Fprintf(&buf, "\tcase %s:\n", ti.qualified)
-		fmt.Fprintf(&buf, "\t\treturn %s{%s(m)}, true\n", newTypeName, newLazyFunc)
+		fmt.Fprintf(&buf, "\t\treturn %s(%s(m)), true\n", newTypeName, newLazyFunc)
 	}
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn nil, false\n")

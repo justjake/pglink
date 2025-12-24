@@ -4,6 +4,7 @@ package pgwire
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -28,84 +29,248 @@ var (
 )
 
 // Response to Parse.
-type ServerExtendedQueryParseComplete struct {
-	LazyServer[*pgproto3.ParseComplete]
+type ServerExtendedQueryParseComplete LazyServer[*pgproto3.ParseComplete]
+
+func (ServerExtendedQueryParseComplete) ExtendedQuery() {}
+func (t ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.ParseComplete])(&t).Parse()
+}
+func (t ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.ParseComplete])(&t).Parse()
+}
+func (m ServerExtendedQueryParseComplete) Raw() RawBody {
+	return LazyServer[*pgproto3.ParseComplete](m).Raw()
+}
+func (m *ServerExtendedQueryParseComplete) Parse() *pgproto3.ParseComplete {
+	return (*LazyServer[*pgproto3.ParseComplete])(m).Parse()
+}
+func (m ServerExtendedQueryParseComplete) IsParsed() bool {
+	return LazyServer[*pgproto3.ParseComplete](m).IsParsed()
+}
+func (m ServerExtendedQueryParseComplete) Body() []byte {
+	return LazyServer[*pgproto3.ParseComplete](m).Body()
+}
+func (m *ServerExtendedQueryParseComplete) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.ParseComplete])(m).WriteTo(w)
 }
 
-func (ServerExtendedQueryParseComplete) ExtendedQuery()                    {}
-func (t ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerExtendedQueryParseComplete) Retain() ServerExtendedQueryParseComplete {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.ParseComplete])(&m).retainFields()
+	return ServerExtendedQueryParseComplete{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Response to Bind.
-type ServerExtendedQueryBindComplete struct {
-	LazyServer[*pgproto3.BindComplete]
+type ServerExtendedQueryBindComplete LazyServer[*pgproto3.BindComplete]
+
+func (ServerExtendedQueryBindComplete) ExtendedQuery() {}
+func (t ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.BindComplete])(&t).Parse()
+}
+func (t ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.BindComplete])(&t).Parse()
+}
+func (m ServerExtendedQueryBindComplete) Raw() RawBody {
+	return LazyServer[*pgproto3.BindComplete](m).Raw()
+}
+func (m *ServerExtendedQueryBindComplete) Parse() *pgproto3.BindComplete {
+	return (*LazyServer[*pgproto3.BindComplete])(m).Parse()
+}
+func (m ServerExtendedQueryBindComplete) IsParsed() bool {
+	return LazyServer[*pgproto3.BindComplete](m).IsParsed()
+}
+func (m ServerExtendedQueryBindComplete) Body() []byte {
+	return LazyServer[*pgproto3.BindComplete](m).Body()
+}
+func (m *ServerExtendedQueryBindComplete) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.BindComplete])(m).WriteTo(w)
 }
 
-func (ServerExtendedQueryBindComplete) ExtendedQuery()                    {}
-func (t ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerExtendedQueryBindComplete) Retain() ServerExtendedQueryBindComplete {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.BindComplete])(&m).retainFields()
+	return ServerExtendedQueryBindComplete{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Response to Describe of prepared statement.
-type ServerExtendedQueryParameterDescription struct {
-	LazyServer[*pgproto3.ParameterDescription]
+type ServerExtendedQueryParameterDescription LazyServer[*pgproto3.ParameterDescription]
+
+func (ServerExtendedQueryParameterDescription) ExtendedQuery() {}
+func (t ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.ParameterDescription])(&t).Parse()
+}
+func (t ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.ParameterDescription])(&t).Parse()
+}
+func (m ServerExtendedQueryParameterDescription) Raw() RawBody {
+	return LazyServer[*pgproto3.ParameterDescription](m).Raw()
+}
+func (m *ServerExtendedQueryParameterDescription) Parse() *pgproto3.ParameterDescription {
+	return (*LazyServer[*pgproto3.ParameterDescription])(m).Parse()
+}
+func (m ServerExtendedQueryParameterDescription) IsParsed() bool {
+	return LazyServer[*pgproto3.ParameterDescription](m).IsParsed()
+}
+func (m ServerExtendedQueryParameterDescription) Body() []byte {
+	return LazyServer[*pgproto3.ParameterDescription](m).Body()
+}
+func (m *ServerExtendedQueryParameterDescription) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.ParameterDescription])(m).WriteTo(w)
 }
 
-func (ServerExtendedQueryParameterDescription) ExtendedQuery()                    {}
-func (t ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerExtendedQueryParameterDescription) Retain() ServerExtendedQueryParameterDescription {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.ParameterDescription])(&m).retainFields()
+	return ServerExtendedQueryParameterDescription{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Response to Describe of portal or statement that returns data.
-type ServerExtendedQueryRowDescription struct {
-	LazyServer[*pgproto3.RowDescription]
+type ServerExtendedQueryRowDescription LazyServer[*pgproto3.RowDescription]
+
+func (ServerExtendedQueryRowDescription) ExtendedQuery() {}
+func (t ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.RowDescription])(&t).Parse()
+}
+func (t ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.RowDescription])(&t).Parse()
+}
+func (m ServerExtendedQueryRowDescription) Raw() RawBody {
+	return LazyServer[*pgproto3.RowDescription](m).Raw()
+}
+func (m *ServerExtendedQueryRowDescription) Parse() *pgproto3.RowDescription {
+	return (*LazyServer[*pgproto3.RowDescription])(m).Parse()
+}
+func (m ServerExtendedQueryRowDescription) IsParsed() bool {
+	return LazyServer[*pgproto3.RowDescription](m).IsParsed()
+}
+func (m ServerExtendedQueryRowDescription) Body() []byte {
+	return LazyServer[*pgproto3.RowDescription](m).Body()
+}
+func (m *ServerExtendedQueryRowDescription) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.RowDescription])(m).WriteTo(w)
 }
 
-func (ServerExtendedQueryRowDescription) ExtendedQuery()                    {}
-func (t ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerExtendedQueryRowDescription) Retain() ServerExtendedQueryRowDescription {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.RowDescription])(&m).retainFields()
+	return ServerExtendedQueryRowDescription{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Response to Describe of portal or statement that doesn't return data.
-type ServerExtendedQueryNoData struct{ LazyServer[*pgproto3.NoData] }
+type ServerExtendedQueryNoData LazyServer[*pgproto3.NoData]
 
-func (ServerExtendedQueryNoData) ExtendedQuery()                    {}
-func (t ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerExtendedQueryNoData) Server() pgproto3.BackendMessage { return t.Parse() }
+func (ServerExtendedQueryNoData) ExtendedQuery() {}
+func (t ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.NoData])(&t).Parse()
+}
+func (t ServerExtendedQueryNoData) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.NoData])(&t).Parse()
+}
+func (m ServerExtendedQueryNoData) Raw() RawBody { return LazyServer[*pgproto3.NoData](m).Raw() }
+func (m *ServerExtendedQueryNoData) Parse() *pgproto3.NoData {
+	return (*LazyServer[*pgproto3.NoData])(m).Parse()
+}
+func (m ServerExtendedQueryNoData) IsParsed() bool { return LazyServer[*pgproto3.NoData](m).IsParsed() }
+func (m ServerExtendedQueryNoData) Body() []byte   { return LazyServer[*pgproto3.NoData](m).Body() }
+func (m *ServerExtendedQueryNoData) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.NoData])(m).WriteTo(w)
+}
+
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerExtendedQueryNoData) Retain() ServerExtendedQueryNoData {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.NoData])(&m).retainFields()
+	return ServerExtendedQueryNoData{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Response to Execute if there are additional rows / the execute did not
 // complete during the Execute call, the client should call Execute again.
-type ServerExtendedQueryPortalSuspended struct {
-	LazyServer[*pgproto3.PortalSuspended]
+type ServerExtendedQueryPortalSuspended LazyServer[*pgproto3.PortalSuspended]
+
+func (ServerExtendedQueryPortalSuspended) ExtendedQuery() {}
+func (t ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.PortalSuspended])(&t).Parse()
+}
+func (t ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.PortalSuspended])(&t).Parse()
+}
+func (m ServerExtendedQueryPortalSuspended) Raw() RawBody {
+	return LazyServer[*pgproto3.PortalSuspended](m).Raw()
+}
+func (m *ServerExtendedQueryPortalSuspended) Parse() *pgproto3.PortalSuspended {
+	return (*LazyServer[*pgproto3.PortalSuspended])(m).Parse()
+}
+func (m ServerExtendedQueryPortalSuspended) IsParsed() bool {
+	return LazyServer[*pgproto3.PortalSuspended](m).IsParsed()
+}
+func (m ServerExtendedQueryPortalSuspended) Body() []byte {
+	return LazyServer[*pgproto3.PortalSuspended](m).Body()
+}
+func (m *ServerExtendedQueryPortalSuspended) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.PortalSuspended])(m).WriteTo(w)
 }
 
-func (ServerExtendedQueryPortalSuspended) ExtendedQuery()                    {}
-func (t ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerExtendedQueryPortalSuspended) Retain() ServerExtendedQueryPortalSuspended {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.PortalSuspended])(&m).retainFields()
+	return ServerExtendedQueryPortalSuspended{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Response to Close of prepared statement or portal.
-type ServerExtendedQueryCloseComplete struct {
-	LazyServer[*pgproto3.CloseComplete]
+type ServerExtendedQueryCloseComplete LazyServer[*pgproto3.CloseComplete]
+
+func (ServerExtendedQueryCloseComplete) ExtendedQuery() {}
+func (t ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.CloseComplete])(&t).Parse()
+}
+func (t ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.CloseComplete])(&t).Parse()
+}
+func (m ServerExtendedQueryCloseComplete) Raw() RawBody {
+	return LazyServer[*pgproto3.CloseComplete](m).Raw()
+}
+func (m *ServerExtendedQueryCloseComplete) Parse() *pgproto3.CloseComplete {
+	return (*LazyServer[*pgproto3.CloseComplete])(m).Parse()
+}
+func (m ServerExtendedQueryCloseComplete) IsParsed() bool {
+	return LazyServer[*pgproto3.CloseComplete](m).IsParsed()
+}
+func (m ServerExtendedQueryCloseComplete) Body() []byte {
+	return LazyServer[*pgproto3.CloseComplete](m).Body()
+}
+func (m *ServerExtendedQueryCloseComplete) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.CloseComplete])(m).WriteTo(w)
 }
 
-func (ServerExtendedQueryCloseComplete) ExtendedQuery()                    {}
-func (t ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerExtendedQueryCloseComplete) Retain() ServerExtendedQueryCloseComplete {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.CloseComplete])(&m).retainFields()
+	return ServerExtendedQueryCloseComplete{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // ToServerExtendedQuery converts a pgproto3.BackendMessage to a ServerExtendedQuery if it matches one of the known types.
 func ToServerExtendedQuery(msg pgproto3.BackendMessage) (ServerExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ParseComplete:
-		return ServerExtendedQueryParseComplete{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryParseComplete(NewLazyServerFromParsed(m)), true
 	case *pgproto3.BindComplete:
-		return ServerExtendedQueryBindComplete{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryBindComplete(NewLazyServerFromParsed(m)), true
 	case *pgproto3.ParameterDescription:
-		return ServerExtendedQueryParameterDescription{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryParameterDescription(NewLazyServerFromParsed(m)), true
 	case *pgproto3.RowDescription:
-		return ServerExtendedQueryRowDescription{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryRowDescription(NewLazyServerFromParsed(m)), true
 	case *pgproto3.NoData:
-		return ServerExtendedQueryNoData{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryNoData(NewLazyServerFromParsed(m)), true
 	case *pgproto3.PortalSuspended:
-		return ServerExtendedQueryPortalSuspended{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryPortalSuspended(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CloseComplete:
-		return ServerExtendedQueryCloseComplete{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryCloseComplete(NewLazyServerFromParsed(m)), true
 	}
 	return nil, false
 }

@@ -4,6 +4,7 @@ package pgwire
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -24,35 +25,95 @@ var (
 )
 
 // ClientCopyCopyData wraps *pgproto3.CopyData from the client.
-type ClientCopyCopyData struct{ LazyClient[*pgproto3.CopyData] }
+type ClientCopyCopyData LazyClient[*pgproto3.CopyData]
 
-func (ClientCopyCopyData) Copy()                              {}
-func (t ClientCopyCopyData) PgwireMessage() pgproto3.Message  { return t.Parse() }
-func (t ClientCopyCopyData) Client() pgproto3.FrontendMessage { return t.Parse() }
+func (ClientCopyCopyData) Copy() {}
+func (t ClientCopyCopyData) PgwireMessage() pgproto3.Message {
+	return (*LazyClient[*pgproto3.CopyData])(&t).Parse()
+}
+func (t ClientCopyCopyData) Client() pgproto3.FrontendMessage {
+	return (*LazyClient[*pgproto3.CopyData])(&t).Parse()
+}
+func (m ClientCopyCopyData) Raw() RawBody { return LazyClient[*pgproto3.CopyData](m).Raw() }
+func (m *ClientCopyCopyData) Parse() *pgproto3.CopyData {
+	return (*LazyClient[*pgproto3.CopyData])(m).Parse()
+}
+func (m ClientCopyCopyData) IsParsed() bool { return LazyClient[*pgproto3.CopyData](m).IsParsed() }
+func (m ClientCopyCopyData) Body() []byte   { return LazyClient[*pgproto3.CopyData](m).Body() }
+func (m *ClientCopyCopyData) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyClient[*pgproto3.CopyData])(m).WriteTo(w)
+}
+
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ClientCopyCopyData) Retain() ClientCopyCopyData {
+	src, parsed, isParsed := (*LazyClient[*pgproto3.CopyData])(&m).retainFields()
+	return ClientCopyCopyData{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // ClientCopyCopyDone wraps *pgproto3.CopyDone from the client.
-type ClientCopyCopyDone struct{ LazyClient[*pgproto3.CopyDone] }
+type ClientCopyCopyDone LazyClient[*pgproto3.CopyDone]
 
-func (ClientCopyCopyDone) Copy()                              {}
-func (t ClientCopyCopyDone) PgwireMessage() pgproto3.Message  { return t.Parse() }
-func (t ClientCopyCopyDone) Client() pgproto3.FrontendMessage { return t.Parse() }
+func (ClientCopyCopyDone) Copy() {}
+func (t ClientCopyCopyDone) PgwireMessage() pgproto3.Message {
+	return (*LazyClient[*pgproto3.CopyDone])(&t).Parse()
+}
+func (t ClientCopyCopyDone) Client() pgproto3.FrontendMessage {
+	return (*LazyClient[*pgproto3.CopyDone])(&t).Parse()
+}
+func (m ClientCopyCopyDone) Raw() RawBody { return LazyClient[*pgproto3.CopyDone](m).Raw() }
+func (m *ClientCopyCopyDone) Parse() *pgproto3.CopyDone {
+	return (*LazyClient[*pgproto3.CopyDone])(m).Parse()
+}
+func (m ClientCopyCopyDone) IsParsed() bool { return LazyClient[*pgproto3.CopyDone](m).IsParsed() }
+func (m ClientCopyCopyDone) Body() []byte   { return LazyClient[*pgproto3.CopyDone](m).Body() }
+func (m *ClientCopyCopyDone) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyClient[*pgproto3.CopyDone])(m).WriteTo(w)
+}
+
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ClientCopyCopyDone) Retain() ClientCopyCopyDone {
+	src, parsed, isParsed := (*LazyClient[*pgproto3.CopyDone])(&m).retainFields()
+	return ClientCopyCopyDone{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // ClientCopyCopyFail wraps *pgproto3.CopyFail from the client.
-type ClientCopyCopyFail struct{ LazyClient[*pgproto3.CopyFail] }
+type ClientCopyCopyFail LazyClient[*pgproto3.CopyFail]
 
-func (ClientCopyCopyFail) Copy()                              {}
-func (t ClientCopyCopyFail) PgwireMessage() pgproto3.Message  { return t.Parse() }
-func (t ClientCopyCopyFail) Client() pgproto3.FrontendMessage { return t.Parse() }
+func (ClientCopyCopyFail) Copy() {}
+func (t ClientCopyCopyFail) PgwireMessage() pgproto3.Message {
+	return (*LazyClient[*pgproto3.CopyFail])(&t).Parse()
+}
+func (t ClientCopyCopyFail) Client() pgproto3.FrontendMessage {
+	return (*LazyClient[*pgproto3.CopyFail])(&t).Parse()
+}
+func (m ClientCopyCopyFail) Raw() RawBody { return LazyClient[*pgproto3.CopyFail](m).Raw() }
+func (m *ClientCopyCopyFail) Parse() *pgproto3.CopyFail {
+	return (*LazyClient[*pgproto3.CopyFail])(m).Parse()
+}
+func (m ClientCopyCopyFail) IsParsed() bool { return LazyClient[*pgproto3.CopyFail](m).IsParsed() }
+func (m ClientCopyCopyFail) Body() []byte   { return LazyClient[*pgproto3.CopyFail](m).Body() }
+func (m *ClientCopyCopyFail) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyClient[*pgproto3.CopyFail])(m).WriteTo(w)
+}
+
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ClientCopyCopyFail) Retain() ClientCopyCopyFail {
+	src, parsed, isParsed := (*LazyClient[*pgproto3.CopyFail])(&m).retainFields()
+	return ClientCopyCopyFail{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // ToClientCopy converts a pgproto3.FrontendMessage to a ClientCopy if it matches one of the known types.
 func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyData:
-		return ClientCopyCopyData{NewLazyClientFromParsed(m)}, true
+		return ClientCopyCopyData(NewLazyClientFromParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ClientCopyCopyDone{NewLazyClientFromParsed(m)}, true
+		return ClientCopyCopyDone(NewLazyClientFromParsed(m)), true
 	case *pgproto3.CopyFail:
-		return ClientCopyCopyFail{NewLazyClientFromParsed(m)}, true
+		return ClientCopyCopyFail(NewLazyClientFromParsed(m)), true
 	}
 	return nil, false
 }

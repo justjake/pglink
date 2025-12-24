@@ -4,6 +4,7 @@ package pgwire
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -24,41 +25,113 @@ var (
 )
 
 // Warning message.
-type ServerAsyncNoticeResponse struct {
-	LazyServer[*pgproto3.NoticeResponse]
+type ServerAsyncNoticeResponse LazyServer[*pgproto3.NoticeResponse]
+
+func (ServerAsyncNoticeResponse) Async() {}
+func (t ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.NoticeResponse])(&t).Parse()
+}
+func (t ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.NoticeResponse])(&t).Parse()
+}
+func (m ServerAsyncNoticeResponse) Raw() RawBody {
+	return LazyServer[*pgproto3.NoticeResponse](m).Raw()
+}
+func (m *ServerAsyncNoticeResponse) Parse() *pgproto3.NoticeResponse {
+	return (*LazyServer[*pgproto3.NoticeResponse])(m).Parse()
+}
+func (m ServerAsyncNoticeResponse) IsParsed() bool {
+	return LazyServer[*pgproto3.NoticeResponse](m).IsParsed()
+}
+func (m ServerAsyncNoticeResponse) Body() []byte {
+	return LazyServer[*pgproto3.NoticeResponse](m).Body()
+}
+func (m *ServerAsyncNoticeResponse) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.NoticeResponse])(m).WriteTo(w)
 }
 
-func (ServerAsyncNoticeResponse) Async()                            {}
-func (t ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerAsyncNoticeResponse) Retain() ServerAsyncNoticeResponse {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.NoticeResponse])(&m).retainFields()
+	return ServerAsyncNoticeResponse{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // LISTEN/NOTIFY notification.
-type ServerAsyncNotificationResponse struct {
-	LazyServer[*pgproto3.NotificationResponse]
+type ServerAsyncNotificationResponse LazyServer[*pgproto3.NotificationResponse]
+
+func (ServerAsyncNotificationResponse) Async() {}
+func (t ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.NotificationResponse])(&t).Parse()
+}
+func (t ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.NotificationResponse])(&t).Parse()
+}
+func (m ServerAsyncNotificationResponse) Raw() RawBody {
+	return LazyServer[*pgproto3.NotificationResponse](m).Raw()
+}
+func (m *ServerAsyncNotificationResponse) Parse() *pgproto3.NotificationResponse {
+	return (*LazyServer[*pgproto3.NotificationResponse])(m).Parse()
+}
+func (m ServerAsyncNotificationResponse) IsParsed() bool {
+	return LazyServer[*pgproto3.NotificationResponse](m).IsParsed()
+}
+func (m ServerAsyncNotificationResponse) Body() []byte {
+	return LazyServer[*pgproto3.NotificationResponse](m).Body()
+}
+func (m *ServerAsyncNotificationResponse) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.NotificationResponse])(m).WriteTo(w)
 }
 
-func (ServerAsyncNotificationResponse) Async()                            {}
-func (t ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerAsyncNotificationResponse) Retain() ServerAsyncNotificationResponse {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.NotificationResponse])(&m).retainFields()
+	return ServerAsyncNotificationResponse{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Informs client that runtime parameter value changed.
-type ServerAsyncParameterStatus struct {
-	LazyServer[*pgproto3.ParameterStatus]
+type ServerAsyncParameterStatus LazyServer[*pgproto3.ParameterStatus]
+
+func (ServerAsyncParameterStatus) Async() {}
+func (t ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.ParameterStatus])(&t).Parse()
+}
+func (t ServerAsyncParameterStatus) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.ParameterStatus])(&t).Parse()
+}
+func (m ServerAsyncParameterStatus) Raw() RawBody {
+	return LazyServer[*pgproto3.ParameterStatus](m).Raw()
+}
+func (m *ServerAsyncParameterStatus) Parse() *pgproto3.ParameterStatus {
+	return (*LazyServer[*pgproto3.ParameterStatus])(m).Parse()
+}
+func (m ServerAsyncParameterStatus) IsParsed() bool {
+	return LazyServer[*pgproto3.ParameterStatus](m).IsParsed()
+}
+func (m ServerAsyncParameterStatus) Body() []byte {
+	return LazyServer[*pgproto3.ParameterStatus](m).Body()
+}
+func (m *ServerAsyncParameterStatus) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.ParameterStatus])(m).WriteTo(w)
 }
 
-func (ServerAsyncParameterStatus) Async()                            {}
-func (t ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerAsyncParameterStatus) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerAsyncParameterStatus) Retain() ServerAsyncParameterStatus {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.ParameterStatus])(&m).retainFields()
+	return ServerAsyncParameterStatus{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // ToServerAsync converts a pgproto3.BackendMessage to a ServerAsync if it matches one of the known types.
 func ToServerAsync(msg pgproto3.BackendMessage) (ServerAsync, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.NoticeResponse:
-		return ServerAsyncNoticeResponse{NewLazyServerFromParsed(m)}, true
+		return ServerAsyncNoticeResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.NotificationResponse:
-		return ServerAsyncNotificationResponse{NewLazyServerFromParsed(m)}, true
+		return ServerAsyncNotificationResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.ParameterStatus:
-		return ServerAsyncParameterStatus{NewLazyServerFromParsed(m)}, true
+		return ServerAsyncParameterStatus(NewLazyServerFromParsed(m)), true
 	}
 	return nil, false
 }

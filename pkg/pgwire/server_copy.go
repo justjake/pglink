@@ -4,6 +4,7 @@ package pgwire
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -28,61 +29,171 @@ var (
 // Response to COPY FROM STDIN.
 // Backend ready to copy data from client to server.
 // Starts CopyIn mode.
-type ServerCopyCopyInResponse struct {
-	LazyServer[*pgproto3.CopyInResponse]
+type ServerCopyCopyInResponse LazyServer[*pgproto3.CopyInResponse]
+
+func (ServerCopyCopyInResponse) Copy() {}
+func (t ServerCopyCopyInResponse) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.CopyInResponse])(&t).Parse()
+}
+func (t ServerCopyCopyInResponse) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.CopyInResponse])(&t).Parse()
+}
+func (m ServerCopyCopyInResponse) Raw() RawBody { return LazyServer[*pgproto3.CopyInResponse](m).Raw() }
+func (m *ServerCopyCopyInResponse) Parse() *pgproto3.CopyInResponse {
+	return (*LazyServer[*pgproto3.CopyInResponse])(m).Parse()
+}
+func (m ServerCopyCopyInResponse) IsParsed() bool {
+	return LazyServer[*pgproto3.CopyInResponse](m).IsParsed()
+}
+func (m ServerCopyCopyInResponse) Body() []byte {
+	return LazyServer[*pgproto3.CopyInResponse](m).Body()
+}
+func (m *ServerCopyCopyInResponse) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.CopyInResponse])(m).WriteTo(w)
 }
 
-func (ServerCopyCopyInResponse) Copy()                             {}
-func (t ServerCopyCopyInResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerCopyCopyInResponse) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerCopyCopyInResponse) Retain() ServerCopyCopyInResponse {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.CopyInResponse])(&m).retainFields()
+	return ServerCopyCopyInResponse{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Response to COPY TO STDOUT.
 // Backend ready to copy data from server to client.
 // Starts CopyOut mode.
-type ServerCopyCopyOutResponse struct {
-	LazyServer[*pgproto3.CopyOutResponse]
+type ServerCopyCopyOutResponse LazyServer[*pgproto3.CopyOutResponse]
+
+func (ServerCopyCopyOutResponse) Copy() {}
+func (t ServerCopyCopyOutResponse) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.CopyOutResponse])(&t).Parse()
+}
+func (t ServerCopyCopyOutResponse) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.CopyOutResponse])(&t).Parse()
+}
+func (m ServerCopyCopyOutResponse) Raw() RawBody {
+	return LazyServer[*pgproto3.CopyOutResponse](m).Raw()
+}
+func (m *ServerCopyCopyOutResponse) Parse() *pgproto3.CopyOutResponse {
+	return (*LazyServer[*pgproto3.CopyOutResponse])(m).Parse()
+}
+func (m ServerCopyCopyOutResponse) IsParsed() bool {
+	return LazyServer[*pgproto3.CopyOutResponse](m).IsParsed()
+}
+func (m ServerCopyCopyOutResponse) Body() []byte {
+	return LazyServer[*pgproto3.CopyOutResponse](m).Body()
+}
+func (m *ServerCopyCopyOutResponse) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.CopyOutResponse])(m).WriteTo(w)
 }
 
-func (ServerCopyCopyOutResponse) Copy()                             {}
-func (t ServerCopyCopyOutResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerCopyCopyOutResponse) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerCopyCopyOutResponse) Retain() ServerCopyCopyOutResponse {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.CopyOutResponse])(&m).retainFields()
+	return ServerCopyCopyOutResponse{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Response to Replication.
-type ServerCopyCopyBothResponse struct {
-	LazyServer[*pgproto3.CopyBothResponse]
+type ServerCopyCopyBothResponse LazyServer[*pgproto3.CopyBothResponse]
+
+func (ServerCopyCopyBothResponse) Copy() {}
+func (t ServerCopyCopyBothResponse) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.CopyBothResponse])(&t).Parse()
+}
+func (t ServerCopyCopyBothResponse) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.CopyBothResponse])(&t).Parse()
+}
+func (m ServerCopyCopyBothResponse) Raw() RawBody {
+	return LazyServer[*pgproto3.CopyBothResponse](m).Raw()
+}
+func (m *ServerCopyCopyBothResponse) Parse() *pgproto3.CopyBothResponse {
+	return (*LazyServer[*pgproto3.CopyBothResponse])(m).Parse()
+}
+func (m ServerCopyCopyBothResponse) IsParsed() bool {
+	return LazyServer[*pgproto3.CopyBothResponse](m).IsParsed()
+}
+func (m ServerCopyCopyBothResponse) Body() []byte {
+	return LazyServer[*pgproto3.CopyBothResponse](m).Body()
+}
+func (m *ServerCopyCopyBothResponse) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.CopyBothResponse])(m).WriteTo(w)
 }
 
-func (ServerCopyCopyBothResponse) Copy()                             {}
-func (t ServerCopyCopyBothResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerCopyCopyBothResponse) Server() pgproto3.BackendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerCopyCopyBothResponse) Retain() ServerCopyCopyBothResponse {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.CopyBothResponse])(&m).retainFields()
+	return ServerCopyCopyBothResponse{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Copy Mode: data row.
-type ServerCopyCopyData struct{ LazyServer[*pgproto3.CopyData] }
+type ServerCopyCopyData LazyServer[*pgproto3.CopyData]
 
-func (ServerCopyCopyData) Copy()                             {}
-func (t ServerCopyCopyData) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerCopyCopyData) Server() pgproto3.BackendMessage { return t.Parse() }
+func (ServerCopyCopyData) Copy() {}
+func (t ServerCopyCopyData) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.CopyData])(&t).Parse()
+}
+func (t ServerCopyCopyData) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.CopyData])(&t).Parse()
+}
+func (m ServerCopyCopyData) Raw() RawBody { return LazyServer[*pgproto3.CopyData](m).Raw() }
+func (m *ServerCopyCopyData) Parse() *pgproto3.CopyData {
+	return (*LazyServer[*pgproto3.CopyData])(m).Parse()
+}
+func (m ServerCopyCopyData) IsParsed() bool { return LazyServer[*pgproto3.CopyData](m).IsParsed() }
+func (m ServerCopyCopyData) Body() []byte   { return LazyServer[*pgproto3.CopyData](m).Body() }
+func (m *ServerCopyCopyData) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.CopyData])(m).WriteTo(w)
+}
+
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerCopyCopyData) Retain() ServerCopyCopyData {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.CopyData])(&m).retainFields()
+	return ServerCopyCopyData{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // Copy Mode: copy completed.
-type ServerCopyCopyDone struct{ LazyServer[*pgproto3.CopyDone] }
+type ServerCopyCopyDone LazyServer[*pgproto3.CopyDone]
 
-func (ServerCopyCopyDone) Copy()                             {}
-func (t ServerCopyCopyDone) PgwireMessage() pgproto3.Message { return t.Parse() }
-func (t ServerCopyCopyDone) Server() pgproto3.BackendMessage { return t.Parse() }
+func (ServerCopyCopyDone) Copy() {}
+func (t ServerCopyCopyDone) PgwireMessage() pgproto3.Message {
+	return (*LazyServer[*pgproto3.CopyDone])(&t).Parse()
+}
+func (t ServerCopyCopyDone) Server() pgproto3.BackendMessage {
+	return (*LazyServer[*pgproto3.CopyDone])(&t).Parse()
+}
+func (m ServerCopyCopyDone) Raw() RawBody { return LazyServer[*pgproto3.CopyDone](m).Raw() }
+func (m *ServerCopyCopyDone) Parse() *pgproto3.CopyDone {
+	return (*LazyServer[*pgproto3.CopyDone])(m).Parse()
+}
+func (m ServerCopyCopyDone) IsParsed() bool { return LazyServer[*pgproto3.CopyDone](m).IsParsed() }
+func (m ServerCopyCopyDone) Body() []byte   { return LazyServer[*pgproto3.CopyDone](m).Body() }
+func (m *ServerCopyCopyDone) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyServer[*pgproto3.CopyDone])(m).WriteTo(w)
+}
+
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ServerCopyCopyDone) Retain() ServerCopyCopyDone {
+	src, parsed, isParsed := (*LazyServer[*pgproto3.CopyDone])(&m).retainFields()
+	return ServerCopyCopyDone{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // ToServerCopy converts a pgproto3.BackendMessage to a ServerCopy if it matches one of the known types.
 func ToServerCopy(msg pgproto3.BackendMessage) (ServerCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyInResponse:
-		return ServerCopyCopyInResponse{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyInResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CopyOutResponse:
-		return ServerCopyCopyOutResponse{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyOutResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CopyBothResponse:
-		return ServerCopyCopyBothResponse{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyBothResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CopyData:
-		return ServerCopyCopyData{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyData(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ServerCopyCopyDone{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyDone(NewLazyServerFromParsed(m)), true
 	}
 	return nil, false
 }

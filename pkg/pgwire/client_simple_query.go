@@ -4,6 +4,7 @@ package pgwire
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -24,28 +25,72 @@ var (
 
 // Simple query.
 // Destroys unnamed prepared statement & portal.
-type ClientSimpleQueryQuery struct{ LazyClient[*pgproto3.Query] }
+type ClientSimpleQueryQuery LazyClient[*pgproto3.Query]
 
-func (ClientSimpleQueryQuery) SimpleQuery()                       {}
-func (t ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message  { return t.Parse() }
-func (t ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage { return t.Parse() }
-
-// Call a function; seems to work like a simple query? Or maybe it works with both modes?
-type ClientSimpleQueryFunctionCall struct {
-	LazyClient[*pgproto3.FunctionCall]
+func (ClientSimpleQueryQuery) SimpleQuery() {}
+func (t ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message {
+	return (*LazyClient[*pgproto3.Query])(&t).Parse()
+}
+func (t ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage {
+	return (*LazyClient[*pgproto3.Query])(&t).Parse()
+}
+func (m ClientSimpleQueryQuery) Raw() RawBody { return LazyClient[*pgproto3.Query](m).Raw() }
+func (m *ClientSimpleQueryQuery) Parse() *pgproto3.Query {
+	return (*LazyClient[*pgproto3.Query])(m).Parse()
+}
+func (m ClientSimpleQueryQuery) IsParsed() bool { return LazyClient[*pgproto3.Query](m).IsParsed() }
+func (m ClientSimpleQueryQuery) Body() []byte   { return LazyClient[*pgproto3.Query](m).Body() }
+func (m *ClientSimpleQueryQuery) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyClient[*pgproto3.Query])(m).WriteTo(w)
 }
 
-func (ClientSimpleQueryFunctionCall) SimpleQuery()                       {}
-func (t ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message  { return t.Parse() }
-func (t ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage { return t.Parse() }
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ClientSimpleQueryQuery) Retain() ClientSimpleQueryQuery {
+	src, parsed, isParsed := (*LazyClient[*pgproto3.Query])(&m).retainFields()
+	return ClientSimpleQueryQuery{source: src, parsed: parsed, isParsed: isParsed}
+}
+
+// Call a function; seems to work like a simple query? Or maybe it works with both modes?
+type ClientSimpleQueryFunctionCall LazyClient[*pgproto3.FunctionCall]
+
+func (ClientSimpleQueryFunctionCall) SimpleQuery() {}
+func (t ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message {
+	return (*LazyClient[*pgproto3.FunctionCall])(&t).Parse()
+}
+func (t ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage {
+	return (*LazyClient[*pgproto3.FunctionCall])(&t).Parse()
+}
+func (m ClientSimpleQueryFunctionCall) Raw() RawBody {
+	return LazyClient[*pgproto3.FunctionCall](m).Raw()
+}
+func (m *ClientSimpleQueryFunctionCall) Parse() *pgproto3.FunctionCall {
+	return (*LazyClient[*pgproto3.FunctionCall])(m).Parse()
+}
+func (m ClientSimpleQueryFunctionCall) IsParsed() bool {
+	return LazyClient[*pgproto3.FunctionCall](m).IsParsed()
+}
+func (m ClientSimpleQueryFunctionCall) Body() []byte {
+	return LazyClient[*pgproto3.FunctionCall](m).Body()
+}
+func (m *ClientSimpleQueryFunctionCall) WriteTo(w io.Writer) (int64, error) {
+	return (*LazyClient[*pgproto3.FunctionCall])(m).WriteTo(w)
+}
+
+// Retain returns a copy of this message with retained source bytes.
+// Use this when the message must outlive the current iteration.
+func (m ClientSimpleQueryFunctionCall) Retain() ClientSimpleQueryFunctionCall {
+	src, parsed, isParsed := (*LazyClient[*pgproto3.FunctionCall])(&m).retainFields()
+	return ClientSimpleQueryFunctionCall{source: src, parsed: parsed, isParsed: isParsed}
+}
 
 // ToClientSimpleQuery converts a pgproto3.FrontendMessage to a ClientSimpleQuery if it matches one of the known types.
 func ToClientSimpleQuery(msg pgproto3.FrontendMessage) (ClientSimpleQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Query:
-		return ClientSimpleQueryQuery{NewLazyClientFromParsed(m)}, true
+		return ClientSimpleQueryQuery(NewLazyClientFromParsed(m)), true
 	case *pgproto3.FunctionCall:
-		return ClientSimpleQueryFunctionCall{NewLazyClientFromParsed(m)}, true
+		return ClientSimpleQueryFunctionCall(NewLazyClientFromParsed(m)), true
 	}
 	return nil, false
 }

@@ -38,52 +38,52 @@ func ToClientMessage(msg pgproto3.FrontendMessage) (ClientMessage, bool) {
 	switch m := msg.(type) {
 	// Cancel
 	case *pgproto3.CancelRequest:
-		return ClientCancelCancelRequest{NewLazyClientFromParsed(m)}, true
+		return ClientCancelCancelRequest(NewLazyClientFromParsed(m)), true
 	// Copy
 	case *pgproto3.CopyData:
-		return ClientCopyCopyData{NewLazyClientFromParsed(m)}, true
+		return ClientCopyCopyData(NewLazyClientFromParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ClientCopyCopyDone{NewLazyClientFromParsed(m)}, true
+		return ClientCopyCopyDone(NewLazyClientFromParsed(m)), true
 	case *pgproto3.CopyFail:
-		return ClientCopyCopyFail{NewLazyClientFromParsed(m)}, true
+		return ClientCopyCopyFail(NewLazyClientFromParsed(m)), true
 	// SimpleQuery
 	case *pgproto3.Query:
-		return ClientSimpleQueryQuery{NewLazyClientFromParsed(m)}, true
+		return ClientSimpleQueryQuery(NewLazyClientFromParsed(m)), true
 	case *pgproto3.FunctionCall:
-		return ClientSimpleQueryFunctionCall{NewLazyClientFromParsed(m)}, true
+		return ClientSimpleQueryFunctionCall(NewLazyClientFromParsed(m)), true
 	// ExtendedQuery
 	case *pgproto3.Parse:
-		return ClientExtendedQueryParse{NewLazyClientFromParsed(m)}, true
+		return ClientExtendedQueryParse(NewLazyClientFromParsed(m)), true
 	case *pgproto3.Bind:
-		return ClientExtendedQueryBind{NewLazyClientFromParsed(m)}, true
+		return ClientExtendedQueryBind(NewLazyClientFromParsed(m)), true
 	case *pgproto3.Execute:
-		return ClientExtendedQueryExecute{NewLazyClientFromParsed(m)}, true
+		return ClientExtendedQueryExecute(NewLazyClientFromParsed(m)), true
 	case *pgproto3.Sync:
-		return ClientExtendedQuerySync{NewLazyClientFromParsed(m)}, true
+		return ClientExtendedQuerySync(NewLazyClientFromParsed(m)), true
 	case *pgproto3.Describe:
-		return ClientExtendedQueryDescribe{NewLazyClientFromParsed(m)}, true
+		return ClientExtendedQueryDescribe(NewLazyClientFromParsed(m)), true
 	case *pgproto3.Close:
-		return ClientExtendedQueryClose{NewLazyClientFromParsed(m)}, true
+		return ClientExtendedQueryClose(NewLazyClientFromParsed(m)), true
 	case *pgproto3.Flush:
-		return ClientExtendedQueryFlush{NewLazyClientFromParsed(m)}, true
+		return ClientExtendedQueryFlush(NewLazyClientFromParsed(m)), true
 	// TerminateConn
 	case *pgproto3.Terminate:
-		return ClientTerminateConnTerminate{NewLazyClientFromParsed(m)}, true
+		return ClientTerminateConnTerminate(NewLazyClientFromParsed(m)), true
 	// Startup
 	case *pgproto3.GSSEncRequest:
-		return ClientStartupGSSEncRequest{NewLazyClientFromParsed(m)}, true
+		return ClientStartupGSSEncRequest(NewLazyClientFromParsed(m)), true
 	case *pgproto3.GSSResponse:
-		return ClientStartupGSSResponse{NewLazyClientFromParsed(m)}, true
+		return ClientStartupGSSResponse(NewLazyClientFromParsed(m)), true
 	case *pgproto3.PasswordMessage:
-		return ClientStartupPasswordMessage{NewLazyClientFromParsed(m)}, true
+		return ClientStartupPasswordMessage(NewLazyClientFromParsed(m)), true
 	case *pgproto3.SASLInitialResponse:
-		return ClientStartupSASLInitialResponse{NewLazyClientFromParsed(m)}, true
+		return ClientStartupSASLInitialResponse(NewLazyClientFromParsed(m)), true
 	case *pgproto3.SASLResponse:
-		return ClientStartupSASLResponse{NewLazyClientFromParsed(m)}, true
+		return ClientStartupSASLResponse(NewLazyClientFromParsed(m)), true
 	case *pgproto3.SSLRequest:
-		return ClientStartupSSLRequest{NewLazyClientFromParsed(m)}, true
+		return ClientStartupSSLRequest(NewLazyClientFromParsed(m)), true
 	case *pgproto3.StartupMessage:
-		return ClientStartupStartupMessage{NewLazyClientFromParsed(m)}, true
+		return ClientStartupStartupMessage(NewLazyClientFromParsed(m)), true
 	}
 	return nil, false
 }
@@ -92,69 +92,69 @@ func ToServerMessage(msg pgproto3.BackendMessage) (ServerMessage, bool) {
 	switch m := msg.(type) {
 	// Async
 	case *pgproto3.NoticeResponse:
-		return ServerAsyncNoticeResponse{NewLazyServerFromParsed(m)}, true
+		return ServerAsyncNoticeResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.NotificationResponse:
-		return ServerAsyncNotificationResponse{NewLazyServerFromParsed(m)}, true
+		return ServerAsyncNotificationResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.ParameterStatus:
-		return ServerAsyncParameterStatus{NewLazyServerFromParsed(m)}, true
+		return ServerAsyncParameterStatus(NewLazyServerFromParsed(m)), true
 	// Copy
 	case *pgproto3.CopyInResponse:
-		return ServerCopyCopyInResponse{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyInResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CopyOutResponse:
-		return ServerCopyCopyOutResponse{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyOutResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CopyBothResponse:
-		return ServerCopyCopyBothResponse{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyBothResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CopyData:
-		return ServerCopyCopyData{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyData(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ServerCopyCopyDone{NewLazyServerFromParsed(m)}, true
+		return ServerCopyCopyDone(NewLazyServerFromParsed(m)), true
 	// ExtendedQuery
 	case *pgproto3.ParseComplete:
-		return ServerExtendedQueryParseComplete{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryParseComplete(NewLazyServerFromParsed(m)), true
 	case *pgproto3.BindComplete:
-		return ServerExtendedQueryBindComplete{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryBindComplete(NewLazyServerFromParsed(m)), true
 	case *pgproto3.ParameterDescription:
-		return ServerExtendedQueryParameterDescription{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryParameterDescription(NewLazyServerFromParsed(m)), true
 	case *pgproto3.RowDescription:
-		return ServerExtendedQueryRowDescription{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryRowDescription(NewLazyServerFromParsed(m)), true
 	case *pgproto3.NoData:
-		return ServerExtendedQueryNoData{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryNoData(NewLazyServerFromParsed(m)), true
 	case *pgproto3.PortalSuspended:
-		return ServerExtendedQueryPortalSuspended{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryPortalSuspended(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CloseComplete:
-		return ServerExtendedQueryCloseComplete{NewLazyServerFromParsed(m)}, true
+		return ServerExtendedQueryCloseComplete(NewLazyServerFromParsed(m)), true
 	// Response
 	case *pgproto3.ReadyForQuery:
-		return ServerResponseReadyForQuery{NewLazyServerFromParsed(m)}, true
+		return ServerResponseReadyForQuery(NewLazyServerFromParsed(m)), true
 	case *pgproto3.CommandComplete:
-		return ServerResponseCommandComplete{NewLazyServerFromParsed(m)}, true
+		return ServerResponseCommandComplete(NewLazyServerFromParsed(m)), true
 	case *pgproto3.DataRow:
-		return ServerResponseDataRow{NewLazyServerFromParsed(m)}, true
+		return ServerResponseDataRow(NewLazyServerFromParsed(m)), true
 	case *pgproto3.EmptyQueryResponse:
-		return ServerResponseEmptyQueryResponse{NewLazyServerFromParsed(m)}, true
+		return ServerResponseEmptyQueryResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.ErrorResponse:
-		return ServerResponseErrorResponse{NewLazyServerFromParsed(m)}, true
+		return ServerResponseErrorResponse(NewLazyServerFromParsed(m)), true
 	case *pgproto3.FunctionCallResponse:
-		return ServerResponseFunctionCallResponse{NewLazyServerFromParsed(m)}, true
+		return ServerResponseFunctionCallResponse(NewLazyServerFromParsed(m)), true
 	// Startup
 	case *pgproto3.AuthenticationCleartextPassword:
-		return ServerStartupAuthenticationCleartextPassword{NewLazyServerFromParsed(m)}, true
+		return ServerStartupAuthenticationCleartextPassword(NewLazyServerFromParsed(m)), true
 	case *pgproto3.AuthenticationGSS:
-		return ServerStartupAuthenticationGSS{NewLazyServerFromParsed(m)}, true
+		return ServerStartupAuthenticationGSS(NewLazyServerFromParsed(m)), true
 	case *pgproto3.AuthenticationGSSContinue:
-		return ServerStartupAuthenticationGSSContinue{NewLazyServerFromParsed(m)}, true
+		return ServerStartupAuthenticationGSSContinue(NewLazyServerFromParsed(m)), true
 	case *pgproto3.AuthenticationMD5Password:
-		return ServerStartupAuthenticationMD5Password{NewLazyServerFromParsed(m)}, true
+		return ServerStartupAuthenticationMD5Password(NewLazyServerFromParsed(m)), true
 	case *pgproto3.AuthenticationOk:
-		return ServerStartupAuthenticationOk{NewLazyServerFromParsed(m)}, true
+		return ServerStartupAuthenticationOk(NewLazyServerFromParsed(m)), true
 	case *pgproto3.AuthenticationSASL:
-		return ServerStartupAuthenticationSASL{NewLazyServerFromParsed(m)}, true
+		return ServerStartupAuthenticationSASL(NewLazyServerFromParsed(m)), true
 	case *pgproto3.AuthenticationSASLContinue:
-		return ServerStartupAuthenticationSASLContinue{NewLazyServerFromParsed(m)}, true
+		return ServerStartupAuthenticationSASLContinue(NewLazyServerFromParsed(m)), true
 	case *pgproto3.AuthenticationSASLFinal:
-		return ServerStartupAuthenticationSASLFinal{NewLazyServerFromParsed(m)}, true
+		return ServerStartupAuthenticationSASLFinal(NewLazyServerFromParsed(m)), true
 	case *pgproto3.BackendKeyData:
-		return ServerStartupBackendKeyData{NewLazyServerFromParsed(m)}, true
+		return ServerStartupBackendKeyData(NewLazyServerFromParsed(m)), true
 	}
 	return nil, false
 }

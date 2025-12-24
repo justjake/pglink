@@ -121,24 +121,6 @@ var MsgIsStartup = MsgLookup[bool]{
 	'p': true, // PasswordMessage / SASLInitialResponse / SASLResponse
 }
 
-// MsgFixedLen contains the total wire length for messages with constant size.
-// Value is 0 for variable-length messages (must read the length field).
-// Total wire length = 1 (type byte) + 4 (length field) + body length.
-var MsgFixedLen = MsgLookup[int]{
-	// Server messages with fixed length (header=5 + body)
-	'1': 5,  // ParseComplete: empty body
-	'2': 5,  // BindComplete: empty body
-	'3': 5,  // CloseComplete: empty body
-	'c': 5,  // CopyDone: empty body
-	'n': 5,  // NoData: empty body
-	's': 5,  // PortalSuspended: empty body
-	'I': 5,  // EmptyQueryResponse: empty body
-	'Z': 6,  // ReadyForQuery: 1 byte body (transaction status)
-	'K': 13, // BackendKeyData: 8 byte body (4 pid + 4 secret key)
-
-	// All other messages are variable length (0 means "read length field")
-}
-
 // MsgName returns a human-readable name for the message type.
 var MsgName = MsgLookup[string]{
 	// Client messages
