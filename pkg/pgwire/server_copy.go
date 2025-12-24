@@ -185,15 +185,15 @@ func (m ServerCopyCopyDone) Retain() ServerCopyCopyDone {
 func ToServerCopy(msg pgproto3.BackendMessage) (ServerCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyInResponse:
-		return ServerCopyCopyInResponse(NewLazyServerFromParsed(m)), true
+		return ServerCopyCopyInResponse(ServerParsed(m)), true
 	case *pgproto3.CopyOutResponse:
-		return ServerCopyCopyOutResponse(NewLazyServerFromParsed(m)), true
+		return ServerCopyCopyOutResponse(ServerParsed(m)), true
 	case *pgproto3.CopyBothResponse:
-		return ServerCopyCopyBothResponse(NewLazyServerFromParsed(m)), true
+		return ServerCopyCopyBothResponse(ServerParsed(m)), true
 	case *pgproto3.CopyData:
-		return ServerCopyCopyData(NewLazyServerFromParsed(m)), true
+		return ServerCopyCopyData(ServerParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ServerCopyCopyDone(NewLazyServerFromParsed(m)), true
+		return ServerCopyCopyDone(ServerParsed(m)), true
 	}
 	return nil, false
 }

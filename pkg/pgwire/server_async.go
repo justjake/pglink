@@ -127,11 +127,11 @@ func (m ServerAsyncParameterStatus) Retain() ServerAsyncParameterStatus {
 func ToServerAsync(msg pgproto3.BackendMessage) (ServerAsync, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.NoticeResponse:
-		return ServerAsyncNoticeResponse(NewLazyServerFromParsed(m)), true
+		return ServerAsyncNoticeResponse(ServerParsed(m)), true
 	case *pgproto3.NotificationResponse:
-		return ServerAsyncNotificationResponse(NewLazyServerFromParsed(m)), true
+		return ServerAsyncNotificationResponse(ServerParsed(m)), true
 	case *pgproto3.ParameterStatus:
-		return ServerAsyncParameterStatus(NewLazyServerFromParsed(m)), true
+		return ServerAsyncParameterStatus(ServerParsed(m)), true
 	}
 	return nil, false
 }

@@ -27,7 +27,7 @@ func (r *RawReader) ReadRaw() (RawBody, error) {
 		return RawBody{}, err
 	}
 
-	msgType := r.headerBuf[0]
+	msgType := MsgType(r.headerBuf[0])
 	// Length includes the 4-byte length field itself
 	length := binary.BigEndian.Uint32(r.headerBuf[1:5])
 	if length < 4 {
@@ -76,63 +76,63 @@ func (r *RawReader) ReadClientMessage() (ClientMessage, error) {
 }
 
 // WrapServerMessage wraps raw bytes in the appropriate type-safe ServerMessage wrapper.
-// This dispatches based on the message type byte and returns a lazy-parsed message.
+// This dispatches based on the message type and returns a lazy-parsed message.
 func WrapServerMessage(raw RawBody) (ServerMessage, error) {
 	switch raw.Type {
 	// Response messages
-	case 'Z':
+	case MsgServerReadyForQuery:
 		return ServerResponseReadyForQuery{source: raw}, nil
-	case 'C':
+	case MsgServerCommandComplete:
 		return ServerResponseCommandComplete{source: raw}, nil
-	case 'D':
+	case MsgServerDataRow:
 		return ServerResponseDataRow{source: raw}, nil
-	case 'I':
+	case MsgServerEmptyQueryResponse:
 		return ServerResponseEmptyQueryResponse{source: raw}, nil
-	case 'E':
+	case MsgServerErrorResponse:
 		return ServerResponseErrorResponse{source: raw}, nil
-	case 'V':
+	case MsgServerFuncCallResponse:
 		return ServerResponseFunctionCallResponse{source: raw}, nil
 
 	// Extended query messages
-	case '1':
+	case MsgServerParseComplete:
 		return ServerExtendedQueryParseComplete{source: raw}, nil
-	case '2':
+	case MsgServerBindComplete:
 		return ServerExtendedQueryBindComplete{source: raw}, nil
-	case 't':
+	case MsgServerParameterDescription:
 		return ServerExtendedQueryParameterDescription{source: raw}, nil
-	case 'T':
+	case MsgServerRowDescription:
 		return ServerExtendedQueryRowDescription{source: raw}, nil
-	case 'n':
+	case MsgServerNoData:
 		return ServerExtendedQueryNoData{source: raw}, nil
-	case 's':
+	case MsgServerPortalSuspended:
 		return ServerExtendedQueryPortalSuspended{source: raw}, nil
-	case '3':
+	case MsgServerCloseComplete:
 		return ServerExtendedQueryCloseComplete{source: raw}, nil
 
 	// Copy messages
-	case 'G':
+	case MsgServerCopyInResponse:
 		return ServerCopyCopyInResponse{source: raw}, nil
-	case 'H':
+	case MsgServerCopyOutResponse:
 		return ServerCopyCopyOutResponse{source: raw}, nil
-	case 'W':
+	case MsgServerCopyBothResponse:
 		return ServerCopyCopyBothResponse{source: raw}, nil
-	case 'd':
+	case MsgServerCopyData:
 		return ServerCopyCopyData{source: raw}, nil
-	case 'c':
+	case MsgServerCopyDone:
 		return ServerCopyCopyDone{source: raw}, nil
 
 	// Async messages
-	case 'N':
+	case MsgServerNoticeResponse:
 		return ServerAsyncNoticeResponse{source: raw}, nil
-	case 'A':
+	case MsgServerNotificationResponse:
 		return ServerAsyncNotificationResponse{source: raw}, nil
-	case 'S':
+	case MsgServerParameterStatus:
 		return ServerAsyncParameterStatus{source: raw}, nil
 
 	// Startup/Authentication messages
-	case 'R':
+	case MsgServerAuth:
 		return wrapAuthenticationMessage(raw)
-	case 'K':
+	case MsgServerBackendKeyData:
 		return ServerStartupBackendKeyData{source: raw}, nil
 
 	default:
@@ -169,47 +169,47 @@ func wrapAuthenticationMessage(raw RawBody) (ServerMessage, error) {
 }
 
 // WrapClientMessage wraps raw bytes in the appropriate type-safe ClientMessage wrapper.
-// This dispatches based on the message type byte and returns a lazy-parsed message.
+// This dispatches based on the message type and returns a lazy-parsed message.
 // Note: This does not handle startup messages (StartupMessage, SSLRequest, etc.)
 // which have a different wire format without the type byte.
 func WrapClientMessage(raw RawBody) (ClientMessage, error) {
 	switch raw.Type {
 	// Simple query
-	case 'Q':
+	case MsgClientQuery:
 		return ClientSimpleQueryQuery{source: raw}, nil
-	case 'F':
+	case MsgClientFunc:
 		return ClientSimpleQueryFunctionCall{source: raw}, nil
 
 	// Extended query
-	case 'P':
+	case MsgClientParse:
 		return ClientExtendedQueryParse{source: raw}, nil
-	case 'B':
+	case MsgClientBind:
 		return ClientExtendedQueryBind{source: raw}, nil
-	case 'E':
+	case MsgClientExecute:
 		return ClientExtendedQueryExecute{source: raw}, nil
-	case 'S':
+	case MsgClientSync:
 		return ClientExtendedQuerySync{source: raw}, nil
-	case 'D':
+	case MsgClientDescribe:
 		return ClientExtendedQueryDescribe{source: raw}, nil
-	case 'C':
+	case MsgClientClose:
 		return ClientExtendedQueryClose{source: raw}, nil
-	case 'H':
+	case MsgClientFlush:
 		return ClientExtendedQueryFlush{source: raw}, nil
 
 	// Copy
-	case 'd':
+	case MsgClientCopyData:
 		return ClientCopyCopyData{source: raw}, nil
-	case 'c':
+	case MsgClientCopyDone:
 		return ClientCopyCopyDone{source: raw}, nil
-	case 'f':
+	case MsgClientCopyFail:
 		return ClientCopyCopyFail{source: raw}, nil
 
 	// Terminate
-	case 'X':
+	case MsgClientTerminate:
 		return ClientTerminateConnTerminate{source: raw}, nil
 
 	// Authentication responses (during startup)
-	case 'p':
+	case MsgClientPassword:
 		// 'p' can be PasswordMessage, SASLInitialResponse, SASLResponse, or GSSResponse
 		// We default to PasswordMessage; the caller can use context to determine the correct type
 		return ClientStartupPasswordMessage{source: raw}, nil

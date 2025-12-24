@@ -225,17 +225,17 @@ func (m ServerResponseFunctionCallResponse) Retain() ServerResponseFunctionCallR
 func ToServerResponse(msg pgproto3.BackendMessage) (ServerResponse, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ReadyForQuery:
-		return ServerResponseReadyForQuery(NewLazyServerFromParsed(m)), true
+		return ServerResponseReadyForQuery(ServerParsed(m)), true
 	case *pgproto3.CommandComplete:
-		return ServerResponseCommandComplete(NewLazyServerFromParsed(m)), true
+		return ServerResponseCommandComplete(ServerParsed(m)), true
 	case *pgproto3.DataRow:
-		return ServerResponseDataRow(NewLazyServerFromParsed(m)), true
+		return ServerResponseDataRow(ServerParsed(m)), true
 	case *pgproto3.EmptyQueryResponse:
-		return ServerResponseEmptyQueryResponse(NewLazyServerFromParsed(m)), true
+		return ServerResponseEmptyQueryResponse(ServerParsed(m)), true
 	case *pgproto3.ErrorResponse:
-		return ServerResponseErrorResponse(NewLazyServerFromParsed(m)), true
+		return ServerResponseErrorResponse(ServerParsed(m)), true
 	case *pgproto3.FunctionCallResponse:
-		return ServerResponseFunctionCallResponse(NewLazyServerFromParsed(m)), true
+		return ServerResponseFunctionCallResponse(ServerParsed(m)), true
 	}
 	return nil, false
 }

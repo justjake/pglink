@@ -57,7 +57,7 @@ func (m ClientCancelCancelRequest) Retain() ClientCancelCancelRequest {
 func ToClientCancel(msg pgproto3.FrontendMessage) (ClientCancel, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CancelRequest:
-		return ClientCancelCancelRequest(NewLazyClientFromParsed(m)), true
+		return ClientCancelCancelRequest(ClientParsed(m)), true
 	}
 	return nil, false
 }

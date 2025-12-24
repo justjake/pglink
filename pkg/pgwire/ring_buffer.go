@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"runtime"
 	"sync/atomic"
 )
 
@@ -22,14 +21,9 @@ const (
 	// defaultMetaSize is the default number of message metadata slots
 	defaultMetaSize = 4096
 
-	// contextCheckBytes is how often to check context cancellation (amortized)
-	contextCheckBytes = 64 * 1024
-
 	// spaceCheckMsgs is how often to refresh cached consumer positions
 	spaceCheckMsgs = 32
 
-	// readerSpinCount is how many times reader spins before blocking on channel
-	readerSpinCount = 64
 )
 
 // ErrMessageTooLarge is returned when a message exceeds the buffer capacity
@@ -100,10 +94,14 @@ func NewRingBuffer() *RingBuffer {
 }
 
 // NewRingBufferWithSize creates a new ring buffer with custom sizes.
-// dataSize must be a power of 2. metaSize must be a power of 2.
+// dataSize and metaSize must be powers of 2; panics otherwise.
 func NewRingBufferWithSize(dataSize, metaSize int) *RingBuffer {
-	dataSize = nextPowerOf2(dataSize)
-	metaSize = nextPowerOf2(metaSize)
+	if dataSize <= 0 || dataSize&(dataSize-1) != 0 {
+		panic("dataSize must be a power of 2")
+	}
+	if metaSize <= 0 || metaSize&(metaSize-1) != 0 {
+		panic("metaSize must be a power of 2")
+	}
 
 	return &RingBuffer{
 		data:       make([]byte, dataSize),
@@ -116,17 +114,6 @@ func NewRingBufferWithSize(dataSize, metaSize int) *RingBuffer {
 	}
 }
 
-func nextPowerOf2(n int) int {
-	n--
-	n |= n >> 1
-	n |= n >> 2
-	n |= n >> 4
-	n |= n >> 8
-	n |= n >> 16
-	n |= n >> 32
-	n++
-	return n
-}
 
 // === Writer methods ===
 
@@ -134,10 +121,17 @@ func nextPowerOf2(n int) int {
 // Bytes are read directly into the ring buffer, then parsed to find message
 // boundaries. Complete messages are published in batches for the consumer.
 func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
-	bytesUntilContextCheck := int64(contextCheckBytes)
 	msgsUntilSpaceRefresh := spaceCheckMsgs
 
 	for {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			r.setError(ctx.Err())
+			return ctx.Err()
+		default:
+		}
+
 		// Calculate available contiguous space
 		used := r.rawEnd - r.cachedConsumedBytes
 		available := int64(len(r.data)) - used - minDataHeadroom
@@ -176,18 +170,6 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 			// Publish if we have new complete messages
 			if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
 				r.publish()
-			}
-
-			// Amortized context check
-			bytesUntilContextCheck -= int64(n)
-			if bytesUntilContextCheck <= 0 {
-				select {
-				case <-ctx.Done():
-					r.setError(ctx.Err())
-					return ctx.Err()
-				default:
-				}
-				bytesUntilContextCheck = contextCheckBytes
 			}
 		}
 
@@ -311,28 +293,14 @@ func (r *RingBuffer) setError(err error) {
 // === Reader methods ===
 
 // AvailableMessages waits for messages and returns the count of available messages.
-// Spins briefly before falling back to channel wait for low latency.
 func (r *RingBuffer) AvailableMessages(afterMsg int64) (toMsg int64, err error) {
-	// Hot path: spin check
-	for i := 0; i < readerSpinCount; i++ {
-		toMsg = atomic.LoadInt64(&r.publishedMsgs)
-		if toMsg > afterMsg {
-			return toMsg, nil
-		}
-		select {
-		case <-r.done:
-			// Check for remaining messages before returning error
-			toMsg = atomic.LoadInt64(&r.publishedMsgs)
-			if toMsg > afterMsg {
-				return toMsg, nil
-			}
-			return afterMsg, r.Error()
-		default:
-		}
-		runtime.Gosched()
+	// Fast path: check if messages already available
+	toMsg = atomic.LoadInt64(&r.publishedMsgs)
+	if toMsg > afterMsg {
+		return toMsg, nil
 	}
 
-	// Cold path: wait on channel
+	// Slow path: wait on channel
 	for {
 		select {
 		case <-r.readerWake:
@@ -374,6 +342,12 @@ func (r *RingBuffer) Done() <-chan struct{} {
 	return r.done
 }
 
+// ReaderWake returns a channel that signals when new messages may be available.
+// Use with PublishedMsgCount() for non-blocking multi-buffer select loops.
+func (r *RingBuffer) ReaderWake() <-chan struct{} {
+	return r.readerWake
+}
+
 // Error returns the error that caused the buffer to close, or nil.
 func (r *RingBuffer) Error() error {
 	errPtr := r.err.Load()
@@ -390,11 +364,11 @@ func (r *RingBuffer) PublishedMsgCount() int64 {
 
 // === Message access methods ===
 
-// MessageType returns the type byte for message at index msgIdx.
+// MessageType returns the message type for message at index msgIdx.
 // Reads directly from the ring buffer data.
-func (r *RingBuffer) MessageType(msgIdx int64) byte {
+func (r *RingBuffer) MessageType(msgIdx int64) MsgType {
 	off := r.offsets[msgIdx&r.metaMask]
-	return r.data[off&r.dataMask]
+	return MsgType(r.data[off&r.dataMask])
 }
 
 // MessageOffset returns the byte offset where message msgIdx starts (including header).

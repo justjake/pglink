@@ -55,7 +55,7 @@ func (m ClientTerminateConnTerminate) Retain() ClientTerminateConnTerminate {
 func ToClientTerminateConn(msg pgproto3.FrontendMessage) (ClientTerminateConn, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Terminate:
-		return ClientTerminateConnTerminate(NewLazyClientFromParsed(m)), true
+		return ClientTerminateConnTerminate(ClientParsed(m)), true
 	}
 	return nil, false
 }

@@ -84,23 +84,6 @@ func TestRawBody_Len(t *testing.T) {
 	}
 }
 
-func TestIsFastForwardableType(t *testing.T) {
-	fastTypes := []byte{'D', 'd', 'T', 'C', '1', '2', '3', 'N', 'n', 't', 's'}
-	slowTypes := []byte{'Z', 'E', 'R', 'S', 'K', 'P', 'B', 'Q'}
-
-	for _, typ := range fastTypes {
-		if !IsFastForwardableType(typ) {
-			t.Errorf("IsFastForwardableType(%c) = false, want true", typ)
-		}
-	}
-
-	for _, typ := range slowTypes {
-		if IsFastForwardableType(typ) {
-			t.Errorf("IsFastForwardableType(%c) = true, want false", typ)
-		}
-	}
-}
-
 func TestDecodeBackendMessage(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -315,7 +298,7 @@ func TestLazyServer(t *testing.T) {
 
 	t.Run("from parsed", func(t *testing.T) {
 		parsed := &pgproto3.ReadyForQuery{TxStatus: 'T'}
-		lazy := NewLazyServerFromParsed(parsed)
+		lazy := ServerParsed(parsed)
 
 		if !lazy.IsParsed() {
 			t.Error("IsParsed() should be true for pre-parsed")
@@ -359,7 +342,7 @@ func TestLazyClient(t *testing.T) {
 
 	t.Run("from parsed", func(t *testing.T) {
 		parsed := &pgproto3.Query{String: "SELECT 2"}
-		lazy := NewLazyClientFromParsed(parsed)
+		lazy := ClientParsed(parsed)
 
 		if !lazy.IsParsed() {
 			t.Error("IsParsed() should be true for pre-parsed")
@@ -396,7 +379,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 
 	// Create RawBody
-	raw := RawBody{Type: typ, Body: body}
+	raw := RawBody{Type: MsgType(typ), Body: body}
 
 	// Encode with WriteTo
 	var buf bytes.Buffer
@@ -498,7 +481,7 @@ func TestLazyServer_EnsureRaw(t *testing.T) {
 	t.Run("from parsed", func(t *testing.T) {
 		// Create LazyServer from parsed message (no source initially)
 		parsed := &pgproto3.ReadyForQuery{TxStatus: 'T'}
-		lazy := NewLazyServerFromParsed(parsed)
+		lazy := ServerParsed(parsed)
 
 		// Source should be nil for parsed-only message
 		if lazy.Source() != nil {
@@ -538,7 +521,7 @@ func TestLazyClient_EnsureRaw(t *testing.T) {
 	t.Run("from parsed", func(t *testing.T) {
 		// Create LazyClient from parsed message (no source initially)
 		parsed := &pgproto3.Query{String: "SELECT 1"}
-		lazy := NewLazyClientFromParsed(parsed)
+		lazy := ClientParsed(parsed)
 
 		// Source should be nil for parsed-only message
 		if lazy.Source() != nil {

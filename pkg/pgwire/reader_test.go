@@ -9,9 +9,9 @@ import (
 )
 
 // encodeMessage encodes a message type and body into wire format.
-func encodeMessage(t byte, body []byte) []byte {
+func encodeMessage(t MsgType, body []byte) []byte {
 	buf := make([]byte, 5+len(body))
-	buf[0] = t
+	buf[0] = byte(t)
 	binary.BigEndian.PutUint32(buf[1:5], uint32(len(body)+4))
 	copy(buf[5:], body)
 	return buf
@@ -38,7 +38,7 @@ func TestRawReader_ReadRaw(t *testing.T) {
 func TestRawReader_ReadServerMessage(t *testing.T) {
 	tests := []struct {
 		name     string
-		msgType  byte
+		msgType  MsgType
 		body     []byte
 		wantType string
 	}{
@@ -212,7 +212,7 @@ func TestRawReader_ReadServerMessage_Authentication(t *testing.T) {
 func TestRawReader_ReadClientMessage(t *testing.T) {
 	tests := []struct {
 		name     string
-		msgType  byte
+		msgType  MsgType
 		body     []byte
 		wantType string
 	}{

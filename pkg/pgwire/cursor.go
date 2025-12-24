@@ -9,7 +9,7 @@ import (
 // Cursor provides zero-allocation iteration over messages in a RingBuffer.
 // It implements RawMessageSource for the current message, enabling lazy parsing.
 //
-// Usage pattern:
+// Single-cursor usage:
 //
 //	cursor := NewClientCursor(ring)
 //	for {
@@ -21,6 +21,35 @@ import (
 //	        // Process msg...
 //	    }
 //	    cursor.WriteAll(dst)
+//	}
+//
+// Multi-cursor usage (e.g., proxying between frontend and backend):
+//
+//	frontend := NewClientCursor(frontendRing)
+//	backend := NewServerCursor(backendRing)
+//	for {
+//	    // Prioritize server responses over new client requests
+//	    if ok, err := backend.TryNextBatch(); err != nil {
+//	        return err
+//	    } else if ok {
+//	        for backend.NextMsg() { /* process */ }
+//	        continue
+//	    }
+//	    if ok, err := frontend.TryNextBatch(); err != nil {
+//	        return err
+//	    } else if ok {
+//	        for frontend.NextMsg() { /* process */ }
+//	        continue
+//	    }
+//	    // Both empty, wait for either
+//	    select {
+//	    case <-backend.Ready():
+//	    case <-frontend.Ready():
+//	    case <-backend.Done():
+//	        return backend.Err()
+//	    case <-frontend.Done():
+//	        return frontend.Err()
+//	    }
 //	}
 type Cursor struct {
 	ring *RingBuffer
@@ -41,18 +70,12 @@ type Cursor struct {
 // ClientFlyweights holds reusable message wrappers for client messages.
 // One instance per message type, reused each iteration for zero allocation.
 type ClientFlyweights struct {
-	// Startup
-	startupMessage      ClientStartupStartupMessage
-	sslRequest          ClientStartupSSLRequest
-	gssEncRequest       ClientStartupGSSEncRequest
-	cancelRequest       ClientCancelCancelRequest
-	passwordMessage     ClientStartupPasswordMessage
-	saslInitialResponse ClientStartupSASLInitialResponse
-	saslResponse        ClientStartupSASLResponse
-
 	// Simple query
 	query        ClientSimpleQueryQuery
 	functionCall ClientSimpleQueryFunctionCall
+
+	// Startup/Auth
+	passwordMessage ClientStartupPasswordMessage
 
 	// Extended query
 	parse    ClientExtendedQueryParse
@@ -133,8 +156,8 @@ func NewServerCursor(ring *RingBuffer) *Cursor {
 
 // === RawMessageSource implementation ===
 
-// MessageType returns the type byte of the current message.
-func (c *Cursor) MessageType() byte {
+// MessageType returns the message type of the current message.
+func (c *Cursor) MessageType() MsgType {
 	return c.ring.MessageType(c.msgIdx)
 }
 
@@ -162,6 +185,7 @@ func (c *Cursor) Retain() RawMessageSource {
 
 // NextBatch waits for new messages and advances the reader position.
 // Returns error on EOF or context cancellation.
+// For multi-cursor scenarios, use TryNextBatch with Ready/Done channels instead.
 func (c *Cursor) NextBatch() error {
 	// Release previous batch (if any)
 	if c.batchEnd > 0 {
@@ -179,6 +203,50 @@ func (c *Cursor) NextBatch() error {
 	c.msgIdx = c.batchStart - 1 // NextMsg will increment
 	c.writePos = c.batchStart
 	return nil
+}
+
+// TryNextBatch checks for new messages without blocking.
+// Returns (true, nil) if messages are available for processing.
+// Returns (false, nil) if no messages yet - use Ready() channel to wait.
+// Returns (false, err) on EOF or error.
+func (c *Cursor) TryNextBatch() (bool, error) {
+	// Release previous batch (if any)
+	if c.batchEnd > 0 {
+		c.ring.ReleaseThrough(c.batchEnd)
+	}
+
+	// Check for error first
+	if err := c.ring.Error(); err != nil {
+		return false, err
+	}
+
+	// Non-blocking check for new messages
+	newEnd := c.ring.PublishedMsgCount()
+	if newEnd <= c.batchEnd {
+		return false, nil
+	}
+
+	c.batchStart = c.batchEnd
+	c.batchEnd = newEnd
+	c.msgIdx = c.batchStart - 1 // NextMsg will increment
+	c.writePos = c.batchStart
+	return true, nil
+}
+
+// Ready returns a channel that signals when new messages may be available.
+// Use in select with other cursors for multiplexing.
+func (c *Cursor) Ready() <-chan struct{} {
+	return c.ring.ReaderWake()
+}
+
+// Done returns a channel that's closed when the cursor is done (EOF or error).
+func (c *Cursor) Done() <-chan struct{} {
+	return c.ring.Done()
+}
+
+// Err returns the error that caused the cursor to close, or nil.
+func (c *Cursor) Err() error {
+	return c.ring.Error()
 }
 
 // NextMsg advances to the next message in the batch.
@@ -246,54 +314,54 @@ func (c *Cursor) AsClient() (ClientMessage, error) {
 
 	switch msgType {
 	// Simple query
-	case 'Q':
+	case MsgClientQuery:
 		fw.query = ClientSimpleQueryQuery{source: c}
 		return fw.query, nil
-	case 'F':
+	case MsgClientFunc:
 		fw.functionCall = ClientSimpleQueryFunctionCall{source: c}
 		return fw.functionCall, nil
 
 	// Extended query
-	case 'P':
+	case MsgClientParse:
 		fw.parse = ClientExtendedQueryParse{source: c}
 		return fw.parse, nil
-	case 'B':
+	case MsgClientBind:
 		fw.bind = ClientExtendedQueryBind{source: c}
 		return fw.bind, nil
-	case 'E':
+	case MsgClientExecute:
 		fw.execute = ClientExtendedQueryExecute{source: c}
 		return fw.execute, nil
-	case 'D':
+	case MsgClientDescribe:
 		fw.describe = ClientExtendedQueryDescribe{source: c}
 		return fw.describe, nil
-	case 'C':
+	case MsgClientClose:
 		fw.close = ClientExtendedQueryClose{source: c}
 		return fw.close, nil
-	case 'S':
+	case MsgClientSync:
 		fw.sync = ClientExtendedQuerySync{source: c}
 		return fw.sync, nil
-	case 'H':
+	case MsgClientFlush:
 		fw.flush = ClientExtendedQueryFlush{source: c}
 		return fw.flush, nil
 
 	// Copy
-	case 'd':
+	case MsgClientCopyData:
 		fw.copyData = ClientCopyCopyData{source: c}
 		return fw.copyData, nil
-	case 'c':
+	case MsgClientCopyDone:
 		fw.copyDone = ClientCopyCopyDone{source: c}
 		return fw.copyDone, nil
-	case 'f':
+	case MsgClientCopyFail:
 		fw.copyFail = ClientCopyCopyFail{source: c}
 		return fw.copyFail, nil
 
 	// Terminate
-	case 'X':
+	case MsgClientTerminate:
 		fw.terminate = ClientTerminateConnTerminate{source: c}
 		return fw.terminate, nil
 
 	// Startup/Auth (p = password)
-	case 'p':
+	case MsgClientPassword:
 		fw.passwordMessage = ClientStartupPasswordMessage{source: c}
 		return fw.passwordMessage, nil
 
@@ -314,80 +382,80 @@ func (c *Cursor) AsServer() (ServerMessage, error) {
 
 	switch msgType {
 	// Response
-	case 'Z':
+	case MsgServerReadyForQuery:
 		fw.readyForQuery = ServerResponseReadyForQuery{source: c}
 		return fw.readyForQuery, nil
-	case 'C':
+	case MsgServerCommandComplete:
 		fw.commandComplete = ServerResponseCommandComplete{source: c}
 		return fw.commandComplete, nil
-	case 'D':
+	case MsgServerDataRow:
 		fw.dataRow = ServerResponseDataRow{source: c}
 		return fw.dataRow, nil
-	case 'I':
+	case MsgServerEmptyQueryResponse:
 		fw.emptyQueryResponse = ServerResponseEmptyQueryResponse{source: c}
 		return fw.emptyQueryResponse, nil
-	case 'E':
+	case MsgServerErrorResponse:
 		fw.errorResponse = ServerResponseErrorResponse{source: c}
 		return fw.errorResponse, nil
-	case 'V':
+	case MsgServerFuncCallResponse:
 		fw.functionCallResponse = ServerResponseFunctionCallResponse{source: c}
 		return fw.functionCallResponse, nil
 
 	// Extended query
-	case '1':
+	case MsgServerParseComplete:
 		fw.parseComplete = ServerExtendedQueryParseComplete{source: c}
 		return fw.parseComplete, nil
-	case '2':
+	case MsgServerBindComplete:
 		fw.bindComplete = ServerExtendedQueryBindComplete{source: c}
 		return fw.bindComplete, nil
-	case 't':
+	case MsgServerParameterDescription:
 		fw.parameterDescription = ServerExtendedQueryParameterDescription{source: c}
 		return fw.parameterDescription, nil
-	case 'T':
+	case MsgServerRowDescription:
 		fw.rowDescription = ServerExtendedQueryRowDescription{source: c}
 		return fw.rowDescription, nil
-	case 'n':
+	case MsgServerNoData:
 		fw.noData = ServerExtendedQueryNoData{source: c}
 		return fw.noData, nil
-	case 's':
+	case MsgServerPortalSuspended:
 		fw.portalSuspended = ServerExtendedQueryPortalSuspended{source: c}
 		return fw.portalSuspended, nil
-	case '3':
+	case MsgServerCloseComplete:
 		fw.closeComplete = ServerExtendedQueryCloseComplete{source: c}
 		return fw.closeComplete, nil
 
 	// Copy
-	case 'G':
+	case MsgServerCopyInResponse:
 		fw.copyInResponse = ServerCopyCopyInResponse{source: c}
 		return fw.copyInResponse, nil
-	case 'H':
+	case MsgServerCopyOutResponse:
 		fw.copyOutResponse = ServerCopyCopyOutResponse{source: c}
 		return fw.copyOutResponse, nil
-	case 'W':
+	case MsgServerCopyBothResponse:
 		fw.copyBothResponse = ServerCopyCopyBothResponse{source: c}
 		return fw.copyBothResponse, nil
-	case 'd':
+	case MsgServerCopyData:
 		fw.copyData = ServerCopyCopyData{source: c}
 		return fw.copyData, nil
-	case 'c':
+	case MsgServerCopyDone:
 		fw.copyDone = ServerCopyCopyDone{source: c}
 		return fw.copyDone, nil
 
 	// Async
-	case 'N':
+	case MsgServerNoticeResponse:
 		fw.noticeResponse = ServerAsyncNoticeResponse{source: c}
 		return fw.noticeResponse, nil
-	case 'A':
+	case MsgServerNotificationResponse:
 		fw.notificationResponse = ServerAsyncNotificationResponse{source: c}
 		return fw.notificationResponse, nil
-	case 'S':
+	case MsgServerParameterStatus:
 		fw.parameterStatus = ServerAsyncParameterStatus{source: c}
 		return fw.parameterStatus, nil
 
 	// Startup/Auth
-	case 'R':
+	case MsgServerAuth:
 		return c.asServerAuth()
-	case 'K':
+	case MsgServerBackendKeyData:
 		fw.backendKeyData = ServerStartupBackendKeyData{source: c}
 		return fw.backendKeyData, nil
 

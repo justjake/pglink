@@ -251,19 +251,19 @@ func (m ClientStartupStartupMessage) Retain() ClientStartupStartupMessage {
 func ToClientStartup(msg pgproto3.FrontendMessage) (ClientStartup, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.GSSEncRequest:
-		return ClientStartupGSSEncRequest(NewLazyClientFromParsed(m)), true
+		return ClientStartupGSSEncRequest(ClientParsed(m)), true
 	case *pgproto3.GSSResponse:
-		return ClientStartupGSSResponse(NewLazyClientFromParsed(m)), true
+		return ClientStartupGSSResponse(ClientParsed(m)), true
 	case *pgproto3.PasswordMessage:
-		return ClientStartupPasswordMessage(NewLazyClientFromParsed(m)), true
+		return ClientStartupPasswordMessage(ClientParsed(m)), true
 	case *pgproto3.SASLInitialResponse:
-		return ClientStartupSASLInitialResponse(NewLazyClientFromParsed(m)), true
+		return ClientStartupSASLInitialResponse(ClientParsed(m)), true
 	case *pgproto3.SASLResponse:
-		return ClientStartupSASLResponse(NewLazyClientFromParsed(m)), true
+		return ClientStartupSASLResponse(ClientParsed(m)), true
 	case *pgproto3.SSLRequest:
-		return ClientStartupSSLRequest(NewLazyClientFromParsed(m)), true
+		return ClientStartupSSLRequest(ClientParsed(m)), true
 	case *pgproto3.StartupMessage:
-		return ClientStartupStartupMessage(NewLazyClientFromParsed(m)), true
+		return ClientStartupStartupMessage(ClientParsed(m)), true
 	}
 	return nil, false
 }

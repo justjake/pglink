@@ -274,19 +274,19 @@ func (m ClientExtendedQueryFlush) Retain() ClientExtendedQueryFlush {
 func ToClientExtendedQuery(msg pgproto3.FrontendMessage) (ClientExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Parse:
-		return ClientExtendedQueryParse(NewLazyClientFromParsed(m)), true
+		return ClientExtendedQueryParse(ClientParsed(m)), true
 	case *pgproto3.Bind:
-		return ClientExtendedQueryBind(NewLazyClientFromParsed(m)), true
+		return ClientExtendedQueryBind(ClientParsed(m)), true
 	case *pgproto3.Execute:
-		return ClientExtendedQueryExecute(NewLazyClientFromParsed(m)), true
+		return ClientExtendedQueryExecute(ClientParsed(m)), true
 	case *pgproto3.Sync:
-		return ClientExtendedQuerySync(NewLazyClientFromParsed(m)), true
+		return ClientExtendedQuerySync(ClientParsed(m)), true
 	case *pgproto3.Describe:
-		return ClientExtendedQueryDescribe(NewLazyClientFromParsed(m)), true
+		return ClientExtendedQueryDescribe(ClientParsed(m)), true
 	case *pgproto3.Close:
-		return ClientExtendedQueryClose(NewLazyClientFromParsed(m)), true
+		return ClientExtendedQueryClose(ClientParsed(m)), true
 	case *pgproto3.Flush:
-		return ClientExtendedQueryFlush(NewLazyClientFromParsed(m)), true
+		return ClientExtendedQueryFlush(ClientParsed(m)), true
 	}
 	return nil, false
 }

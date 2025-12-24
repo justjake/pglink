@@ -620,12 +620,11 @@ func (s *Session) handleServerCopy(msg pgwire.ServerCopy) (bool, error) {
 }
 
 // forwardServerMessage sends a server message to the client.
-// For fast-forwardable message types, it uses raw byte forwarding to avoid
-// re-encoding overhead. For other messages, it uses the standard Send path.
+// If raw bytes are available, uses raw byte forwarding to avoid re-encoding overhead.
 func (s *Session) forwardServerMessage(msg pgwire.ServerMessage) {
 	// Check if we have raw bytes available (from RawReader)
 	raw := msg.Raw()
-	if !raw.IsZero() && raw.IsFastForwardable() {
+	if !raw.IsZero() {
 		// Fast path: forward raw bytes directly
 		if err := s.frontend.ForwardRaw(raw); err != nil {
 			// Fall back to slow path on error
@@ -634,20 +633,8 @@ func (s *Session) forwardServerMessage(msg pgwire.ServerMessage) {
 		return
 	}
 
-	// Check if this message type is fast-forwardable
-	// Even without raw bytes, we can encode and forward to bypass pgproto3 buffering
-	serverMsg := msg.Server()
-	raw = pgwire.EncodeBackendMessage(serverMsg)
-	if !raw.IsZero() && raw.IsFastForwardable() {
-		if err := s.frontend.ForwardRaw(raw); err != nil {
-			// Fall back to slow path on error
-			s.frontend.Send(serverMsg)
-		}
-		return
-	}
-
 	// Slow path: use standard Send
-	s.frontend.Send(serverMsg)
+	s.frontend.Send(msg.Server())
 }
 
 func (s *Session) clientToServerObjectName(objectType byte, name string) string {

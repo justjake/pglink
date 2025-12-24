@@ -109,11 +109,11 @@ func (m ClientCopyCopyFail) Retain() ClientCopyCopyFail {
 func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyData:
-		return ClientCopyCopyData(NewLazyClientFromParsed(m)), true
+		return ClientCopyCopyData(ClientParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ClientCopyCopyDone(NewLazyClientFromParsed(m)), true
+		return ClientCopyCopyDone(ClientParsed(m)), true
 	case *pgproto3.CopyFail:
-		return ClientCopyCopyFail(NewLazyClientFromParsed(m)), true
+		return ClientCopyCopyFail(ClientParsed(m)), true
 	}
 	return nil, false
 }

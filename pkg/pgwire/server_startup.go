@@ -332,23 +332,23 @@ func (m ServerStartupBackendKeyData) Retain() ServerStartupBackendKeyData {
 func ToServerStartup(msg pgproto3.BackendMessage) (ServerStartup, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.AuthenticationCleartextPassword:
-		return ServerStartupAuthenticationCleartextPassword(NewLazyServerFromParsed(m)), true
+		return ServerStartupAuthenticationCleartextPassword(ServerParsed(m)), true
 	case *pgproto3.AuthenticationGSS:
-		return ServerStartupAuthenticationGSS(NewLazyServerFromParsed(m)), true
+		return ServerStartupAuthenticationGSS(ServerParsed(m)), true
 	case *pgproto3.AuthenticationGSSContinue:
-		return ServerStartupAuthenticationGSSContinue(NewLazyServerFromParsed(m)), true
+		return ServerStartupAuthenticationGSSContinue(ServerParsed(m)), true
 	case *pgproto3.AuthenticationMD5Password:
-		return ServerStartupAuthenticationMD5Password(NewLazyServerFromParsed(m)), true
+		return ServerStartupAuthenticationMD5Password(ServerParsed(m)), true
 	case *pgproto3.AuthenticationOk:
-		return ServerStartupAuthenticationOk(NewLazyServerFromParsed(m)), true
+		return ServerStartupAuthenticationOk(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASL:
-		return ServerStartupAuthenticationSASL(NewLazyServerFromParsed(m)), true
+		return ServerStartupAuthenticationSASL(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASLContinue:
-		return ServerStartupAuthenticationSASLContinue(NewLazyServerFromParsed(m)), true
+		return ServerStartupAuthenticationSASLContinue(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASLFinal:
-		return ServerStartupAuthenticationSASLFinal(NewLazyServerFromParsed(m)), true
+		return ServerStartupAuthenticationSASLFinal(ServerParsed(m)), true
 	case *pgproto3.BackendKeyData:
-		return ServerStartupBackendKeyData(NewLazyServerFromParsed(m)), true
+		return ServerStartupBackendKeyData(ServerParsed(m)), true
 	}
 	return nil, false
 }

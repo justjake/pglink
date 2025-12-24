@@ -88,9 +88,9 @@ func (m ClientSimpleQueryFunctionCall) Retain() ClientSimpleQueryFunctionCall {
 func ToClientSimpleQuery(msg pgproto3.FrontendMessage) (ClientSimpleQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Query:
-		return ClientSimpleQueryQuery(NewLazyClientFromParsed(m)), true
+		return ClientSimpleQueryQuery(ClientParsed(m)), true
 	case *pgproto3.FunctionCall:
-		return ClientSimpleQueryFunctionCall(NewLazyClientFromParsed(m)), true
+		return ClientSimpleQueryFunctionCall(ClientParsed(m)), true
 	}
 	return nil, false
 }

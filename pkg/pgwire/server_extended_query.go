@@ -258,19 +258,19 @@ func (m ServerExtendedQueryCloseComplete) Retain() ServerExtendedQueryCloseCompl
 func ToServerExtendedQuery(msg pgproto3.BackendMessage) (ServerExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ParseComplete:
-		return ServerExtendedQueryParseComplete(NewLazyServerFromParsed(m)), true
+		return ServerExtendedQueryParseComplete(ServerParsed(m)), true
 	case *pgproto3.BindComplete:
-		return ServerExtendedQueryBindComplete(NewLazyServerFromParsed(m)), true
+		return ServerExtendedQueryBindComplete(ServerParsed(m)), true
 	case *pgproto3.ParameterDescription:
-		return ServerExtendedQueryParameterDescription(NewLazyServerFromParsed(m)), true
+		return ServerExtendedQueryParameterDescription(ServerParsed(m)), true
 	case *pgproto3.RowDescription:
-		return ServerExtendedQueryRowDescription(NewLazyServerFromParsed(m)), true
+		return ServerExtendedQueryRowDescription(ServerParsed(m)), true
 	case *pgproto3.NoData:
-		return ServerExtendedQueryNoData(NewLazyServerFromParsed(m)), true
+		return ServerExtendedQueryNoData(ServerParsed(m)), true
 	case *pgproto3.PortalSuspended:
-		return ServerExtendedQueryPortalSuspended(NewLazyServerFromParsed(m)), true
+		return ServerExtendedQueryPortalSuspended(ServerParsed(m)), true
 	case *pgproto3.CloseComplete:
-		return ServerExtendedQueryCloseComplete(NewLazyServerFromParsed(m)), true
+		return ServerExtendedQueryCloseComplete(ServerParsed(m)), true
 	}
 	return nil, false
 }
