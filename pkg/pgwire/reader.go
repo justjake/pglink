@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-
 )
 
 // RawReader reads PostgreSQL wire protocol messages from an io.Reader

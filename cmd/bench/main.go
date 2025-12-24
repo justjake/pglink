@@ -117,8 +117,8 @@ type RunConfig struct {
 	Seed           int64
 
 	// A/B comparison config (optional)
-	Compare          *CompareConfig // Comparison target config
-	CompareGomaxprocs int           // GOMAXPROCS for comparison target
+	Compare           *CompareConfig // Comparison target config
+	CompareGomaxprocs int            // GOMAXPROCS for comparison target
 }
 
 // BenchmarkSuite manages the benchmark execution
@@ -134,10 +134,10 @@ type BenchmarkSuite struct {
 	pgbouncerCmd *exec.Cmd
 
 	// Ports
-	directPort       int
-	pglinkPort       int
-	pgbouncerPort    int
-	comparePort      int // Port for comparison pglink instance
+	directPort    int
+	pglinkPort    int
+	pgbouncerPort int
+	comparePort   int // Port for comparison pglink instance
 
 	// Current pglink config (set during target setup)
 	currentPglinkConfig *config.Config

@@ -133,17 +133,17 @@ func (tp *TracerProvider) Enabled() bool {
 
 // Common span attribute keys used throughout pglink.
 const (
-	AttrDBUser            = "db.user"
-	AttrDBName            = "db.name"
-	AttrDBStatement       = "db.statement"
-	AttrDBOperation       = "db.operation"
-	AttrApplicationName   = "application_name"
-	AttrApplicationNameQ  = "application_name.query"
-	AttrQueryType         = "pglink.query_type"
-	AttrRowCount          = "pglink.row_count"
-	AttrByteCount         = "pglink.byte_count"
-	AttrStatementName     = "pglink.statement_name"
-	AttrPortalName        = "pglink.portal_name"
+	AttrDBUser           = "db.user"
+	AttrDBName           = "db.name"
+	AttrDBStatement      = "db.statement"
+	AttrDBOperation      = "db.operation"
+	AttrApplicationName  = "application_name"
+	AttrApplicationNameQ = "application_name.query"
+	AttrQueryType        = "pglink.query_type"
+	AttrRowCount         = "pglink.row_count"
+	AttrByteCount        = "pglink.byte_count"
+	AttrStatementName    = "pglink.statement_name"
+	AttrPortalName       = "pglink.portal_name"
 )
 
 // SessionAttributes returns common attributes for a session.

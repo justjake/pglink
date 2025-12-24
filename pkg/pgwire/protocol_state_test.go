@@ -310,9 +310,9 @@ func TestProtocolState_ParameterStatus(t *testing.T) {
 // TestProtocolState_InTxOrQuery tests the InTxOrQuery method.
 func TestProtocolState_InTxOrQuery(t *testing.T) {
 	tests := []struct {
-		name   string
-		setup  func(*ProtocolState)
-		want   bool
+		name  string
+		setup func(*ProtocolState)
+		want  bool
 	}{
 		{
 			name:  "IdleState",

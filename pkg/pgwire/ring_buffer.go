@@ -77,15 +77,15 @@ type RingBuffer struct {
 
 	// === Published positions (writer stores, reader loads) ===
 	// These share a cache line since they have the same access pattern
-	publishedBytes int64 // Bytes available to reader (end of last complete message)
-	publishedMsgs  int64 // Messages available to reader
-	_ [48]byte           // Pad to 64 bytes
+	publishedBytes int64    // Bytes available to reader (end of last complete message)
+	publishedMsgs  int64    // Messages available to reader
+	_              [48]byte // Pad to 64 bytes
 
 	// === Consumed positions (reader stores, writer loads) ===
 	// These share a cache line since they have the same access pattern
-	consumedBytes int64 // Bytes consumed by reader (can be reclaimed)
-	consumedMsgs  int64 // Messages consumed by reader
-	_ [48]byte          // Pad to 64 bytes
+	consumedBytes int64    // Bytes consumed by reader (can be reclaimed)
+	consumedMsgs  int64    // Messages consumed by reader
+	_             [48]byte // Pad to 64 bytes
 
 	// === Signaling (cold path) ===
 	writerWake chan struct{} // Reader signals writer: space freed

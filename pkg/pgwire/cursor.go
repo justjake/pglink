@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-
 )
 
 // Cursor provides zero-allocation iteration over messages in a RingBuffer.

@@ -20,10 +20,10 @@ import (
 // All pools are created eagerly in NewDatabase and the userPools map is
 // immutable after construction, so no locking is needed.
 type Database struct {
-	config        *config.DatabaseConfig
-	secrets       *config.SecretCache
-	pool          *MultiPool[config.UserConfig]
-	logger        *slog.Logger
+	config         *config.DatabaseConfig
+	secrets        *config.SecretCache
+	pool           *MultiPool[config.UserConfig]
+	logger         *slog.Logger
 	tracingEnabled bool
 
 	destroyedConns atomic.Int32
@@ -36,8 +36,8 @@ type Database struct {
 // (assumes the global tracer provider has been configured).
 func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *config.SecretCache, logger *slog.Logger, tracingEnabled bool) (*Database, error) {
 	db := &Database{
-		config:        cfg,
-		secrets:       secrets,
+		config:         cfg,
+		secrets:        secrets,
 		tracingEnabled: tracingEnabled,
 	}
 	db.logger = logger.With("backend", db.Name())

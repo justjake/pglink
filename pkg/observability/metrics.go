@@ -14,12 +14,12 @@ type Metrics struct {
 	ErrorsTotal            *prometheus.CounterVec
 
 	// Gauges
-	ClientConnectionsActive    *prometheus.GaugeVec
+	ClientConnectionsActive     *prometheus.GaugeVec
 	BackendPoolConnectionsTotal *prometheus.GaugeVec
 	BackendPoolConnectionsIdle  *prometheus.GaugeVec
 
 	// Histograms
-	QueryDuration        *prometheus.HistogramVec
+	QueryDuration          *prometheus.HistogramVec
 	BackendAcquireDuration *prometheus.HistogramVec
 }
 
