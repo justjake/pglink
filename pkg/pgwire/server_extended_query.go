@@ -40,7 +40,7 @@ func (ServerExtendedQueryBindComplete) ExtendedQuery()                    {}
 func (t ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message { return t.T }
 func (t ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage { return t.T }
 
-// Response to Describe of prepared statemnt
+// Response to Describe of prepared statement.
 type ServerExtendedQueryParameterDescription FromServer[*pgproto3.ParameterDescription]
 
 func (ServerExtendedQueryParameterDescription) ExtendedQuery()                    {}

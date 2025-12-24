@@ -57,7 +57,7 @@ func (t ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage { return t
 // Extended Query 4: Command pipeline complete.
 //
 // Causes the backend to close the current transaction if it's not inside a
-// BEGIN/COMMIT transaction block (“close” meaning to commit if no error, or
+// BEGIN/COMMIT transaction block ("close" meaning to commit if no error, or
 // roll back if error).
 // then, a ReadyForQuery response is issued.
 //

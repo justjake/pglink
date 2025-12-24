@@ -390,6 +390,34 @@ func TestToMessage(t *testing.T) {
 	}
 }
 
+// TestIsStartupModeMessage tests startup message detection.
+func TestIsStartupModeMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		input pgproto3.FrontendMessage
+		want  bool
+	}{
+		{"GSSEncRequest", &pgproto3.GSSEncRequest{}, true},
+		{"GSSResponse", &pgproto3.GSSResponse{}, true},
+		{"PasswordMessage", &pgproto3.PasswordMessage{}, true},
+		{"SASLInitialResponse", &pgproto3.SASLInitialResponse{}, true},
+		{"SASLResponse", &pgproto3.SASLResponse{}, true},
+		{"SSLRequest", &pgproto3.SSLRequest{}, true},
+		{"StartupMessage", &pgproto3.StartupMessage{}, true},
+		{"Query", &pgproto3.Query{String: "SELECT 1"}, false},
+		{"Parse", &pgproto3.Parse{Query: "SELECT $1"}, false},
+		{"Terminate", &pgproto3.Terminate{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isStartupModeMessage(tt.input); got != tt.want {
+				t.Errorf("isStartupModeMessage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestIsSimpleQueryModeMessage tests simple query message detection.
 func TestIsSimpleQueryModeMessage(t *testing.T) {
 	tests := []struct {
@@ -408,8 +436,8 @@ func TestIsSimpleQueryModeMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsSimpleQueryModeMessage(tt.input); got != tt.want {
-				t.Errorf("IsSimpleQueryModeMessage() = %v, want %v", got, tt.want)
+			if got := isSimpleQueryModeMessage(tt.input); got != tt.want {
+				t.Errorf("isSimpleQueryModeMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -435,8 +463,8 @@ func TestIsExtendedQueryModeMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsExtendedQueryModeMessage(tt.input); got != tt.want {
-				t.Errorf("IsExtendedQueryModeMessage() = %v, want %v", got, tt.want)
+			if got := isExtendedQueryModeMessage(tt.input); got != tt.want {
+				t.Errorf("isExtendedQueryModeMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -458,8 +486,8 @@ func TestIsCopyModeMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsCopyModeMessage(tt.input); got != tt.want {
-				t.Errorf("IsCopyModeMessage() = %v, want %v", got, tt.want)
+			if got := isCopyModeMessage(tt.input); got != tt.want {
+				t.Errorf("isCopyModeMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -479,8 +507,8 @@ func TestIsCancelMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsCancelMessage(tt.input); got != tt.want {
-				t.Errorf("IsCancelMessage() = %v, want %v", got, tt.want)
+			if got := isCancelMessage(tt.input); got != tt.want {
+				t.Errorf("isCancelMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -500,8 +528,8 @@ func TestIsTerminateConnMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsTerminateConnMessage(tt.input); got != tt.want {
-				t.Errorf("IsTerminateConnMessage() = %v, want %v", got, tt.want)
+			if got := isTerminateConnMessage(tt.input); got != tt.want {
+				t.Errorf("isTerminateConnMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -527,8 +555,8 @@ func TestIsBackendStartupModeMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsBackendStartupModeMessage(tt.input); got != tt.want {
-				t.Errorf("IsBackendStartupModeMessage() = %v, want %v", got, tt.want)
+			if got := isBackendStartupModeMessage(tt.input); got != tt.want {
+				t.Errorf("isBackendStartupModeMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -554,8 +582,8 @@ func TestIsBackendExtendedQueryModeMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsBackendExtendedQueryModeMessage(tt.input); got != tt.want {
-				t.Errorf("IsBackendExtendedQueryModeMessage() = %v, want %v", got, tt.want)
+			if got := isBackendExtendedQueryModeMessage(tt.input); got != tt.want {
+				t.Errorf("isBackendExtendedQueryModeMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -579,8 +607,8 @@ func TestIsBackendCopyModeMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsBackendCopyModeMessage(tt.input); got != tt.want {
-				t.Errorf("IsBackendCopyModeMessage() = %v, want %v", got, tt.want)
+			if got := isBackendCopyModeMessage(tt.input); got != tt.want {
+				t.Errorf("isBackendCopyModeMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -605,8 +633,8 @@ func TestIsBackendResponseMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsBackendResponseMessage(tt.input); got != tt.want {
-				t.Errorf("IsBackendResponseMessage() = %v, want %v", got, tt.want)
+			if got := isBackendResponseMessage(tt.input); got != tt.want {
+				t.Errorf("isBackendResponseMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -628,8 +656,8 @@ func TestIsBackendAsyncMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsBackendAsyncMessage(tt.input); got != tt.want {
-				t.Errorf("IsBackendAsyncMessage() = %v, want %v", got, tt.want)
+			if got := isBackendAsyncMessage(tt.input); got != tt.want {
+				t.Errorf("isBackendAsyncMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
