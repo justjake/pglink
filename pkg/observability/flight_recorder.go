@@ -16,40 +16,98 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/justjake/pglink/pkg/config"
 )
+
+// FlightRecorderMetrics holds Prometheus metrics for the flight recorder.
+type FlightRecorderMetrics struct {
+	SnapshotsTotal   *prometheus.CounterVec
+	SnapshotDuration prometheus.Histogram
+	BufferBytes      prometheus.Gauge
+	Running          prometheus.Gauge
+}
+
+// NewFlightRecorderMetrics creates and registers flight recorder metrics.
+func NewFlightRecorderMetrics() *FlightRecorderMetrics {
+	m := &FlightRecorderMetrics{
+		SnapshotsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "pglink",
+				Subsystem: "flight_recorder",
+				Name:      "snapshots_total",
+				Help:      "Total number of trace snapshots captured",
+			},
+			[]string{"reason"},
+		),
+		SnapshotDuration: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "pglink",
+				Subsystem: "flight_recorder",
+				Name:      "snapshot_duration_seconds",
+				Help:      "Duration of snapshot capture operations",
+				Buckets:   []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+			},
+		),
+		BufferBytes: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Namespace: "pglink",
+				Subsystem: "flight_recorder",
+				Name:      "buffer_max_bytes",
+				Help:      "Maximum configured buffer size in bytes",
+			},
+		),
+		Running: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Namespace: "pglink",
+				Subsystem: "flight_recorder",
+				Name:      "running",
+				Help:      "Whether the flight recorder is currently running (1=running, 0=stopped)",
+			},
+		),
+	}
+
+	prometheus.MustRegister(m.SnapshotsTotal)
+	prometheus.MustRegister(m.SnapshotDuration)
+	prometheus.MustRegister(m.BufferBytes)
+	prometheus.MustRegister(m.Running)
+
+	return m
+}
 
 // FlightRecorderService manages the runtime/trace flight recorder.
 // It provides continuous execution tracing with on-demand snapshot capture.
 type FlightRecorderService struct {
-	fr     *trace.FlightRecorder
-	config *config.FlightRecorderConfig
-	logger *slog.Logger
+	fr      *trace.FlightRecorder
+	config  *config.FlightRecorderConfig
+	logger  *slog.Logger
+	metrics *FlightRecorderMetrics
 
 	mu            sync.Mutex
 	lastSnapshot  time.Time
 	snapshotCount int64
 
-	// Channel to signal shutdown to signal handler goroutine
+	// Channel to signal shutdown to goroutines
 	done chan struct{}
 }
 
 // FlightRecorderStatus represents the current status of the flight recorder.
 type FlightRecorderStatus struct {
-	Enabled         bool      `json:"enabled"`
-	Running         bool      `json:"running"`
-	OutputDir       string    `json:"output_dir"`
-	MinAge          string    `json:"min_age"`
-	MaxBytes        int64     `json:"max_bytes"`
-	LastSnapshot    time.Time `json:"last_snapshot,omitempty"`
-	SnapshotCount   int64     `json:"snapshot_count"`
-	TriggerCooldown string    `json:"trigger_cooldown"`
+	Running          bool      `json:"running"`
+	OutputDir        string    `json:"output_dir"`
+	MinAge           string    `json:"min_age"`
+	MaxBytes         int64     `json:"max_bytes"`
+	PeriodicInterval string    `json:"periodic_interval,omitempty"`
+	LastSnapshot     time.Time `json:"last_snapshot,omitempty"`
+	SnapshotCount    int64     `json:"snapshot_count"`
+	TriggerCooldown  string    `json:"trigger_cooldown"`
 }
 
 // NewFlightRecorderService creates a new flight recorder service.
-// Returns nil if the config is nil or flight recording is not enabled.
-func NewFlightRecorderService(cfg *config.FlightRecorderConfig, logger *slog.Logger) (*FlightRecorderService, error) {
-	if cfg == nil || !cfg.Enabled {
+// Returns nil if the config is nil.
+func NewFlightRecorderService(cfg *config.FlightRecorderConfig, logger *slog.Logger, metrics *FlightRecorderMetrics) (*FlightRecorderService, error) {
+	if cfg == nil {
 		return nil, nil
 	}
 
@@ -58,28 +116,77 @@ func NewFlightRecorderService(cfg *config.FlightRecorderConfig, logger *slog.Log
 		MaxBytes: uint64(cfg.GetMaxBytes()),
 	})
 
+	if metrics != nil {
+		metrics.BufferBytes.Set(float64(cfg.GetMaxBytes()))
+	}
+
 	return &FlightRecorderService{
-		fr:     fr,
-		config: cfg,
-		logger: logger,
-		done:   make(chan struct{}),
+		fr:      fr,
+		config:  cfg,
+		logger:  logger,
+		metrics: metrics,
+		done:    make(chan struct{}),
 	}, nil
 }
 
 // Start begins recording trace data.
-func (s *FlightRecorderService) Start() error {
+func (s *FlightRecorderService) Start(ctx context.Context) error {
 	if s == nil || s.fr == nil {
 		return nil
 	}
 	if err := s.fr.Start(); err != nil {
 		return fmt.Errorf("failed to start flight recorder: %w", err)
 	}
+
+	if s.metrics != nil {
+		s.metrics.Running.Set(1)
+	}
+
+	periodicInterval := s.config.GetPeriodicInterval()
 	s.logger.Info("flight recorder started",
 		"output_dir", s.config.OutputDir,
 		"min_age", s.config.GetMinAge(),
 		"max_bytes", s.config.GetMaxBytes(),
+		"periodic_interval", periodicInterval,
 	)
+
+	// Start periodic snapshot goroutine if configured
+	if periodicInterval > 0 {
+		go s.runPeriodicSnapshots(ctx, periodicInterval)
+	}
+
 	return nil
+}
+
+// runPeriodicSnapshots captures snapshots at regular intervals.
+func (s *FlightRecorderService) runPeriodicSnapshots(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	s.logger.Info("flight recorder periodic snapshots enabled",
+		"interval", interval,
+	)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.done:
+			return
+		case <-ticker.C:
+			// Periodic snapshots bypass cooldown
+			path, err := s.TakeSnapshot("periodic")
+			if err != nil {
+				s.logger.Error("failed to take periodic snapshot",
+					"error", err,
+				)
+			} else {
+				s.logger.Info("periodic snapshot captured",
+					"path", path,
+				)
+			}
+		}
+	}
 }
 
 // Stop ends recording trace data.
@@ -89,6 +196,11 @@ func (s *FlightRecorderService) Stop() {
 	}
 	close(s.done)
 	s.fr.Stop()
+
+	if s.metrics != nil {
+		s.metrics.Running.Set(0)
+	}
+
 	s.logger.Info("flight recorder stopped",
 		"snapshot_count", atomic.LoadInt64(&s.snapshotCount),
 	)
@@ -106,6 +218,8 @@ func (s *FlightRecorderService) TakeSnapshot(reason string) (string, error) {
 	if s == nil || s.fr == nil {
 		return "", fmt.Errorf("flight recorder not enabled")
 	}
+
+	start := time.Now()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -135,9 +249,16 @@ func (s *FlightRecorderService) TakeSnapshot(reason string) (string, error) {
 	s.lastSnapshot = time.Now()
 	atomic.AddInt64(&s.snapshotCount, 1)
 
+	// Record metrics
+	if s.metrics != nil {
+		s.metrics.SnapshotsTotal.WithLabelValues(reason).Inc()
+		s.metrics.SnapshotDuration.Observe(time.Since(start).Seconds())
+	}
+
 	s.logger.Info("flight recorder snapshot captured",
 		"path", path,
 		"reason", reason,
+		"duration", time.Since(start),
 	)
 
 	return path, nil
@@ -178,6 +299,8 @@ func (s *FlightRecorderService) WriteSnapshotTo(w io.Writer) error {
 		return fmt.Errorf("flight recorder not enabled")
 	}
 
+	start := time.Now()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -187,6 +310,12 @@ func (s *FlightRecorderService) WriteSnapshotTo(w io.Writer) error {
 
 	s.lastSnapshot = time.Now()
 	atomic.AddInt64(&s.snapshotCount, 1)
+
+	// Record metrics
+	if s.metrics != nil {
+		s.metrics.SnapshotsTotal.WithLabelValues("http").Inc()
+		s.metrics.SnapshotDuration.Observe(time.Since(start).Seconds())
+	}
 
 	return nil
 }
@@ -282,22 +411,27 @@ func (s *FlightRecorderService) SetupSignalHandler(ctx context.Context) {
 // Status returns the current status of the flight recorder.
 func (s *FlightRecorderService) Status() FlightRecorderStatus {
 	if s == nil {
-		return FlightRecorderStatus{Enabled: false}
+		return FlightRecorderStatus{Running: false}
 	}
 
 	s.mu.Lock()
 	lastSnapshot := s.lastSnapshot
 	s.mu.Unlock()
 
+	var periodicInterval string
+	if pi := s.config.GetPeriodicInterval(); pi > 0 {
+		periodicInterval = pi.String()
+	}
+
 	return FlightRecorderStatus{
-		Enabled:         true,
-		Running:         s.fr.Enabled(),
-		OutputDir:       s.config.OutputDir,
-		MinAge:          s.config.GetMinAge().String(),
-		MaxBytes:        s.config.GetMaxBytes(),
-		LastSnapshot:    lastSnapshot,
-		SnapshotCount:   atomic.LoadInt64(&s.snapshotCount),
-		TriggerCooldown: s.config.GetTriggers().GetCooldown().String(),
+		Running:          s.fr.Enabled(),
+		OutputDir:        s.config.OutputDir,
+		MinAge:           s.config.GetMinAge().String(),
+		MaxBytes:         s.config.GetMaxBytes(),
+		PeriodicInterval: periodicInterval,
+		LastSnapshot:     lastSnapshot,
+		SnapshotCount:    atomic.LoadInt64(&s.snapshotCount),
+		TriggerCooldown:  s.config.GetTriggers().GetCooldown().String(),
 	}
 }
 

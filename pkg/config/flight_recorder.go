@@ -41,26 +41,32 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 // FlightRecorderConfig configures the runtime/trace flight recorder.
 // The flight recorder continuously records execution traces in a ring buffer,
 // allowing snapshots to be captured on demand for post-mortem analysis.
+//
+// The presence of this config enables the flight recorder. To disable,
+// remove the flight_recorder key from the config entirely.
 type FlightRecorderConfig struct {
-	// Enabled enables the flight recorder. Default: false.
-	Enabled bool `json:"enabled,omitzero"`
-
 	// MinAge is the minimum duration of trace data to retain in the ring buffer.
 	// The flight recorder will keep at least this much recent trace data available.
-	// Default: "10s".
+	// Default: "10s". For production debugging, set to 2x the expected problem duration.
 	MinAge Duration `json:"min_age,omitzero"`
 
 	// MaxBytes is the maximum memory (in bytes) for the trace buffer.
 	// This bounds memory usage regardless of MinAge setting.
+	// Expect 2-10 MB/s of trace data for busy services.
 	// Default: 10485760 (10 MiB).
 	MaxBytes int64 `json:"max_bytes,omitzero"`
 
 	// OutputDir is the directory where trace snapshots are written.
-	// Required if Enabled is true.
-	OutputDir string `json:"output_dir,omitzero"`
+	// Required.
+	OutputDir string `json:"output_dir"`
+
+	// PeriodicInterval enables periodic snapshot capture at the specified interval.
+	// Set to 0 or omit to disable periodic snapshots.
+	// Example: "5m" captures a snapshot every 5 minutes.
+	PeriodicInterval Duration `json:"periodic_interval,omitzero"`
 
 	// Triggers configures automatic snapshot triggers.
-	// If nil, only manual triggers (signal, HTTP) are available.
+	// If nil, only manual triggers (signal, HTTP) and periodic (if configured) are available.
 	Triggers *FlightRecorderTriggers `json:"triggers,omitzero"`
 }
 
@@ -133,15 +139,11 @@ func (t FlightRecorderTriggers) GetCooldown() time.Duration {
 
 // Validate validates the flight recorder configuration.
 func (c *FlightRecorderConfig) Validate() error {
-	if !c.Enabled {
-		return nil
-	}
-
 	var errs []error
 
-	// OutputDir is required when enabled
+	// OutputDir is required
 	if c.OutputDir == "" {
-		errs = append(errs, errors.New("output_dir is required when flight recorder is enabled"))
+		errs = append(errs, errors.New("output_dir is required"))
 	} else {
 		// Check if directory exists or can be created
 		if info, err := os.Stat(c.OutputDir); err != nil {
@@ -168,6 +170,11 @@ func (c *FlightRecorderConfig) Validate() error {
 		errs = append(errs, errors.New("max_bytes must be non-negative"))
 	}
 
+	// Validate PeriodicInterval
+	if c.PeriodicInterval < 0 {
+		errs = append(errs, errors.New("periodic_interval must be non-negative"))
+	}
+
 	// Validate triggers
 	if c.Triggers != nil {
 		if c.Triggers.OnSlowQueryMs < 0 {
@@ -185,14 +192,18 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
+// GetPeriodicInterval returns the periodic interval, or 0 if disabled.
+func (c *FlightRecorderConfig) GetPeriodicInterval() time.Duration {
+	return c.PeriodicInterval.Duration()
+}
+
 // ParseFlightRecorderDir creates a FlightRecorderConfig from a CLI directory argument.
-// This enables the flight recorder with default settings, saving snapshots to the given directory.
+// This creates a flight recorder config with default settings, saving snapshots to the given directory.
 func ParseFlightRecorderDir(dir string) *FlightRecorderConfig {
 	if dir == "" {
 		return nil
 	}
 	return &FlightRecorderConfig{
-		Enabled:   true,
 		OutputDir: dir,
 	}
 }

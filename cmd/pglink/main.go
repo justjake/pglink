@@ -302,15 +302,21 @@ func main() {
 
 	// Initialize flight recorder if configured
 	var flightRecorder *observability.FlightRecorderService
-	if cfg.FlightRecorder != nil && cfg.FlightRecorder.Enabled {
+	var flightRecorderMetrics *observability.FlightRecorderMetrics
+	if cfg.FlightRecorder != nil {
+		// Create metrics if Prometheus is enabled
+		if metrics != nil {
+			flightRecorderMetrics = observability.NewFlightRecorderMetrics()
+		}
+
 		var err error
-		flightRecorder, err = observability.NewFlightRecorderService(cfg.FlightRecorder, logger)
+		flightRecorder, err = observability.NewFlightRecorderService(cfg.FlightRecorder, logger, flightRecorderMetrics)
 		if err != nil {
 			logger.Error("failed to create flight recorder", "error", err)
 			os.Exit(1)
 		}
 		if flightRecorder != nil {
-			if err := flightRecorder.Start(); err != nil {
+			if err := flightRecorder.Start(ctx); err != nil {
 				logger.Error("failed to start flight recorder", "error", err)
 				os.Exit(1)
 			}

@@ -46,8 +46,6 @@ func (r *ChanReader[T]) State() uint32 {
 
 func (r *ChanReader[T]) Continue() {
 	if r.State() == ChanReaderNotReading {
-		// TODO: confusing semantics
-		// TODO: rethink this whole idea
 		panic("reader not reading")
 	}
 	r.continueCh <- true

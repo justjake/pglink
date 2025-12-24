@@ -168,9 +168,7 @@ func (s *Session) updateState() {
 }
 
 func (s *Session) readBackendMessage() (*pgwire.ServerMessage, error) {
-	s.logger.Debug("readBackendMessage: waiting for message")
 	msg, err := s.Conn.ReceiveMessage(s.acquiredContext)
-	s.logger.Debug("readBackendMessage: received", "msg", fmt.Sprintf("%T", msg), "err", err)
 	if err != nil {
 		return nil, nil
 	}

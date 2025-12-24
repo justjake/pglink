@@ -205,7 +205,7 @@ func makePglinkTarget(name string, maxConns, concurrency, gomaxprocs int, task f
 			return nil
 		},
 		ConnString: func(s *BenchmarkSuite) string {
-			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=prefer", s.pglinkPort)
+			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", s.pglinkPort)
 		},
 		Task: task,
 	}

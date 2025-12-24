@@ -33,33 +33,126 @@ type ServerMessage interface {
 }
 
 func ToClientMessage(msg pgproto3.FrontendMessage) (ClientMessage, bool) {
-	if m, ok := ToClientCancel(msg); ok {
-		return m, true
-	} else if m, ok := ToClientCopy(msg); ok {
-		return m, true
-	} else if m, ok := ToClientSimpleQuery(msg); ok {
-		return m, true
-	} else if m, ok := ToClientExtendedQuery(msg); ok {
-		return m, true
-	} else if m, ok := ToClientTerminateConn(msg); ok {
-		return m, true
-	} else if m, ok := ToClientStartup(msg); ok {
-		return m, true
+	switch m := msg.(type) {
+	// Cancel
+	case *pgproto3.CancelRequest:
+		return ClientCancelCancelRequest{m}, true
+	// Copy
+	case *pgproto3.CopyData:
+		return ClientCopyCopyData{m}, true
+	case *pgproto3.CopyDone:
+		return ClientCopyCopyDone{m}, true
+	case *pgproto3.CopyFail:
+		return ClientCopyCopyFail{m}, true
+	// SimpleQuery
+	case *pgproto3.Query:
+		return ClientSimpleQueryQuery{m}, true
+	case *pgproto3.FunctionCall:
+		return ClientSimpleQueryFunctionCall{m}, true
+	// ExtendedQuery
+	case *pgproto3.Parse:
+		return ClientExtendedQueryParse{m}, true
+	case *pgproto3.Bind:
+		return ClientExtendedQueryBind{m}, true
+	case *pgproto3.Execute:
+		return ClientExtendedQueryExecute{m}, true
+	case *pgproto3.Sync:
+		return ClientExtendedQuerySync{m}, true
+	case *pgproto3.Describe:
+		return ClientExtendedQueryDescribe{m}, true
+	case *pgproto3.Close:
+		return ClientExtendedQueryClose{m}, true
+	case *pgproto3.Flush:
+		return ClientExtendedQueryFlush{m}, true
+	// TerminateConn
+	case *pgproto3.Terminate:
+		return ClientTerminateConnTerminate{m}, true
+	// Startup
+	case *pgproto3.GSSEncRequest:
+		return ClientStartupGSSEncRequest{m}, true
+	case *pgproto3.GSSResponse:
+		return ClientStartupGSSResponse{m}, true
+	case *pgproto3.PasswordMessage:
+		return ClientStartupPasswordMessage{m}, true
+	case *pgproto3.SASLInitialResponse:
+		return ClientStartupSASLInitialResponse{m}, true
+	case *pgproto3.SASLResponse:
+		return ClientStartupSASLResponse{m}, true
+	case *pgproto3.SSLRequest:
+		return ClientStartupSSLRequest{m}, true
+	case *pgproto3.StartupMessage:
+		return ClientStartupStartupMessage{m}, true
 	}
 	return nil, false
 }
 
 func ToServerMessage(msg pgproto3.BackendMessage) (ServerMessage, bool) {
-	if m, ok := ToServerAsync(msg); ok {
-		return m, true
-	} else if m, ok := ToServerCopy(msg); ok {
-		return m, true
-	} else if m, ok := ToServerExtendedQuery(msg); ok {
-		return m, true
-	} else if m, ok := ToServerResponse(msg); ok {
-		return m, true
-	} else if m, ok := ToServerStartup(msg); ok {
-		return m, true
+	switch m := msg.(type) {
+	// Async
+	case *pgproto3.NoticeResponse:
+		return ServerAsyncNoticeResponse{m}, true
+	case *pgproto3.NotificationResponse:
+		return ServerAsyncNotificationResponse{m}, true
+	case *pgproto3.ParameterStatus:
+		return ServerAsyncParameterStatus{m}, true
+	// Copy
+	case *pgproto3.CopyInResponse:
+		return ServerCopyCopyInResponse{m}, true
+	case *pgproto3.CopyOutResponse:
+		return ServerCopyCopyOutResponse{m}, true
+	case *pgproto3.CopyBothResponse:
+		return ServerCopyCopyBothResponse{m}, true
+	case *pgproto3.CopyData:
+		return ServerCopyCopyData{m}, true
+	case *pgproto3.CopyDone:
+		return ServerCopyCopyDone{m}, true
+	// ExtendedQuery
+	case *pgproto3.ParseComplete:
+		return ServerExtendedQueryParseComplete{m}, true
+	case *pgproto3.BindComplete:
+		return ServerExtendedQueryBindComplete{m}, true
+	case *pgproto3.ParameterDescription:
+		return ServerExtendedQueryParameterDescription{m}, true
+	case *pgproto3.RowDescription:
+		return ServerExtendedQueryRowDescription{m}, true
+	case *pgproto3.NoData:
+		return ServerExtendedQueryNoData{m}, true
+	case *pgproto3.PortalSuspended:
+		return ServerExtendedQueryPortalSuspended{m}, true
+	case *pgproto3.CloseComplete:
+		return ServerExtendedQueryCloseComplete{m}, true
+	// Response
+	case *pgproto3.ReadyForQuery:
+		return ServerResponseReadyForQuery{m}, true
+	case *pgproto3.CommandComplete:
+		return ServerResponseCommandComplete{m}, true
+	case *pgproto3.DataRow:
+		return ServerResponseDataRow{m}, true
+	case *pgproto3.EmptyQueryResponse:
+		return ServerResponseEmptyQueryResponse{m}, true
+	case *pgproto3.ErrorResponse:
+		return ServerResponseErrorResponse{m}, true
+	case *pgproto3.FunctionCallResponse:
+		return ServerResponseFunctionCallResponse{m}, true
+	// Startup
+	case *pgproto3.AuthenticationCleartextPassword:
+		return ServerStartupAuthenticationCleartextPassword{m}, true
+	case *pgproto3.AuthenticationGSS:
+		return ServerStartupAuthenticationGSS{m}, true
+	case *pgproto3.AuthenticationGSSContinue:
+		return ServerStartupAuthenticationGSSContinue{m}, true
+	case *pgproto3.AuthenticationMD5Password:
+		return ServerStartupAuthenticationMD5Password{m}, true
+	case *pgproto3.AuthenticationOk:
+		return ServerStartupAuthenticationOk{m}, true
+	case *pgproto3.AuthenticationSASL:
+		return ServerStartupAuthenticationSASL{m}, true
+	case *pgproto3.AuthenticationSASLContinue:
+		return ServerStartupAuthenticationSASLContinue{m}, true
+	case *pgproto3.AuthenticationSASLFinal:
+		return ServerStartupAuthenticationSASLFinal{m}, true
+	case *pgproto3.BackendKeyData:
+		return ServerStartupBackendKeyData{m}, true
 	}
 	return nil, false
 }

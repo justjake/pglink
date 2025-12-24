@@ -112,7 +112,7 @@ func NewHarnessForMain() *Harness {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: slog.LevelInfo, // Use INFO to avoid pgproto3 tracing overhead
 	}))
 
 	return &Harness{

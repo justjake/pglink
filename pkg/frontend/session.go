@@ -97,14 +97,11 @@ type Session struct {
 
 // Select over reading from frontend, reading from backend, or receiving a context cancellation.
 func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
-	s.logger.Debug("RecvFrontend: freeing lastRecv", "lastRecv", fmt.Sprintf("%T", s.lastRecv))
 	s.freeLastRecvAndContinueSender()
-	s.logger.Debug("RecvFrontend: waiting for frontend message")
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
 	case msg := <-s.frontend.Reader().ReadingChan():
-		s.logger.Debug("received (frontend only): from frontend", "msg", fmt.Sprintf("%T", msg.Value))
 		s.lastRecv = msg.Value
 		s.state.UpdateForFrontentMessage(msg.Value.Client())
 		s.state.ProcessFlows(msg.Value)
@@ -114,19 +111,16 @@ func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
 
 func (s *Session) RecvAny() (pgwire.Message, error) {
 	s.freeLastRecvAndContinueSender()
-	s.logger.Debug("RecvAny: waiting")
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
 	case msg := <-s.frontend.Reader().ReadingChan():
 		s.lastRecv = msg.Value
-		s.logger.Debug("receive: from frontend", "msg", fmt.Sprintf("%T", msg.Value))
 		s.state.UpdateForFrontentMessage(msg.Value.Client())
 		s.state.ProcessFlows(msg.Value)
 		return msg.Value, msg.Error
 	case msg := <-s.backend.ReadingChan():
 		s.lastRecv = msg.Value
-		s.logger.Debug("RecvAny: from backend", "msg", fmt.Sprintf("%T", msg.Value))
 		// We never want to rewrite a server message, since they never contain
 		// information like portal or statement names.
 		s.state.UpdateForServerMessage(msg.Value)
@@ -337,7 +331,6 @@ func (s *Session) Run() {
 			s.sendError(pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.ConnectionException, "error receiving client message", err))
 			return
 		}
-		s.logger.Debug("recv client message", "type", fmt.Sprintf("%T", msg))
 
 		if transitionToBackend, err := idleClientState.Handle(msg); err != nil || !transitionToBackend {
 			if err != nil {
@@ -503,9 +496,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 
 	var msg pgwire.Message = firstMsg
 	for {
-		s.logger.Debug("runWithBackend: handling message", "msg", fmt.Sprintf("%T", msg))
 		continueWithBackend, err := backendAcquiredState.Handle(msg)
-		s.logger.Debug("runWithBackend: handler returned", "continueWithBackend", continueWithBackend, "err", err)
 
 		// Ensure we've sent any pending messages
 		if flushErr := s.flush(); flushErr != nil {
@@ -529,16 +520,13 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 }
 
 func (s *Session) runSimpleQueryWithBackend(msg pgwire.ClientSimpleQuery) (bool, error) {
-	s.logger.Debug("runSimpleQueryWithBackend: sending to backend")
 	if err := s.backend.Send(msg.Client()); err != nil {
 		return false, err
 	}
-	s.logger.Debug("runSimpleQueryWithBackend: sent")
 	return true, nil
 }
 
 func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (bool, error) {
-	s.logger.Debug("runExtendedQueryWithBackend: start", "msgType", fmt.Sprintf("%T", msg))
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
 		Bind: func(msg pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
 			return &pgproto3.Bind{
@@ -587,7 +575,6 @@ func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (b
 		return false, err
 	}
 
-	s.logger.Debug("runExtendedQueryWithBackend: sending to backend", "msg", fmt.Sprintf("%T", rewritten))
 	if err := s.backend.Send(rewritten); err != nil {
 		return false, err
 	}
