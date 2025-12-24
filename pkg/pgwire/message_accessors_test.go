@@ -26,9 +26,9 @@ func TestReadyForQuery_TxStatusByte(t *testing.T) {
 			}
 
 			// Test with raw bytes
-			raw := ServerResponseReadyForQuery{LazyServer[*pgproto3.ReadyForQuery]{
+			raw := ServerResponseReadyForQuery(LazyServer[*pgproto3.ReadyForQuery]{
 				source: RawBody{Type: 'Z', Body: []byte{tt.txStatus}},
-			}}
+			})
 			if got := raw.TxStatusByte(); got != tt.txStatus {
 				t.Errorf("TxStatusByte() from raw = %c, want %c", got, tt.txStatus)
 			}
@@ -61,9 +61,9 @@ func TestDataRow_ColumnCount(t *testing.T) {
 			// Test with raw bytes
 			body := make([]byte, 2)
 			binary.BigEndian.PutUint16(body, uint16(tt.count))
-			raw := ServerResponseDataRow{LazyServer[*pgproto3.DataRow]{
+			raw := ServerResponseDataRow(LazyServer[*pgproto3.DataRow]{
 				source: RawBody{Type: 'D', Body: body},
-			}}
+			})
 			if got := raw.ColumnCount(); got != tt.count {
 				t.Errorf("ColumnCount() from raw = %d, want %d", got, tt.count)
 			}
@@ -73,9 +73,9 @@ func TestDataRow_ColumnCount(t *testing.T) {
 
 func TestDataRow_BodySize(t *testing.T) {
 	body := []byte{0, 2, 0, 0, 0, 4, 't', 'e', 's', 't', 0, 0, 0, 3, 'f', 'o', 'o'}
-	raw := ServerResponseDataRow{LazyServer[*pgproto3.DataRow]{
+	raw := ServerResponseDataRow(LazyServer[*pgproto3.DataRow]{
 		source: RawBody{Type: 'D', Body: body},
-	}}
+	})
 	if got := raw.BodySize(); got != len(body) {
 		t.Errorf("BodySize() = %d, want %d", got, len(body))
 	}
@@ -91,9 +91,9 @@ func TestCopyData_DataBytes(t *testing.T) {
 	}
 
 	// Test server CopyData with raw
-	serverRaw := ServerCopyCopyData{LazyServer[*pgproto3.CopyData]{
+	serverRaw := ServerCopyCopyData(LazyServer[*pgproto3.CopyData]{
 		source: RawBody{Type: 'd', Body: data},
-	}}
+	})
 	if got := serverRaw.DataBytes(); string(got) != string(data) {
 		t.Errorf("ServerCopyCopyData.DataBytes() from raw = %q, want %q", got, data)
 	}
@@ -105,9 +105,9 @@ func TestCopyData_DataBytes(t *testing.T) {
 	}
 
 	// Test client CopyData with raw
-	clientRaw := ClientCopyCopyData{LazyClient[*pgproto3.CopyData]{
+	clientRaw := ClientCopyCopyData(LazyClient[*pgproto3.CopyData]{
 		source: RawBody{Type: 'd', Body: data},
-	}}
+	})
 	if got := clientRaw.DataBytes(); string(got) != string(data) {
 		t.Errorf("ClientCopyCopyData.DataBytes() from raw = %q, want %q", got, data)
 	}
@@ -115,16 +115,16 @@ func TestCopyData_DataBytes(t *testing.T) {
 
 func TestCopyData_DataSize(t *testing.T) {
 	data := []byte("test data for copy")
-	server := ServerCopyCopyData{LazyServer[*pgproto3.CopyData]{
+	server := ServerCopyCopyData(LazyServer[*pgproto3.CopyData]{
 		source: RawBody{Type: 'd', Body: data},
-	}}
+	})
 	if got := server.DataSize(); got != len(data) {
 		t.Errorf("DataSize() = %d, want %d", got, len(data))
 	}
 
-	client := ClientCopyCopyData{LazyClient[*pgproto3.CopyData]{
+	client := ClientCopyCopyData(LazyClient[*pgproto3.CopyData]{
 		source: RawBody{Type: 'd', Body: data},
-	}}
+	})
 	if got := client.DataSize(); got != len(data) {
 		t.Errorf("DataSize() = %d, want %d", got, len(data))
 	}
@@ -141,9 +141,9 @@ func TestCommandComplete_CommandTagBytes(t *testing.T) {
 
 	// Test with raw (includes null terminator in wire format)
 	rawBody := append(tag, 0)
-	raw := ServerResponseCommandComplete{LazyServer[*pgproto3.CommandComplete]{
+	raw := ServerResponseCommandComplete(LazyServer[*pgproto3.CommandComplete]{
 		source: RawBody{Type: 'C', Body: rawBody},
-	}}
+	})
 	if got := raw.CommandTagBytes(); string(got) != string(rawBody) {
 		t.Errorf("CommandTagBytes() from raw = %q, want %q", got, rawBody)
 	}
@@ -168,9 +168,9 @@ func TestCopyInResponse_Format(t *testing.T) {
 
 			// Test with raw (format byte + column count + column formats)
 			rawBody := []byte{tt.format, 0, 0} // format + 0 columns
-			raw := ServerCopyCopyInResponse{LazyServer[*pgproto3.CopyInResponse]{
+			raw := ServerCopyCopyInResponse(LazyServer[*pgproto3.CopyInResponse]{
 				source: RawBody{Type: 'G', Body: rawBody},
-			}}
+			})
 			if got := raw.Format(); got != tt.format {
 				t.Errorf("Format() from raw = %d, want %d", got, tt.format)
 			}
@@ -186,9 +186,9 @@ func TestCopyOutResponse_Format(t *testing.T) {
 	}
 
 	// Test with raw
-	raw := ServerCopyCopyOutResponse{LazyServer[*pgproto3.CopyOutResponse]{
+	raw := ServerCopyCopyOutResponse(LazyServer[*pgproto3.CopyOutResponse]{
 		source: RawBody{Type: 'H', Body: []byte{1, 0, 0}},
-	}}
+	})
 	if got := raw.Format(); got != 1 {
 		t.Errorf("Format() from raw = %d, want 1", got)
 	}
@@ -206,9 +206,9 @@ func TestRowDescription_FieldCount(t *testing.T) {
 	// Test with raw
 	body := make([]byte, 2)
 	binary.BigEndian.PutUint16(body, 5)
-	raw := ServerExtendedQueryRowDescription{LazyServer[*pgproto3.RowDescription]{
+	raw := ServerExtendedQueryRowDescription(LazyServer[*pgproto3.RowDescription]{
 		source: RawBody{Type: 'T', Body: body},
-	}}
+	})
 	if got := raw.FieldCount(); got != 5 {
 		t.Errorf("FieldCount() from raw = %d, want 5", got)
 	}
@@ -226,9 +226,9 @@ func TestParameterDescription_ParameterCount(t *testing.T) {
 	// Test with raw
 	body := make([]byte, 2)
 	binary.BigEndian.PutUint16(body, 10)
-	raw := ServerExtendedQueryParameterDescription{LazyServer[*pgproto3.ParameterDescription]{
+	raw := ServerExtendedQueryParameterDescription(LazyServer[*pgproto3.ParameterDescription]{
 		source: RawBody{Type: 't', Body: body},
-	}}
+	})
 	if got := raw.ParameterCount(); got != 10 {
 		t.Errorf("ParameterCount() from raw = %d, want 10", got)
 	}
@@ -245,9 +245,9 @@ func TestQuery_QueryBytes(t *testing.T) {
 
 	// Test with raw (null-terminated)
 	rawBody := append([]byte(query), 0)
-	raw := ClientSimpleQueryQuery{LazyClient[*pgproto3.Query]{
+	raw := ClientSimpleQueryQuery(LazyClient[*pgproto3.Query]{
 		source: RawBody{Type: 'Q', Body: rawBody},
-	}}
+	})
 	if got := raw.QueryBytes(); string(got) != string(rawBody) {
 		t.Errorf("QueryBytes() from raw = %q, want %q", got, rawBody)
 	}
@@ -264,9 +264,9 @@ func TestParse_StatementNameBytes(t *testing.T) {
 	rawBody := append([]byte("my_stmt"), 0)
 	rawBody = append(rawBody, []byte("SELECT $1")...)
 	rawBody = append(rawBody, 0, 0, 0) // null + 0 params
-	raw := ClientExtendedQueryParse{LazyClient[*pgproto3.Parse]{
+	raw := ClientExtendedQueryParse(LazyClient[*pgproto3.Parse]{
 		source: RawBody{Type: 'P', Body: rawBody},
-	}}
+	})
 	if got := string(raw.StatementNameBytes()); got != "my_stmt" {
 		t.Errorf("StatementNameBytes() from raw = %q, want %q", got, "my_stmt")
 	}
@@ -287,9 +287,9 @@ func TestBind_PortalNameBytes(t *testing.T) {
 	rawBody = append(rawBody, []byte("s1")...)
 	rawBody = append(rawBody, 0)
 	rawBody = append(rawBody, 0, 0, 0, 0, 0, 0) // format codes, params, result codes
-	raw := ClientExtendedQueryBind{LazyClient[*pgproto3.Bind]{
+	raw := ClientExtendedQueryBind(LazyClient[*pgproto3.Bind]{
 		source: RawBody{Type: 'B', Body: rawBody},
-	}}
+	})
 	if got := string(raw.PortalNameBytes()); got != "p1" {
 		t.Errorf("PortalNameBytes() from raw = %q, want %q", got, "p1")
 	}
@@ -310,9 +310,9 @@ func TestBind_StatementNameBytes(t *testing.T) {
 	rawBody = append(rawBody, []byte("prepared_statement")...)
 	rawBody = append(rawBody, 0)
 	rawBody = append(rawBody, 0, 0, 0, 0, 0, 0) // rest of bind message
-	raw := ClientExtendedQueryBind{LazyClient[*pgproto3.Bind]{
+	raw := ClientExtendedQueryBind(LazyClient[*pgproto3.Bind]{
 		source: RawBody{Type: 'B', Body: rawBody},
-	}}
+	})
 	if got := string(raw.StatementNameBytes()); got != "prepared_statement" {
 		t.Errorf("StatementNameBytes() from raw = %q, want %q", got, "prepared_statement")
 	}
@@ -330,9 +330,9 @@ func TestExecute_PortalNameBytes(t *testing.T) {
 	maxRows := make([]byte, 4)
 	binary.BigEndian.PutUint32(maxRows, 50)
 	rawBody = append(rawBody, maxRows...)
-	raw := ClientExtendedQueryExecute{LazyClient[*pgproto3.Execute]{
+	raw := ClientExtendedQueryExecute(LazyClient[*pgproto3.Execute]{
 		source: RawBody{Type: 'E', Body: rawBody},
-	}}
+	})
 	if got := string(raw.PortalNameBytes()); got != "test_portal" {
 		t.Errorf("PortalNameBytes() from raw = %q, want %q", got, "test_portal")
 	}
@@ -350,9 +350,9 @@ func TestExecute_MaxRows(t *testing.T) {
 	maxRows := make([]byte, 4)
 	binary.BigEndian.PutUint32(maxRows, 500)
 	rawBody = append(rawBody, maxRows...)
-	raw := ClientExtendedQueryExecute{LazyClient[*pgproto3.Execute]{
+	raw := ClientExtendedQueryExecute(LazyClient[*pgproto3.Execute]{
 		source: RawBody{Type: 'E', Body: rawBody},
-	}}
+	})
 	if got := raw.MaxRows(); got != 500 {
 		t.Errorf("MaxRows() from raw = %d, want 500", got)
 	}
@@ -374,9 +374,9 @@ func TestDescribe_ObjectType(t *testing.T) {
 	// Test with raw
 	rawBody := append([]byte{'S'}, []byte("my_stmt")...)
 	rawBody = append(rawBody, 0)
-	raw := ClientExtendedQueryDescribe{LazyClient[*pgproto3.Describe]{
+	raw := ClientExtendedQueryDescribe(LazyClient[*pgproto3.Describe]{
 		source: RawBody{Type: 'D', Body: rawBody},
-	}}
+	})
 	if got := raw.ObjectType(); got != 'S' {
 		t.Errorf("ObjectType() from raw = %c, want S", got)
 	}
@@ -392,9 +392,9 @@ func TestDescribe_ObjectNameBytes(t *testing.T) {
 	// Test with raw: type(1) + name + null
 	rawBody := append([]byte{'P'}, []byte("my_portal")...)
 	rawBody = append(rawBody, 0)
-	raw := ClientExtendedQueryDescribe{LazyClient[*pgproto3.Describe]{
+	raw := ClientExtendedQueryDescribe(LazyClient[*pgproto3.Describe]{
 		source: RawBody{Type: 'D', Body: rawBody},
-	}}
+	})
 	if got := string(raw.ObjectNameBytes()); got != "my_portal" {
 		t.Errorf("ObjectNameBytes() from raw = %q, want %q", got, "my_portal")
 	}
@@ -410,9 +410,9 @@ func TestClose_ObjectType(t *testing.T) {
 	// Test with raw
 	rawBody := append([]byte{'P'}, []byte("portal")...)
 	rawBody = append(rawBody, 0)
-	raw := ClientExtendedQueryClose{LazyClient[*pgproto3.Close]{
+	raw := ClientExtendedQueryClose(LazyClient[*pgproto3.Close]{
 		source: RawBody{Type: 'C', Body: rawBody},
-	}}
+	})
 	if got := raw.ObjectType(); got != 'P' {
 		t.Errorf("ObjectType() from raw = %c, want P", got)
 	}
@@ -428,9 +428,9 @@ func TestClose_ObjectNameBytes(t *testing.T) {
 	// Test with raw
 	rawBody := append([]byte{'S'}, []byte("stmt_to_close")...)
 	rawBody = append(rawBody, 0)
-	raw := ClientExtendedQueryClose{LazyClient[*pgproto3.Close]{
+	raw := ClientExtendedQueryClose(LazyClient[*pgproto3.Close]{
 		source: RawBody{Type: 'C', Body: rawBody},
-	}}
+	})
 	if got := string(raw.ObjectNameBytes()); got != "stmt_to_close" {
 		t.Errorf("ObjectNameBytes() from raw = %q, want %q", got, "stmt_to_close")
 	}
