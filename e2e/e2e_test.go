@@ -24,6 +24,12 @@ func testTimeout(t *testing.T) (context.Context, context.CancelFunc) {
 
 // TestMain sets up and tears down the test harness for all e2e tests.
 // This ensures docker-compose and pglink are running before any tests execute.
+//
+// The session algorithm can be selected via the PGLINK_ALGO environment variable.
+// Valid values are "default" (channel-based) and "ring" (experimental ring buffer).
+// To run tests for all algos:
+//
+//	for algo in default ring; do PGLINK_ALGO=$algo go test ./e2e/... || exit 1; done
 var testHarness *Harness
 
 // maxTestDuration is the maximum time allowed for all tests to complete.
@@ -42,6 +48,11 @@ func TestMain(m *testing.M) {
 
 	// Create harness with a nil testing.T since we're in TestMain
 	testHarness = NewHarnessForMain()
+
+	// Check for algo override via environment variable
+	if algo := os.Getenv("PGLINK_ALGO"); algo != "" {
+		testHarness.Algo = algo
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	testHarness.Start(ctx)

@@ -148,6 +148,7 @@ func printFullDocs() {
 func main() {
 	configPath := flag.String("config", "", "path to pglink.json config file")
 	listenAddr := flag.String("listen-addr", "", "listen address (overrides config file, e.g. :16432, 0.0.0.0:5432)")
+	algo := flag.String("algo", "", "session algorithm: default, ring (experimental)")
 	prometheusListen := flag.String("prometheus-listen", "", "enable Prometheus metrics (format: :9090 or :9090/metrics)")
 	flightRecorderDir := flag.String("flight-recorder", "", "enable flight recorder, save snapshots to this directory")
 	flightRecorderMinAge := flag.String("flight-recorder-min-age", "", "flight recorder min age (e.g. 10s, 1m)")
@@ -191,6 +192,12 @@ func main() {
 	// Apply CLI overrides
 	if *listenAddr != "" {
 		cfg.SetListenAddr(*listenAddr)
+	}
+
+	// Apply algo CLI override
+	if *algo != "" {
+		cfg.SetAlgo(*algo)
+		logger.Info("using session algorithm", "algo", *algo)
 	}
 
 	// Apply Prometheus CLI override

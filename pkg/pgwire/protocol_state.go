@@ -84,7 +84,11 @@ type NamedObjectState[T any] struct {
 }
 
 func (s *ProtocolState) InTxOrQuery() bool {
-	return s.TxStatus != TxIdle || s.Statements.PendingExecute != nil || s.Statements.Executing != nil || s.Portals.PendingExecute != nil && s.Portals.Executing != nil
+	return s.TxStatus != TxIdle ||
+		s.Statements.PendingExecute != nil ||
+		s.Statements.Executing != nil ||
+		s.Portals.PendingExecute != nil ||
+		s.Portals.Executing != nil
 }
 
 func (s *ProtocolState) UpdateForFrontentMessage(msg pgproto3.FrontendMessage) {

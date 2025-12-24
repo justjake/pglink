@@ -92,6 +92,11 @@ type Config struct {
 	// filePath is the path to the config file on disk (not serialized).
 	// Used for resolving relative paths in the config.
 	filePath string
+
+	// Algo is the session algorithm to use (not serialized, set via CLI flag).
+	// Valid values: "default", "ring"
+	// This is an internal field for testing/benchmarking different implementations.
+	Algo string `json:"-"`
 }
 
 // GetMaxClientConnections returns the maximum client connections setting,
@@ -130,6 +135,32 @@ func (c *Config) GetListenAddr() ListenAddr {
 // SetListenAddr sets the listen address, overriding any configured value.
 func (c *Config) SetListenAddr(addr string) {
 	c.Listen = ListenAddr(normalizeListenAddr(addr))
+}
+
+// SessionAlgo constants for the Algo field.
+const (
+	// SessionAlgoDefault uses the standard ChanReader-based session.
+	SessionAlgoDefault = "default"
+	// SessionAlgoRing uses the RingBuffer-based session for lower latency.
+	SessionAlgoRing = "ring"
+)
+
+// AllSessionAlgos returns all valid session algorithm names.
+func AllSessionAlgos() []string {
+	return []string{SessionAlgoDefault, SessionAlgoRing}
+}
+
+// GetAlgo returns the session algorithm, defaulting to "default".
+func (c *Config) GetAlgo() string {
+	if c.Algo == "" {
+		return SessionAlgoDefault
+	}
+	return c.Algo
+}
+
+// SetAlgo sets the session algorithm.
+func (c *Config) SetAlgo(algo string) {
+	c.Algo = algo
 }
 
 // FilePath returns the path to the config file on disk.

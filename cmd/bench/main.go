@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log"
 	"math/rand"
@@ -19,7 +20,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,8 +33,19 @@ import (
 	"github.com/justjake/pglink/pkg/config/pgbouncer"
 )
 
-// BenchmarkCase defines a single benchmark case (e.g., "SELECT 1", "COPY OUT")
+// TaskResult is returned by each task execution to report work done.
+type TaskResult struct {
+	// Queries is the number of queries executed in this task.
+	Queries int
+	// Bytes is the number of bytes transferred (for COPY benchmarks).
+	Bytes int64
+}
+
+// BenchmarkCase defines a single benchmark case (e.g., "Mixed Workload", "COPY OUT")
 type BenchmarkCase struct {
+	// Name is a short identifier for this benchmark
+	Name string
+
 	// Title is the markdown title for this benchmark section
 	Title string
 
@@ -46,14 +57,11 @@ type BenchmarkCase struct {
 
 	// TearDown runs once after all targets for this case
 	TearDown func(ctx context.Context, s *BenchmarkSuite) error
-
-	// Targets are the different configurations to benchmark
-	Targets []*BenchmarkTarget
 }
 
 // BenchmarkTarget defines a single target configuration (becomes a row in the table)
 type BenchmarkTarget struct {
-	// Name is the target name shown in the table (e.g., "direct", "pglink (GOMAXPROCS=4)")
+	// Name is the target name shown in the table (e.g., "direct", "pgbouncer", "pglink")
 	Name string
 
 	// SetUp runs before benchmarking this target
@@ -62,18 +70,12 @@ type BenchmarkTarget struct {
 	// TearDown runs after benchmarking this target
 	TearDown func(ctx context.Context, s *BenchmarkSuite) error
 
-	// Task runs a single iteration of the benchmark task
-	// It receives a connection pool (may be nil for non-pool benchmarks like psql)
-	Task func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error
+	// Task runs a single iteration of the benchmark task.
+	// Returns TaskResult with query count and bytes transferred.
+	Task func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error)
 
 	// ConnString returns the connection string for this target
 	ConnString func(s *BenchmarkSuite) string
-
-	// MaxConns is the max connections for the pool
-	MaxConns int
-
-	// Concurrency is the number of concurrent workers
-	Concurrency int
 }
 
 // BenchmarkResult holds results from a single benchmark run
@@ -82,12 +84,16 @@ type BenchmarkResult struct {
 	TargetName    string        `json:"target_name"`
 	MaxConns      int           `json:"max_conns"`
 	Concurrency   int           `json:"concurrency"`
+	TotalTasks    int64         `json:"total_tasks"`
 	TotalQueries  int64         `json:"total_queries"`
+	TotalBytes    int64         `json:"total_bytes"`
 	SuccessCount  int64         `json:"success_count"`
 	ErrorCount    int64         `json:"error_count"`
 	ErrorRate     float64       `json:"error_rate"`
 	Duration      time.Duration `json:"duration"`
 	QueriesPerSec float64       `json:"queries_per_sec"`
+	BytesPerSec   float64       `json:"bytes_per_sec"`
+	MBPerSec      float64       `json:"mb_per_sec"`
 	AvgLatencyUs  float64       `json:"avg_latency_us"`
 	MinLatencyUs  float64       `json:"min_latency_us"`
 	MaxLatencyUs  float64       `json:"max_latency_us"`
@@ -103,10 +109,16 @@ type BenchmarkResult struct {
 type RunConfig struct {
 	Duration       time.Duration
 	Warmup         time.Duration
-	MaxConns       []int
-	Concurrency    []int
-	Rounds         int // Number of rounds to run each target (mitigates ordering effects)
+	MaxConns       int
+	Concurrency    int
+	Rounds         int
 	FlightRecorder bool
+	FullTargets    bool // Include all target variants (TLS, session pooling, multiple GOMAXPROCS)
+	Seed           int64
+
+	// A/B comparison config (optional)
+	Compare          *CompareConfig // Comparison target config
+	CompareGomaxprocs int           // GOMAXPROCS for comparison target
 }
 
 // BenchmarkSuite manages the benchmark execution
@@ -115,34 +127,37 @@ type BenchmarkSuite struct {
 	projectDir string
 	outputDir  string
 	results    []BenchmarkResult
-
-	// Pre-generated COPY data for consistent benchmarks
-	copyData     []byte
-	copyDataFile string
+	targets    []*BenchmarkTarget
 
 	// Process management
 	pglinkCmd    *exec.Cmd
 	pgbouncerCmd *exec.Cmd
 
 	// Ports
-	directPort    int
-	pglinkPort    int
-	pgbouncerPort int
+	directPort       int
+	pglinkPort       int
+	pgbouncerPort    int
+	comparePort      int // Port for comparison pglink instance
 
 	// Current pglink config (set during target setup)
 	currentPglinkConfig *config.Config
 
 	// Flight recorder
-	pglinkTempDir string // Temp dir for pglink config (also contains traces)
-	lastTraceFile string // Path to last captured trace file
+	pglinkTempDir string
+	lastTraceFile string
 
-	// TLS cert/key paths (set when pglink starts with TLS enabled)
+	// TLS cert/key paths
 	tlsCertPath string
 	tlsKeyPath  string
-}
 
-// COPY benchmark constants
-const copyRowCount = 1000
+	// Random source for deterministic workload generation
+	rng *rand.Rand
+
+	// Comparison target info (populated during setup)
+	compareBinaryPath string
+	compareCommitHash string
+	compareLabel      string
+}
 
 // NewBenchmarkSuite creates a new benchmark suite
 func NewBenchmarkSuite(cfg RunConfig, projectDir, outputDir string) *BenchmarkSuite {
@@ -153,7 +168,20 @@ func NewBenchmarkSuite(cfg RunConfig, projectDir, outputDir string) *BenchmarkSu
 		directPort:    15432,
 		pglinkPort:    16432,
 		pgbouncerPort: 16433,
+		comparePort:   16434,
+		rng:           rand.New(rand.NewSource(cfg.Seed)),
 	}
+}
+
+// getCurrentCommit returns the short commit hash of HEAD
+func (s *BenchmarkSuite) getCurrentCommit() string {
+	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	cmd.Dir = s.projectDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // ============================================================================
@@ -161,148 +189,649 @@ func NewBenchmarkSuite(cfg RunConfig, projectDir, outputDir string) *BenchmarkSu
 // ============================================================================
 
 // makeDirectTarget creates a target for direct postgres connection
-func makeDirectTarget(name string, maxConns, concurrency int, task func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error) *BenchmarkTarget {
+func makeDirectTarget() *BenchmarkTarget {
 	return &BenchmarkTarget{
-		Name:        name,
-		MaxConns:    maxConns,
-		Concurrency: concurrency,
+		Name: "direct",
 		ConnString: func(s *BenchmarkSuite) string {
 			return fmt.Sprintf("postgres://app:app_password@localhost:%d/uno?sslmode=disable", s.directPort)
 		},
-		Task: task,
 	}
 }
 
-// pgbouncerOpts configures pgbouncer target behavior.
-type pgbouncerOpts struct {
-	poolMode pgbouncer.PoolMode
-	useTLS   bool
-}
-
-// makePgbouncerTarget creates a target for pgbouncer connection with options.
-func makePgbouncerTarget(name string, maxConns, concurrency int, opts pgbouncerOpts, task func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error) *BenchmarkTarget {
+// makePgbouncerTarget creates a target for pgbouncer (transaction pooling, no TLS)
+func makePgbouncerTarget() *BenchmarkTarget {
 	return &BenchmarkTarget{
-		Name:        name,
-		MaxConns:    maxConns,
-		Concurrency: concurrency,
+		Name: "pgbouncer",
 		SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
-			return s.startPgbouncerWithOpts(ctx, s.currentPglinkConfig, opts)
+			return s.startPgbouncerWithOpts(ctx, s.currentPglinkConfig,
+				pgbouncerOpts{poolMode: pgbouncer.PoolModeTransaction, useTLS: false})
 		},
 		TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
 			s.stopPgbouncer()
 			return nil
 		},
 		ConnString: func(s *BenchmarkSuite) string {
-			sslmode := "disable"
-			if opts.useTLS {
-				sslmode = "require"
-			}
-			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=%s", s.pgbouncerPort, sslmode)
+			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", s.pgbouncerPort)
 		},
-		Task: task,
 	}
 }
 
-// pglinkOpts configures pglink target behavior.
-type pglinkOpts struct {
-	gomaxprocs int
-	useTLS     bool
+// makePglinkTarget creates a target for pglink with specified GOMAXPROCS
+func makePglinkTarget(gomaxprocs int) *BenchmarkTarget {
+	return makePglinkTargetWithLabel(gomaxprocs, "")
 }
 
-// makePglinkTarget creates a target for pglink connection with options.
-func makePglinkTarget(name string, maxConns, concurrency int, opts pglinkOpts, task func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error) *BenchmarkTarget {
-	displayName := name
-	if opts.gomaxprocs > 0 {
-		displayName = fmt.Sprintf("%s (GOMAXPROCS=%d)", name, opts.gomaxprocs)
+// makePglinkTargetWithLabel creates a target for pglink with specified GOMAXPROCS and optional commit label
+func makePglinkTargetWithLabel(gomaxprocs int, commitLabel string) *BenchmarkTarget {
+	var name string
+	if commitLabel != "" {
+		name = fmt.Sprintf("pglink (current @ %s)", commitLabel)
+	} else if gomaxprocs > 0 {
+		name = fmt.Sprintf("pglink (GOMAXPROCS=%d)", gomaxprocs)
+	} else {
+		name = "pglink"
 	}
 	return &BenchmarkTarget{
-		Name:        displayName,
-		MaxConns:    maxConns,
-		Concurrency: concurrency,
+		Name: name,
 		SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
-			return s.startPglinkWithOpts(ctx, s.currentPglinkConfig, opts)
+			return s.startPglinkWithOpts(ctx, s.currentPglinkConfig,
+				pglinkOpts{gomaxprocs: gomaxprocs, useTLS: false})
 		},
 		TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
 			s.stopPglink()
 			return nil
 		},
 		ConnString: func(s *BenchmarkSuite) string {
-			sslmode := "disable"
-			if opts.useTLS {
-				sslmode = "require"
-			}
-			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=%s", s.pglinkPort, sslmode)
+			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", s.pglinkPort)
 		},
-		Task: task,
+	}
+}
+
+// Extended targets (used when -full-targets is set)
+
+func makePgbouncerTLSTarget() *BenchmarkTarget {
+	return &BenchmarkTarget{
+		Name: "pgbouncer (tls)",
+		SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
+			return s.startPgbouncerWithOpts(ctx, s.currentPglinkConfig,
+				pgbouncerOpts{poolMode: pgbouncer.PoolModeTransaction, useTLS: true})
+		},
+		TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
+			s.stopPgbouncer()
+			return nil
+		},
+		ConnString: func(s *BenchmarkSuite) string {
+			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=require", s.pgbouncerPort)
+		},
+	}
+}
+
+func makePgbouncerSessionTarget() *BenchmarkTarget {
+	return &BenchmarkTarget{
+		Name: "pgbouncer (session)",
+		SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
+			return s.startPgbouncerWithOpts(ctx, s.currentPglinkConfig,
+				pgbouncerOpts{poolMode: pgbouncer.PoolModeSession, useTLS: false})
+		},
+		TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
+			s.stopPgbouncer()
+			return nil
+		},
+		ConnString: func(s *BenchmarkSuite) string {
+			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", s.pgbouncerPort)
+		},
+	}
+}
+
+func makePglinkTLSTarget(gomaxprocs int) *BenchmarkTarget {
+	return &BenchmarkTarget{
+		Name: fmt.Sprintf("pglink (tls, GOMAXPROCS=%d)", gomaxprocs),
+		SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
+			return s.startPglinkWithOpts(ctx, s.currentPglinkConfig,
+				pglinkOpts{gomaxprocs: gomaxprocs, useTLS: true})
+		},
+		TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
+			s.stopPglink()
+			return nil
+		},
+		ConnString: func(s *BenchmarkSuite) string {
+			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=require", s.pglinkPort)
+		},
+	}
+}
+
+// buildTargets creates the target list based on configuration
+func (s *BenchmarkSuite) buildTargets() []*BenchmarkTarget {
+	var targets []*BenchmarkTarget
+
+	// Get current commit for labeling when comparison is enabled
+	currentCommit := ""
+	if s.compareBinaryPath != "" {
+		currentCommit = s.getCurrentCommit()
+	}
+
+	if s.runCfg.FullTargets {
+		targets = []*BenchmarkTarget{
+			makeDirectTarget(),
+			makePgbouncerTarget(),
+			makePgbouncerTLSTarget(),
+			makePgbouncerSessionTarget(),
+			makePglinkTargetWithLabel(4, currentCommit),
+			makePglinkTargetWithLabel(8, currentCommit),
+			makePglinkTargetWithLabel(16, currentCommit),
+			makePglinkTLSTarget(16),
+		}
+	} else {
+		// Default: minimal set
+		targets = []*BenchmarkTarget{
+			makeDirectTarget(),
+			makePgbouncerTarget(),
+			makePglinkTargetWithLabel(16, currentCommit),
+		}
+	}
+
+	// Add comparison target if configured
+	if s.compareBinaryPath != "" {
+		targets = append(targets, makePglinkCompareTarget(
+			s.compareBinaryPath,
+			s.comparePort,
+			s.runCfg.CompareGomaxprocs,
+			s.compareLabel,
+		))
+	}
+
+	return targets
+}
+
+// ============================================================================
+// A/B Comparison Targets
+// ============================================================================
+
+// CompareConfig describes a comparison target for A/B testing
+type CompareConfig struct {
+	// One of these must be set:
+	Ref        string // Git ref (branch, tag, commit) - auto-creates worktree
+	Worktree   string // Path to existing worktree
+	BinaryPath string // Path to pre-built binary
+
+	// Optional:
+	Label string // Custom label (default: derived from ref/path)
+}
+
+// WorktreeManager handles git worktree creation and cleanup
+type WorktreeManager struct {
+	projectDir  string
+	worktreeDir string   // out/worktrees
+	created     []string // Worktrees we created (for cleanup)
+}
+
+// NewWorktreeManager creates a new WorktreeManager
+func NewWorktreeManager(projectDir string) *WorktreeManager {
+	return &WorktreeManager{
+		projectDir:  projectDir,
+		worktreeDir: filepath.Join(projectDir, "out", "worktrees"),
+	}
+}
+
+// ResolveRef resolves a git ref to a full commit hash
+func (m *WorktreeManager) ResolveRef(ref string) (commitHash string, err error) {
+	cmd := exec.Command("git", "rev-parse", ref)
+	cmd.Dir = m.projectDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve ref %q: %w", ref, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// ShortHash returns the first 7 characters of a commit hash
+func ShortHash(commitHash string) string {
+	if len(commitHash) > 7 {
+		return commitHash[:7]
+	}
+	return commitHash
+}
+
+// GetCurrentCommit returns the current HEAD commit hash
+func (m *WorktreeManager) GetCurrentCommit() (string, error) {
+	return m.ResolveRef("HEAD")
+}
+
+// CachedBinaryPath returns the path where a cached binary for a commit would be stored
+func (m *WorktreeManager) CachedBinaryPath(commitHash string) string {
+	return filepath.Join(m.projectDir, "out", fmt.Sprintf("pglink-%s", ShortHash(commitHash)))
+}
+
+// CreateWorktree creates a git worktree for the given ref and returns the path and commit hash
+func (m *WorktreeManager) CreateWorktree(ref string) (worktreePath string, commitHash string, err error) {
+	// Resolve ref to commit hash
+	commitHash, err = m.ResolveRef(ref)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Create worktree directory
+	if err := os.MkdirAll(m.worktreeDir, 0755); err != nil {
+		return "", "", fmt.Errorf("failed to create worktree dir: %w", err)
+	}
+
+	// Create unique worktree path
+	worktreePath = filepath.Join(m.worktreeDir, ShortHash(commitHash))
+
+	// Check if worktree already exists
+	if _, err := os.Stat(worktreePath); err == nil {
+		// Worktree exists, remove it first
+		removeCmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+		removeCmd.Dir = m.projectDir
+		_ = removeCmd.Run() // Ignore errors
+	}
+
+	// Create worktree
+	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath, commitHash)
+	cmd.Dir = m.projectDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("failed to create worktree: %w\n%s", err, out)
+	}
+
+	m.created = append(m.created, worktreePath)
+	return worktreePath, commitHash, nil
+}
+
+// BuildInWorktree builds pglink in the worktree and copies the binary to the output path
+func (m *WorktreeManager) BuildInWorktree(worktreePath string, outputBinary string) error {
+	// Check if bin/build exists
+	buildScript := filepath.Join(worktreePath, "bin", "build")
+	if _, err := os.Stat(buildScript); os.IsNotExist(err) {
+		return fmt.Errorf("bin/build not found in worktree at %s - use --compare-binary for old code", worktreePath)
+	}
+
+	// Run bin/build
+	cmd := exec.Command(buildScript)
+	cmd.Dir = worktreePath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build failed in worktree: %w\n%s", err, out)
+	}
+
+	// Copy the built binary to the output path
+	srcBinary := filepath.Join(worktreePath, "out", "pglink")
+	if _, err := os.Stat(srcBinary); os.IsNotExist(err) {
+		return fmt.Errorf("build did not produce out/pglink in worktree")
+	}
+
+	// Copy file
+	src, err := os.Open(srcBinary)
+	if err != nil {
+		return fmt.Errorf("failed to open built binary: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(outputBinary, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create output binary: %w", err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("failed to copy binary: %w", err)
+	}
+
+	return nil
+}
+
+// Cleanup removes all worktrees we created
+func (m *WorktreeManager) Cleanup() {
+	for _, path := range m.created {
+		cmd := exec.Command("git", "worktree", "remove", "--force", path)
+		cmd.Dir = m.projectDir
+		_ = cmd.Run() // Ignore errors
+	}
+	m.created = nil
+}
+
+// PrepareCompareTarget prepares a comparison target and returns the binary path, commit hash, and label
+func (s *BenchmarkSuite) PrepareCompareTarget(cfg CompareConfig) (binaryPath, commitHash, label string, err error) {
+	wm := NewWorktreeManager(s.projectDir)
+	defer wm.Cleanup()
+
+	switch {
+	case cfg.BinaryPath != "":
+		// Pre-built binary - just use it directly
+		if _, err := os.Stat(cfg.BinaryPath); os.IsNotExist(err) {
+			return "", "", "", fmt.Errorf("binary not found: %s", cfg.BinaryPath)
+		}
+		binaryPath = cfg.BinaryPath
+		label = cfg.Label
+		if label == "" {
+			label = filepath.Base(cfg.BinaryPath)
+		}
+		return binaryPath, "", label, nil
+
+	case cfg.Worktree != "":
+		// Existing worktree - build from it
+		if _, err := os.Stat(cfg.Worktree); os.IsNotExist(err) {
+			return "", "", "", fmt.Errorf("worktree not found: %s", cfg.Worktree)
+		}
+
+		// Get commit hash from worktree
+		cmd := exec.Command("git", "rev-parse", "HEAD")
+		cmd.Dir = cfg.Worktree
+		out, err := cmd.Output()
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to get commit from worktree: %w", err)
+		}
+		commitHash = strings.TrimSpace(string(out))
+
+		// Check if cached binary exists
+		cachedPath := wm.CachedBinaryPath(commitHash)
+		if _, err := os.Stat(cachedPath); err == nil {
+			log.Printf("Using cached binary for %s: %s", ShortHash(commitHash), cachedPath)
+			binaryPath = cachedPath
+		} else {
+			// Build from worktree
+			log.Printf("Building from worktree %s (commit %s)...", cfg.Worktree, ShortHash(commitHash))
+			if err := wm.BuildInWorktree(cfg.Worktree, cachedPath); err != nil {
+				return "", "", "", err
+			}
+			binaryPath = cachedPath
+		}
+
+		label = cfg.Label
+		if label == "" {
+			label = ShortHash(commitHash)
+		}
+		return binaryPath, commitHash, label, nil
+
+	case cfg.Ref != "":
+		// Git ref - resolve, create worktree, build
+		commitHash, err = wm.ResolveRef(cfg.Ref)
+		if err != nil {
+			return "", "", "", err
+		}
+
+		// Check if cached binary exists
+		cachedPath := wm.CachedBinaryPath(commitHash)
+		if _, err := os.Stat(cachedPath); err == nil {
+			log.Printf("Using cached binary for %s (%s): %s", cfg.Ref, ShortHash(commitHash), cachedPath)
+			binaryPath = cachedPath
+		} else {
+			// Create worktree and build
+			log.Printf("Creating worktree for %s (%s)...", cfg.Ref, ShortHash(commitHash))
+			worktreePath, _, err := wm.CreateWorktree(cfg.Ref)
+			if err != nil {
+				return "", "", "", err
+			}
+
+			log.Printf("Building in worktree...")
+			if err := wm.BuildInWorktree(worktreePath, cachedPath); err != nil {
+				return "", "", "", err
+			}
+			binaryPath = cachedPath
+		}
+
+		label = cfg.Label
+		if label == "" {
+			// Use ref name if it's a branch/tag, otherwise use short hash
+			if cfg.Ref != commitHash && !strings.HasPrefix(cfg.Ref, commitHash[:7]) {
+				label = fmt.Sprintf("%s @ %s", cfg.Ref, ShortHash(commitHash))
+			} else {
+				label = ShortHash(commitHash)
+			}
+		}
+		return binaryPath, commitHash, label, nil
+
+	default:
+		return "", "", "", fmt.Errorf("CompareConfig must have Ref, Worktree, or BinaryPath set")
+	}
+}
+
+// makePglinkCompareTarget creates a benchmark target for a comparison pglink binary
+func makePglinkCompareTarget(binaryPath string, port int, gomaxprocs int, label string) *BenchmarkTarget {
+	return &BenchmarkTarget{
+		Name: fmt.Sprintf("pglink (%s)", label),
+		SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
+			return s.startPglinkWithOpts(ctx, s.currentPglinkConfig,
+				pglinkOpts{
+					gomaxprocs: gomaxprocs,
+					useTLS:     false,
+					binaryPath: binaryPath,
+					port:       port,
+					label:      label,
+				})
+		},
+		TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
+			s.stopPglink()
+			return nil
+		},
+		ConnString: func(s *BenchmarkSuite) string {
+			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", port)
+		},
 	}
 }
 
 // ============================================================================
-// Task Implementations
+// Mixed Workload Generation
 // ============================================================================
 
-// taskSelect1 runs SELECT 1
-func taskSelect1(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
-	var result int
-	return pool.QueryRow(ctx, "SELECT 1").Scan(&result)
+// WorkloadQuery represents a single query in the mixed workload
+type WorkloadQuery struct {
+	SQL        string
+	IsWrite    bool
+	InTxn      bool // Part of a multi-statement transaction
+	TxnStart   bool // BEGIN
+	TxnEnd     bool // COMMIT
+	ExpectRows int  // Expected row count (0 for writes)
 }
 
-// taskSelectRows runs SELECT with 100 rows
-func taskSelectRows(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
-	rows, err := pool.Query(ctx, "SELECT generate_series(1, 100)")
-	if err != nil {
-		return err
+// generateMixedWorkload creates a deterministic workload with various query types.
+// Uses only SELECT queries with generated data to avoid needing DDL permissions.
+// Includes explicit transactions of varying lengths.
+func generateMixedWorkload(rng *rand.Rand, count int) []WorkloadQuery {
+	queries := make([]WorkloadQuery, 0, count)
+
+	i := 0
+	for i < count {
+		r := rng.Float64()
+
+		if r < 0.5 {
+			// 50%: Simple SELECT with varying row counts
+			rows := rng.Intn(100) + 1
+			queries = append(queries, WorkloadQuery{
+				SQL:        fmt.Sprintf("SELECT generate_series(1, %d)", rows),
+				IsWrite:    false,
+				ExpectRows: rows,
+			})
+			i++
+		} else if r < 0.7 {
+			// 20%: SELECT with computation (simulates more complex queries)
+			n := rng.Intn(1000) + 100
+			queries = append(queries, WorkloadQuery{
+				SQL:        fmt.Sprintf("SELECT i, i*2, i::text FROM generate_series(1, %d) AS i", n),
+				IsWrite:    false,
+				ExpectRows: n,
+			})
+			i++
+		} else if r < 0.85 {
+			// 15%: Read transaction (2-5 queries)
+			txnLen := rng.Intn(4) + 2
+			if i+txnLen+2 > count {
+				txnLen = count - i - 2
+				if txnLen < 1 {
+					continue
+				}
+			}
+			queries = append(queries, WorkloadQuery{SQL: "BEGIN", TxnStart: true, InTxn: true})
+			i++
+			for j := 0; j < txnLen; j++ {
+				rows := rng.Intn(50) + 1
+				queries = append(queries, WorkloadQuery{
+					SQL:        fmt.Sprintf("SELECT generate_series(1, %d)", rows),
+					IsWrite:    false,
+					InTxn:      true,
+					ExpectRows: rows,
+				})
+				i++
+			}
+			queries = append(queries, WorkloadQuery{SQL: "COMMIT", TxnEnd: true, InTxn: true})
+			i++
+		} else {
+			// 15%: Longer transaction with mixed query sizes
+			txnLen := rng.Intn(5) + 3
+			if i+txnLen+2 > count {
+				txnLen = count - i - 2
+				if txnLen < 1 {
+					continue
+				}
+			}
+			queries = append(queries, WorkloadQuery{SQL: "BEGIN", TxnStart: true, InTxn: true})
+			i++
+			for j := 0; j < txnLen; j++ {
+				rows := rng.Intn(200) + 10
+				queries = append(queries, WorkloadQuery{
+					SQL:        fmt.Sprintf("SELECT i, md5(i::text) FROM generate_series(1, %d) AS i", rows),
+					IsWrite:    false,
+					InTxn:      true,
+					ExpectRows: rows,
+				})
+				i++
+			}
+			queries = append(queries, WorkloadQuery{SQL: "COMMIT", TxnEnd: true, InTxn: true})
+			i++
+		}
 	}
-	defer rows.Close()
-	for rows.Next() {
-	}
-	return rows.Err()
+
+	return queries
 }
 
-// taskTransaction runs BEGIN/SELECT/COMMIT
-func taskTransaction(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
+// ============================================================================
+// Benchmark Cases
+// ============================================================================
+
+// COPY benchmark constants
+const (
+	copyRowCount      = 1000   // Rows per COPY operation
+	copyBatchSize     = 5      // Number of COPY operations per task (to amortize overhead)
+	mixedWorkloadSize = 100000 // Total queries in the mixed workload
+	mixedBatchSize    = 20     // Queries per task for mixed workload
+)
+
+// Pre-generated workload and COPY data (set during suite setup)
+var (
+	mixedWorkload []WorkloadQuery
+	copyData      []byte
+	copyDataSize  int64
+)
+
+func (s *BenchmarkSuite) buildBenchmarkCases() []*BenchmarkCase {
+	return []*BenchmarkCase{
+		{
+			Name:        "mixed",
+			Title:       "Mixed Workload",
+			Description: fmt.Sprintf("Various SELECT queries with transactions. %d queries/task, deterministic (seed=%d)", mixedBatchSize, s.runCfg.Seed),
+		},
+		{
+			Name:        "copy_out",
+			Title:       fmt.Sprintf("COPY OUT (%d rows × %d per task)", copyRowCount, copyBatchSize),
+			Description: "COPY TO STDOUT benchmark using generated data",
+		},
+		{
+			Name:        "copy_in",
+			Title:       fmt.Sprintf("COPY IN (%d rows × %d per task)", copyRowCount, copyBatchSize),
+			Description: "COPY FROM STDIN benchmark using temp tables",
+		},
 	}
-	var result int
-	if err := tx.QueryRow(ctx, "SELECT 1").Scan(&result); err != nil {
-		_ = tx.Rollback(ctx)
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
-// taskCopyOut runs COPY TO STDOUT using a query-generated dataset.
-// This avoids table locking by generating data on the fly.
-func taskCopyOut(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
+// getTaskForCase returns the appropriate task function for a benchmark case
+func getTaskForCase(bc *BenchmarkCase) func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error) {
+	switch bc.Name {
+	case "mixed":
+		return taskMixedWorkload
+	case "copy_out":
+		return taskCopyOut
+	case "copy_in":
+		return taskCopyIn
+	default:
+		return taskMixedWorkload
+	}
+}
+
+// taskMixedWorkload executes a batch of queries from the pre-generated workload
+func taskMixedWorkload(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error) {
+	// Get a random starting point in the workload
+	startIdx := s.rng.Intn(len(mixedWorkload) - mixedBatchSize)
+
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
-		return err
+		return TaskResult{}, err
 	}
 	defer conn.Release()
 
-	// Generate data on the fly - no table access, no locking
+	queriesExecuted := 0
+	for i := 0; i < mixedBatchSize && startIdx+i < len(mixedWorkload); i++ {
+		q := mixedWorkload[startIdx+i]
+
+		if q.TxnStart || q.TxnEnd {
+			_, err = conn.Exec(ctx, q.SQL)
+		} else if q.ExpectRows > 0 {
+			var rows pgx.Rows
+			rows, err = conn.Query(ctx, q.SQL)
+			if err != nil {
+				return TaskResult{Queries: queriesExecuted}, err
+			}
+			for rows.Next() {
+			}
+			rows.Close()
+			if err = rows.Err(); err != nil {
+				return TaskResult{Queries: queriesExecuted}, err
+			}
+		} else {
+			_, err = conn.Exec(ctx, q.SQL)
+		}
+		if err != nil {
+			return TaskResult{Queries: queriesExecuted}, err
+		}
+		queriesExecuted++
+	}
+
+	return TaskResult{Queries: queriesExecuted}, nil
+}
+
+// taskCopyOut executes multiple COPY TO STDOUT operations
+func taskCopyOut(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return TaskResult{}, err
+	}
+	defer conn.Release()
+
+	var totalBytes int64
 	query := fmt.Sprintf(`COPY (
 		SELECT i AS id, 'row_' || i::text AS name, i * 10 AS value
 		FROM generate_series(1, %d) AS i
 	) TO STDOUT`, copyRowCount)
 
-	_, err = conn.Conn().PgConn().CopyTo(ctx, io.Discard, query)
-	return err
+	for i := 0; i < copyBatchSize; i++ {
+		// Use a counting writer to track bytes
+		cw := &countingWriter{}
+		_, err = conn.Conn().PgConn().CopyTo(ctx, cw, query)
+		if err != nil {
+			return TaskResult{Queries: i, Bytes: totalBytes}, err
+		}
+		totalBytes += cw.count
+	}
+
+	return TaskResult{Queries: copyBatchSize, Bytes: totalBytes}, nil
 }
 
-// taskCopyIn runs COPY FROM STDIN to a temp table.
-// Each connection creates its own temp table, avoiding cross-connection locking.
-func taskCopyIn(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
+// taskCopyIn executes multiple COPY FROM STDIN operations
+func taskCopyIn(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error) {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
-		return err
+		return TaskResult{}, err
 	}
 	defer conn.Release()
 
-	// Create a temp table for this session if it doesn't exist.
-	// Temp tables are session-local, so no locking between connections.
+	// Create temp table for this session
 	_, err = conn.Exec(ctx, `
 		CREATE TEMP TABLE IF NOT EXISTS bench_copy_temp (
 			id INTEGER,
@@ -311,267 +840,93 @@ func taskCopyIn(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) erro
 		) ON COMMIT DELETE ROWS
 	`)
 	if err != nil {
-		return err
+		return TaskResult{}, err
 	}
 
-	// Use a transaction - ON COMMIT DELETE ROWS cleans up automatically
-	tx, err := conn.Begin(ctx)
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.Conn().PgConn().CopyFrom(ctx, strings.NewReader(string(s.copyData)), "COPY bench_copy_temp FROM STDIN")
-	if err != nil {
-		_ = tx.Rollback(ctx)
-		return err
-	}
-
-	// Commit triggers ON COMMIT DELETE ROWS, cleaning up without TRUNCATE
-	return tx.Commit(ctx)
-}
-
-// makePsqlCopyOutTask creates a psql COPY OUT task for a given connection getter.
-// Uses a query-generated dataset to avoid table locking.
-func makePsqlCopyOutTask(getConnParams func(s *BenchmarkSuite) (host string, port int, dbname, user, password string)) func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
-	return func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
-		host, port, dbname, user, password := getConnParams(s)
-
-		// Generate data on the fly with COPY (SELECT ...) - no table access, no locking
-		query := fmt.Sprintf(`COPY (SELECT i AS id, 'row_' || i::text AS name, i * 10 AS value FROM generate_series(1, %d) AS i) TO STDOUT`, copyRowCount)
-
-		cmd := exec.CommandContext(ctx, "psql",
-			"-h", host,
-			"-p", fmt.Sprintf("%d", port),
-			"-d", dbname,
-			"-U", user,
-			"-c", query,
-		)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PGPASSWORD=%s", password))
-		output, err := cmd.CombinedOutput()
+	var totalBytes int64
+	for i := 0; i < copyBatchSize; i++ {
+		tx, err := conn.Begin(ctx)
 		if err != nil {
-			return fmt.Errorf("psql copy out failed: %w: %s", err, string(output))
+			return TaskResult{Queries: i, Bytes: totalBytes}, err
 		}
-		return nil
-	}
-}
 
-// makePsqlCopyInTask creates a psql COPY IN task for a given connection getter.
-// Uses a temp table with ON COMMIT DELETE ROWS to avoid locking.
-func makePsqlCopyInTask(getConnParams func(s *BenchmarkSuite) (host string, port int, dbname, user, password string)) func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
-	return func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error {
-		host, port, dbname, user, password := getConnParams(s)
-
-		// Create temp table, COPY into it within a transaction, then commit.
-		// ON COMMIT DELETE ROWS cleans up automatically without TRUNCATE locking.
-		query := fmt.Sprintf(`
-			CREATE TEMP TABLE IF NOT EXISTS bench_copy_temp (
-				id INTEGER, name TEXT, value INTEGER
-			) ON COMMIT DELETE ROWS;
-			BEGIN;
-			\copy bench_copy_temp FROM '%s'
-			COMMIT;
-		`, s.copyDataFile)
-
-		cmd := exec.CommandContext(ctx, "psql",
-			"-h", host,
-			"-p", fmt.Sprintf("%d", port),
-			"-d", dbname,
-			"-U", user,
-			"-c", query,
-		)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PGPASSWORD=%s", password))
-		output, err := cmd.CombinedOutput()
+		_, err = tx.Conn().PgConn().CopyFrom(ctx, strings.NewReader(string(copyData)), "COPY bench_copy_temp FROM STDIN")
 		if err != nil {
-			return fmt.Errorf("psql copy in failed: %w: %s", err, string(output))
+			_ = tx.Rollback(ctx)
+			return TaskResult{Queries: i, Bytes: totalBytes}, err
 		}
 
-		return nil
-	}
-}
-
-// ============================================================================
-// Benchmark Case Builders
-// ============================================================================
-
-// buildStandardTargets creates the standard set of targets:
-// - direct
-// - pgbouncer (tx pooling)
-// - pgbouncer (tx pooling) (tls)
-// - pgbouncer (session pooling)
-// - pglink (GOMAXPROCS=4)
-// - pglink (GOMAXPROCS=8)
-// - pglink (GOMAXPROCS=16)
-// - pglink (tls) (GOMAXPROCS=16)
-func (s *BenchmarkSuite) buildStandardTargets(maxConns, concurrency int, task func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error) []*BenchmarkTarget {
-	targets := []*BenchmarkTarget{
-		// Direct PostgreSQL connection
-		makeDirectTarget("direct", maxConns, concurrency, task),
-
-		// pgbouncer variants
-		makePgbouncerTarget("pgbouncer (tx pooling)", maxConns, concurrency,
-			pgbouncerOpts{poolMode: pgbouncer.PoolModeTransaction, useTLS: false}, task),
-		makePgbouncerTarget("pgbouncer (tx pooling) (tls)", maxConns, concurrency,
-			pgbouncerOpts{poolMode: pgbouncer.PoolModeTransaction, useTLS: true}, task),
-		makePgbouncerTarget("pgbouncer (session pooling)", maxConns, concurrency,
-			pgbouncerOpts{poolMode: pgbouncer.PoolModeSession, useTLS: false}, task),
-
-		// pglink variants - GOMAXPROCS 4, 8, 16
-		makePglinkTarget("pglink", maxConns, concurrency,
-			pglinkOpts{gomaxprocs: 4, useTLS: false}, task),
-		makePglinkTarget("pglink", maxConns, concurrency,
-			pglinkOpts{gomaxprocs: 8, useTLS: false}, task),
-		makePglinkTarget("pglink", maxConns, concurrency,
-			pglinkOpts{gomaxprocs: 16, useTLS: false}, task),
-
-		// pglink with TLS - only GOMAXPROCS=16
-		makePglinkTarget("pglink (tls)", maxConns, concurrency,
-			pglinkOpts{gomaxprocs: 16, useTLS: true}, task),
-	}
-
-	return targets
-}
-
-// buildPsqlTargets creates psql-based targets (subset for psql-specific tests)
-func (s *BenchmarkSuite) buildPsqlTargets(concurrency int, taskMaker func(getConnParams func(s *BenchmarkSuite) (string, int, string, string, string)) func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool) error) []*BenchmarkTarget {
-	directParams := func(s *BenchmarkSuite) (string, int, string, string, string) {
-		return "localhost", s.directPort, "uno", "app", "app_password"
-	}
-	pgbouncerParams := func(s *BenchmarkSuite) (string, int, string, string, string) {
-		return "localhost", s.pgbouncerPort, "alpha_uno", "app", "app_password"
-	}
-	pglinkParams := func(s *BenchmarkSuite) (string, int, string, string, string) {
-		return "localhost", s.pglinkPort, "alpha_uno", "app", "app_password"
-	}
-
-	targets := []*BenchmarkTarget{
-		{
-			Name:        "direct (psql)",
-			Concurrency: concurrency,
-			Task:        taskMaker(directParams),
-		},
-		{
-			Name:        "pgbouncer (tx pooling) (psql)",
-			Concurrency: concurrency,
-			SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
-				return s.startPgbouncerWithOpts(ctx, s.currentPglinkConfig,
-					pgbouncerOpts{poolMode: pgbouncer.PoolModeTransaction, useTLS: false})
-			},
-			TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
-				s.stopPgbouncer()
-				return nil
-			},
-			Task: taskMaker(pgbouncerParams),
-		},
-		{
-			Name:        "pglink (psql) (GOMAXPROCS=16)",
-			Concurrency: concurrency,
-			SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
-				return s.startPglinkWithOpts(ctx, s.currentPglinkConfig,
-					pglinkOpts{gomaxprocs: 16, useTLS: false})
-			},
-			TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
-				s.stopPglink()
-				return nil
-			},
-			Task: taskMaker(pglinkParams),
-		},
-	}
-
-	return targets
-}
-
-// buildAllBenchmarkCases creates all benchmark cases for the given parameters
-func (s *BenchmarkSuite) buildAllBenchmarkCases() []*BenchmarkCase {
-	var cases []*BenchmarkCase
-
-	for _, maxConns := range s.runCfg.MaxConns {
-		for _, concurrency := range s.runCfg.Concurrency {
-			// Skip if concurrency is too high for max_conns
-			if concurrency > maxConns*3 {
-				continue
-			}
-
-			mc := maxConns
-			cc := concurrency
-
-			// SELECT 1
-			cases = append(cases, &BenchmarkCase{
-				Title:       fmt.Sprintf("SELECT 1 (max_conns=%d, concurrency=%d)", mc, cc),
-				Description: "Pure proxy overhead benchmark",
-				Targets:     s.buildStandardTargets(mc, cc, taskSelect1),
-			})
-
-			// SELECT with rows
-			cases = append(cases, &BenchmarkCase{
-				Title:       fmt.Sprintf("SELECT 100 Rows (max_conns=%d, concurrency=%d)", mc, cc),
-				Description: "Data transfer benchmark",
-				Targets:     s.buildStandardTargets(mc, cc, taskSelectRows),
-			})
-
-			// Transactions
-			cases = append(cases, &BenchmarkCase{
-				Title:       fmt.Sprintf("Transaction (max_conns=%d, concurrency=%d)", mc, cc),
-				Description: "BEGIN/SELECT/COMMIT benchmark",
-				Targets:     s.buildStandardTargets(mc, cc, taskTransaction),
-			})
-
-			// COPY OUT (pgx) - uses generated data, no table access
-			cases = append(cases, &BenchmarkCase{
-				Title:       fmt.Sprintf("COPY OUT pgx (%d rows, max_conns=%d, concurrency=%d)", copyRowCount, mc, cc),
-				Description: "COPY TO STDOUT benchmark using pgx with generated data",
-				Targets:     s.buildStandardTargets(mc, cc, taskCopyOut),
-			})
-
-			// COPY IN (pgx) - uses temp tables per connection
-			cases = append(cases, &BenchmarkCase{
-				Title:       fmt.Sprintf("COPY IN pgx (%d rows, max_conns=%d, concurrency=%d)", copyRowCount, mc, cc),
-				Description: "COPY FROM STDIN benchmark using pgx with temp tables",
-				Targets:     s.buildStandardTargets(mc, cc, taskCopyIn),
-			})
-
-			// COPY OUT (psql) - uses generated data, no table access
-			cases = append(cases, &BenchmarkCase{
-				Title:       fmt.Sprintf("COPY OUT psql (%d rows, concurrency=%d)", copyRowCount, cc),
-				Description: "COPY TO STDOUT benchmark using psql CLI with generated data",
-				Targets:     s.buildPsqlTargets(cc, makePsqlCopyOutTask),
-			})
-
-			// COPY IN (psql) - uses temp tables per connection
-			cases = append(cases, &BenchmarkCase{
-				Title:       fmt.Sprintf("COPY IN psql (%d rows, concurrency=%d)", copyRowCount, cc),
-				Description: "COPY FROM STDIN benchmark using psql CLI with temp tables",
-				Targets:     s.buildPsqlTargets(cc, makePsqlCopyInTask),
-			})
+		if err = tx.Commit(ctx); err != nil {
+			return TaskResult{Queries: i, Bytes: totalBytes}, err
 		}
+		totalBytes += copyDataSize
 	}
 
-	return cases
+	return TaskResult{Queries: copyBatchSize, Bytes: totalBytes}, nil
+}
+
+// countingWriter counts bytes written to it
+type countingWriter struct {
+	count int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.count += int64(len(p))
+	return len(p), nil
+}
+
+// formatLatency formats microseconds in human-readable form
+func formatLatency(us float64) string {
+	if us >= 1000000 {
+		return fmt.Sprintf("%.2fs", us/1000000)
+	} else if us >= 1000 {
+		return fmt.Sprintf("%.1fms", us/1000)
+	}
+	return fmt.Sprintf("%.0fμs", us)
 }
 
 // ============================================================================
 // Setup and Teardown
 // ============================================================================
 
-func (s *BenchmarkSuite) generateCopyData() error {
+type pgbouncerOpts struct {
+	poolMode pgbouncer.PoolMode
+	useTLS   bool
+}
+
+type pglinkOpts struct {
+	gomaxprocs int
+	useTLS     bool
+	binaryPath string // Path to pglink binary (empty = default out/pglink)
+	port       int    // Port to use (0 = default s.pglinkPort)
+	label      string // Label for this target (e.g., "current @ abc123")
+}
+
+func (s *BenchmarkSuite) generateCopyData() {
 	var buf strings.Builder
 	for i := 1; i <= copyRowCount; i++ {
 		buf.WriteString(fmt.Sprintf("%d\trow_%d\t%d\n", i, i, i*10))
 	}
-	s.copyData = []byte(buf.String())
+	copyData = []byte(buf.String())
+	copyDataSize = int64(len(copyData))
+}
 
-	// Write to temp file for psql
-	tmpFile, err := os.CreateTemp("", "bench_copy_*.csv")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tmpFile.Close() }()
-	if _, err := tmpFile.Write(s.copyData); err != nil {
-		_ = os.Remove(tmpFile.Name())
-		return err
-	}
-	s.copyDataFile = tmpFile.Name()
+func (s *BenchmarkSuite) generateMixedWorkload() {
+	// Use a seeded RNG for reproducibility
+	rng := rand.New(rand.NewSource(s.runCfg.Seed))
+	mixedWorkload = generateMixedWorkload(rng, mixedWorkloadSize)
+	log.Printf("Generated mixed workload: %d queries (seed=%d)", len(mixedWorkload), s.runCfg.Seed)
 
-	return nil
+	// Count query types for logging
+	var selects, txnStarts int
+	for _, q := range mixedWorkload {
+		if q.TxnStart {
+			txnStarts++
+		} else if !q.TxnEnd {
+			selects++
+		}
+	}
+	log.Printf("  SELECT queries: %d, Transactions: %d", selects, txnStarts)
 }
 
 func (s *BenchmarkSuite) ensureDockerCompose(ctx context.Context) error {
@@ -582,14 +937,14 @@ func (s *BenchmarkSuite) ensureDockerCompose(ctx context.Context) error {
 	return cmd.Run()
 }
 
-func (s *BenchmarkSuite) generatePglinkConfig(maxConns int) (*config.Config, error) {
+func (s *BenchmarkSuite) generatePglinkConfig() (*config.Config, error) {
 	configPath := filepath.Join(s.projectDir, "pglink.json")
 	cfg, err := config.ReadConfigFile(configPath)
 	if err != nil {
 		return nil, err
 	}
 	for _, dbCfg := range cfg.Databases {
-		dbCfg.Backend.PoolMaxConns = int32(maxConns)
+		dbCfg.Backend.PoolMaxConns = int32(s.runCfg.MaxConns)
 	}
 	return cfg, nil
 }
@@ -601,7 +956,6 @@ func (s *BenchmarkSuite) startPglinkWithOpts(ctx context.Context, cfg *config.Co
 	}
 	s.pglinkTempDir = tmpDir
 
-	// Configure flight recorder if enabled
 	var args []string
 	if s.runCfg.FlightRecorder {
 		tracesDir := filepath.Join(tmpDir, "traces")
@@ -609,22 +963,25 @@ func (s *BenchmarkSuite) startPglinkWithOpts(ctx context.Context, cfg *config.Co
 			_ = os.RemoveAll(tmpDir)
 			return fmt.Errorf("failed to create traces dir: %w", err)
 		}
-		// Use CLI flags to enable flight recorder
-		// Set min_age to benchmark duration + warmup + buffer
 		minAge := s.runCfg.Duration + s.runCfg.Warmup + 30*time.Second
 		args = append(args,
 			"-flight-recorder", tracesDir,
 			"-flight-recorder-min-age", minAge.String(),
-			"-flight-recorder-max-bytes", "52428800", // 50MB for benchmarks
+			"-flight-recorder-max-bytes", "52428800",
 		)
 	}
 
-	// Make a copy of config to modify TLS settings
-	cfgCopy := *cfg
+	// Determine port
+	port := opts.port
+	if port == 0 {
+		port = s.pglinkPort
+	}
 
-	// Configure TLS based on opts
+	cfgCopy := *cfg
+	// Update listen address with the target port
+	cfgCopy.Listen = config.ListenAddr(fmt.Sprintf(":%d", port))
+
 	if opts.useTLS {
-		// Enable TLS with generated cert, write to files so pgbouncer can use them
 		certPath := "server.crt"
 		keyPath := "server.key"
 		cfgCopy.TLS = &config.JsonTLSConfig{
@@ -633,11 +990,9 @@ func (s *BenchmarkSuite) startPglinkWithOpts(ctx context.Context, cfg *config.Co
 			CertPrivateKeyPath: keyPath,
 			GenerateCert:       true,
 		}
-		// Store absolute paths for pgbouncer to use
 		s.tlsCertPath = filepath.Join(tmpDir, certPath)
 		s.tlsKeyPath = filepath.Join(tmpDir, keyPath)
 	} else {
-		// Explicitly disable TLS
 		cfgCopy.TLS = &config.JsonTLSConfig{
 			SSLMode: config.SSLModeDisable,
 		}
@@ -656,17 +1011,20 @@ func (s *BenchmarkSuite) startPglinkWithOpts(ctx context.Context, cfg *config.Co
 		return err
 	}
 
-	pglinkBinary := filepath.Join(s.projectDir, "out", "pglink")
-	if _, err := os.Stat(pglinkBinary); os.IsNotExist(err) {
-		buildCmd := exec.CommandContext(ctx, filepath.Join(s.projectDir, "bin", "build"))
-		buildCmd.Dir = s.projectDir
-		if err := buildCmd.Run(); err != nil {
-			_ = os.RemoveAll(tmpDir)
-			return fmt.Errorf("failed to build pglink: %w", err)
+	// Determine binary path
+	pglinkBinary := opts.binaryPath
+	if pglinkBinary == "" {
+		pglinkBinary = filepath.Join(s.projectDir, "out", "pglink")
+		if _, err := os.Stat(pglinkBinary); os.IsNotExist(err) {
+			buildCmd := exec.CommandContext(ctx, filepath.Join(s.projectDir, "bin", "build"))
+			buildCmd.Dir = s.projectDir
+			if err := buildCmd.Run(); err != nil {
+				_ = os.RemoveAll(tmpDir)
+				return fmt.Errorf("failed to build pglink: %w", err)
+			}
 		}
 	}
 
-	// Build command with config and optional flight recorder flags
 	cmdArgs := append([]string{"-config", configPath}, args...)
 	s.pglinkCmd = exec.Command(pglinkBinary, cmdArgs...)
 	s.pglinkCmd.Env = append(os.Environ(), fmt.Sprintf("GOMAXPROCS=%d", opts.gomaxprocs))
@@ -677,18 +1035,15 @@ func (s *BenchmarkSuite) startPglinkWithOpts(ctx context.Context, cfg *config.Co
 		return fmt.Errorf("failed to start pglink: %w", err)
 	}
 
-	// Wait for pglink to be ready
-	return s.waitForPort(ctx, s.pglinkPort, 10*time.Second)
+	return s.waitForPort(ctx, port, 10*time.Second)
 }
 
 func (s *BenchmarkSuite) stopPglink() {
 	s.lastTraceFile = ""
 
 	if s.pglinkCmd != nil && s.pglinkCmd.Process != nil {
-		// If flight recorder is enabled, send SIGUSR1 to trigger a snapshot before stopping
 		if s.runCfg.FlightRecorder {
 			_ = s.pglinkCmd.Process.Signal(syscall.SIGUSR1)
-			// Give it a moment to write the snapshot
 			time.Sleep(500 * time.Millisecond)
 		}
 
@@ -703,12 +1058,10 @@ func (s *BenchmarkSuite) stopPglink() {
 		s.pglinkCmd = nil
 	}
 
-	// If flight recorder was enabled, find and copy the trace file
 	if s.runCfg.FlightRecorder && s.pglinkTempDir != "" {
 		tracesDir := filepath.Join(s.pglinkTempDir, "traces")
 		files, err := os.ReadDir(tracesDir)
 		if err == nil && len(files) > 0 {
-			// Find the most recent trace file
 			var latestFile string
 			var latestTime time.Time
 			for _, f := range files {
@@ -722,7 +1075,6 @@ func (s *BenchmarkSuite) stopPglink() {
 			}
 			if latestFile != "" {
 				srcPath := filepath.Join(tracesDir, latestFile)
-				// Copy to output traces directory
 				destDir := filepath.Join(s.outputDir, "traces")
 				_ = os.MkdirAll(destDir, 0755)
 				destPath := filepath.Join(destDir, latestFile)
@@ -738,7 +1090,6 @@ func (s *BenchmarkSuite) stopPglink() {
 				}
 			}
 		}
-		// Clean up temp dir
 		_ = os.RemoveAll(s.pglinkTempDir)
 		s.pglinkTempDir = ""
 	}
@@ -750,26 +1101,17 @@ func (s *BenchmarkSuite) startPgbouncerWithOpts(ctx context.Context, cfg *config
 		return err
 	}
 
-	// Build pgbouncer options
 	pgbOpts := pgbouncer.Options{
 		PoolMode: opts.poolMode,
 	}
 
-	// Configure TLS if requested
 	if opts.useTLS {
-		// For pgbouncer TLS, we need to generate certs.
-		// First start pglink with TLS to get the certs, then use them.
-		// However, since we might not have pglink running, generate our own.
-		// For simplicity, we'll generate certs directly here.
 		certPath := filepath.Join(tmpDir, "server.crt")
 		keyPath := filepath.Join(tmpDir, "server.key")
-
-		// Generate self-signed cert for pgbouncer
 		if err := generateSelfSignedCert(certPath, keyPath); err != nil {
 			_ = os.RemoveAll(tmpDir)
 			return fmt.Errorf("failed to generate TLS cert for pgbouncer: %w", err)
 		}
-
 		pgbOpts.TLS = &pgbouncer.TLSConfig{
 			CertPath: certPath,
 			KeyPath:  keyPath,
@@ -798,15 +1140,12 @@ func (s *BenchmarkSuite) startPgbouncerWithOpts(ctx context.Context, cfg *config
 	return s.waitForPort(ctx, s.pgbouncerPort, 10*time.Second)
 }
 
-// generateSelfSignedCert generates a self-signed TLS certificate.
 func generateSelfSignedCert(certPath, keyPath string) (err error) {
-	// Use the same cert generation as pglink's config package
 	cert, err := config.GenerateSelfSignedCertForBenchmark()
 	if err != nil {
 		return err
 	}
 
-	// Write cert
 	certFile, err := os.Create(certPath)
 	if err != nil {
 		return err
@@ -818,12 +1157,11 @@ func generateSelfSignedCert(certPath, keyPath string) (err error) {
 	}()
 
 	for _, certBytes := range cert.Certificate {
-		if err := writePEMBlock(certFile, "CERTIFICATE", certBytes); err != nil {
+		if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certBytes}); err != nil {
 			return err
 		}
 	}
 
-	// Write key
 	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
@@ -834,21 +1172,12 @@ func generateSelfSignedCert(certPath, keyPath string) (err error) {
 		}
 	}()
 
-	// Get the private key bytes - we need to marshal it
 	privKeyBytes, err := config.MarshalPrivateKeyForBenchmark(cert.PrivateKey)
 	if err != nil {
 		return err
 	}
 
-	return writePEMBlock(keyFile, "EC PRIVATE KEY", privKeyBytes)
-}
-
-func writePEMBlock(w io.Writer, blockType string, bytes []byte) error {
-	block := &pem.Block{
-		Type:  blockType,
-		Bytes: bytes,
-	}
-	return pem.Encode(w, block)
+	return pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privKeyBytes})
 }
 
 func (s *BenchmarkSuite) stopPgbouncer() {
@@ -877,6 +1206,8 @@ func (s *BenchmarkSuite) waitForPort(ctx context.Context, port int, timeout time
 		conn, err := pgx.Connect(ctx, connStr)
 		if err == nil {
 			_ = conn.Close(ctx)
+			// Give the server time to clean up the connection
+			time.Sleep(500 * time.Millisecond)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -898,44 +1229,43 @@ func (s *BenchmarkSuite) Run(ctx context.Context) error {
 		return fmt.Errorf("docker-compose setup failed: %w", err)
 	}
 
-	log.Println("Generating COPY data...")
-	if err := s.generateCopyData(); err != nil {
-		return fmt.Errorf("failed to generate copy data: %w", err)
-	}
-	defer func() { _ = os.Remove(s.copyDataFile) }()
+	log.Println("Generating workloads...")
+	s.generateCopyData()
+	s.generateMixedWorkload()
 
-	// Generate config for the first max_conns value (will be regenerated per case if needed)
-	if len(s.runCfg.MaxConns) > 0 {
-		cfg, err := s.generatePglinkConfig(s.runCfg.MaxConns[0])
+	cfg, err := s.generatePglinkConfig()
+	if err != nil {
+		return fmt.Errorf("failed to generate pglink config: %w", err)
+	}
+	s.currentPglinkConfig = cfg
+
+	// Prepare comparison target if configured
+	if s.runCfg.Compare != nil {
+		log.Println("Preparing comparison target...")
+		binaryPath, commitHash, label, err := s.PrepareCompareTarget(*s.runCfg.Compare)
 		if err != nil {
-			return fmt.Errorf("failed to generate pglink config: %w", err)
+			return fmt.Errorf("failed to prepare comparison target: %w", err)
 		}
-		s.currentPglinkConfig = cfg
+		s.compareBinaryPath = binaryPath
+		s.compareCommitHash = commitHash
+		s.compareLabel = label
+		log.Printf("Comparison target ready: %s", label)
 	}
 
-	cases := s.buildAllBenchmarkCases()
+	s.targets = s.buildTargets()
+
+	cases := s.buildBenchmarkCases()
 	rounds := s.runCfg.Rounds
 	if rounds < 1 {
 		rounds = 1
 	}
 
-	log.Printf("Running %d benchmark cases (%d rounds each, %d targets per case)...",
-		len(cases), rounds, len(cases[0].Targets))
-	log.Printf("Each target runs for %s warmup + %s measurement per round",
-		s.runCfg.Warmup, s.runCfg.Duration)
+	log.Printf("Running %d benchmark cases × %d targets × %d rounds", len(cases), len(s.targets), rounds)
+	log.Printf("Each round: %s warmup + %s measurement", s.runCfg.Warmup, s.runCfg.Duration)
+	log.Printf("Pool: max_conns=%d, concurrency=%d", s.runCfg.MaxConns, s.runCfg.Concurrency)
 
-	for i, bc := range cases {
-		log.Printf("\n=== [%d/%d] %s ===", i+1, len(cases), bc.Title)
-
-		// Update pglink config if max_conns changed
-		if len(bc.Targets) > 0 && bc.Targets[0].MaxConns > 0 {
-			cfg, err := s.generatePglinkConfig(bc.Targets[0].MaxConns)
-			if err != nil {
-				log.Printf("Warning: failed to generate config: %v", err)
-				continue
-			}
-			s.currentPglinkConfig = cfg
-		}
+	for _, bc := range cases {
+		log.Printf("\n=== %s ===", bc.Title)
 
 		// Case setup
 		if bc.SetUp != nil {
@@ -945,44 +1275,67 @@ func (s *BenchmarkSuite) Run(ctx context.Context) error {
 			}
 		}
 
-		// Collect results from all rounds for aggregation
-		// Map from target name to list of results
+		// Get task function for this case
+		taskFn := getTaskForCase(bc)
+
+		// Collect results from all rounds
 		targetResults := make(map[string][]BenchmarkResult)
 
-		// Run multiple rounds with shuffled target order
 		for round := 1; round <= rounds; round++ {
-			// Create shuffled copy of targets for this round
-			shuffledTargets := make([]*BenchmarkTarget, len(bc.Targets))
-			copy(shuffledTargets, bc.Targets)
+			// Shuffle targets for this round
+			shuffledTargets := make([]*BenchmarkTarget, len(s.targets))
+			copy(shuffledTargets, s.targets)
 			rand.Shuffle(len(shuffledTargets), func(i, j int) {
 				shuffledTargets[i], shuffledTargets[j] = shuffledTargets[j], shuffledTargets[i]
 			})
 
-			log.Printf("  Round %d/%d (order: %s)", round, rounds, targetOrder(shuffledTargets))
+			log.Printf("  Round %d/%d", round, rounds)
 
 			for _, target := range shuffledTargets {
-				result, err := s.runTarget(ctx, bc, target)
+				result, err := s.runTarget(ctx, bc, target, taskFn)
 				if err != nil {
-					log.Printf("    %s: ERROR: %v", target.Name, err)
+					log.Printf("    %s: SETUP ERROR: %v", target.Name, err)
 					continue
 				}
 				targetResults[target.Name] = append(targetResults[target.Name], result)
-				log.Printf("    %s: %.0f qps, p50=%.0fus, p99=%.0fus",
-					target.Name, result.QueriesPerSec, result.P50LatencyUs, result.P99LatencyUs)
+
+				// Format output based on whether we have bytes
+				errPct := result.ErrorRate * 100
+				errStr := ""
+				if errPct > 0 {
+					errStr = fmt.Sprintf(", err=%.1f%%", errPct)
+				}
+
+				if result.TotalBytes > 0 {
+					log.Printf("    %s: %.0f qps, %.1f MB/s, p50=%s, p99=%s%s",
+						target.Name, result.QueriesPerSec, result.MBPerSec,
+						formatLatency(result.P50LatencyUs), formatLatency(result.P99LatencyUs), errStr)
+				} else {
+					log.Printf("    %s: %.0f qps, p50=%s, p99=%s%s",
+						target.Name, result.QueriesPerSec,
+						formatLatency(result.P50LatencyUs), formatLatency(result.P99LatencyUs), errStr)
+				}
+
+				// Log sample errors if error rate is high
+				if errPct >= 10 && len(result.SampleErrors) > 0 {
+					log.Printf("      Sample errors: %v", result.SampleErrors[:min(3, len(result.SampleErrors))])
+				}
+
+				// Warn on very high error rate
+				if errPct >= 50 {
+					log.Printf("    ⚠️  HIGH ERROR RATE: %.1f%% - this may indicate a bug", errPct)
+				}
 			}
 		}
 
-		// Aggregate results across rounds for each target
-		for _, target := range bc.Targets {
+		// Aggregate results across rounds
+		for _, target := range s.targets {
 			results := targetResults[target.Name]
 			if len(results) == 0 {
 				continue
 			}
-			aggregated := aggregateResults(results)
+			aggregated := aggregateResults(results, bc.Title)
 			s.results = append(s.results, aggregated)
-			log.Printf("  [AGGREGATED] %s: %.0f qps (%.2f%% errors), p50=%.0fus, p99=%.0fus",
-				target.Name, aggregated.QueriesPerSec, aggregated.ErrorRate*100,
-				aggregated.P50LatencyUs, aggregated.P99LatencyUs)
 		}
 
 		// Case teardown
@@ -996,22 +1349,7 @@ func (s *BenchmarkSuite) Run(ctx context.Context) error {
 	return s.writeResults()
 }
 
-// targetOrder returns a short string showing the order of targets
-func targetOrder(targets []*BenchmarkTarget) string {
-	names := make([]string, len(targets))
-	for i, t := range targets {
-		// Abbreviate target names for compact display
-		name := t.Name
-		if len(name) > 15 {
-			name = name[:12] + "..."
-		}
-		names[i] = name
-	}
-	return strings.Join(names, " → ")
-}
-
-// aggregateResults combines multiple BenchmarkResults into one
-func aggregateResults(results []BenchmarkResult) BenchmarkResult {
+func aggregateResults(results []BenchmarkResult, caseTitle string) BenchmarkResult {
 	if len(results) == 0 {
 		return BenchmarkResult{}
 	}
@@ -1019,44 +1357,48 @@ func aggregateResults(results []BenchmarkResult) BenchmarkResult {
 		return results[0]
 	}
 
-	// Use first result as template for metadata
 	agg := BenchmarkResult{
-		CaseTitle:   results[0].CaseTitle,
+		CaseTitle:   caseTitle,
 		TargetName:  results[0].TargetName,
 		MaxConns:    results[0].MaxConns,
 		Concurrency: results[0].Concurrency,
 		Timestamp:   results[0].Timestamp,
 	}
 
-	// Sum up counts and durations
-	var totalQueries, successCount, errorCount int64
+	var totalTasks, totalQueries, totalBytes, successCount, errorCount int64
 	var totalDuration time.Duration
 	var allErrors []string
 
 	for _, r := range results {
+		totalTasks += r.TotalTasks
 		totalQueries += r.TotalQueries
+		totalBytes += r.TotalBytes
 		successCount += r.SuccessCount
 		errorCount += r.ErrorCount
 		totalDuration += r.Duration
 		allErrors = append(allErrors, r.SampleErrors...)
-		// Keep trace file from last result
 		if r.TraceFile != "" {
 			agg.TraceFile = r.TraceFile
 		}
 	}
 
+	agg.TotalTasks = totalTasks
 	agg.TotalQueries = totalQueries
+	agg.TotalBytes = totalBytes
 	agg.SuccessCount = successCount
 	agg.ErrorCount = errorCount
 	agg.Duration = totalDuration
 
-	if totalQueries > 0 {
-		agg.ErrorRate = float64(errorCount) / float64(totalQueries)
+	if totalTasks > 0 {
+		agg.ErrorRate = float64(errorCount) / float64(totalTasks)
 		agg.QueriesPerSec = float64(totalQueries) / totalDuration.Seconds()
 	}
+	if totalBytes > 0 {
+		agg.BytesPerSec = float64(totalBytes) / totalDuration.Seconds()
+		agg.MBPerSec = agg.BytesPerSec / (1024 * 1024)
+	}
 
-	// For latency percentiles, we take the average of each percentile across rounds
-	// This is an approximation but avoids storing all raw latencies
+	// Average latency percentiles across rounds
 	var sumAvg, sumMin, sumMax, sumP50, sumP95, sumP99 float64
 	validCount := 0
 	for _, r := range results {
@@ -1091,13 +1433,23 @@ func aggregateResults(results []BenchmarkResult) BenchmarkResult {
 	return agg
 }
 
-func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, target *BenchmarkTarget) (result BenchmarkResult, err error) {
+func (s *BenchmarkSuite) runTarget(
+	ctx context.Context,
+	bc *BenchmarkCase,
+	target *BenchmarkTarget,
+	taskFn func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error),
+) (result BenchmarkResult, err error) {
 	result = BenchmarkResult{
 		CaseTitle:   bc.Title,
 		TargetName:  target.Name,
-		MaxConns:    target.MaxConns,
-		Concurrency: target.Concurrency,
+		MaxConns:    s.runCfg.MaxConns,
+		Concurrency: s.runCfg.Concurrency,
 		Timestamp:   time.Now(),
+	}
+
+	// Assign the task function to target temporarily
+	target.Task = func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error) {
+		return taskFn(ctx, s, pool, bc)
 	}
 
 	// Target setup
@@ -1107,18 +1459,16 @@ func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, targe
 		}
 	}
 
-	// Ensure teardown runs and capture trace file path
 	defer func() {
 		if target.TearDown != nil {
 			_ = target.TearDown(ctx, s)
 		}
-		// Capture the trace file path after teardown (which calls stopPglink)
 		if s.lastTraceFile != "" {
 			result.TraceFile = s.lastTraceFile
 		}
 	}()
 
-	// Create connection pool if we have a connection string
+	// Create connection pool
 	var pool *pgxpool.Pool
 	if target.ConnString != nil {
 		connStr := target.ConnString(s)
@@ -1126,13 +1476,10 @@ func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, targe
 		if err != nil {
 			return result, err
 		}
-		concurrency := target.Concurrency
-		if concurrency == 0 {
-			concurrency = 10
-		}
-		poolConfig.MaxConns = int32(concurrency)
-		poolConfig.MinConns = int32(concurrency)
-		poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
+		poolConfig.MaxConns = int32(s.runCfg.Concurrency)
+		poolConfig.MinConns = int32(s.runCfg.Concurrency)
+		// Use default extended protocol (prepare + execute)
+		poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 
 		pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
 		if err != nil {
@@ -1143,11 +1490,11 @@ func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, targe
 
 	// Warmup
 	warmupCtx, warmupCancel := context.WithTimeout(ctx, s.runCfg.Warmup)
-	s.runLoadForDuration(warmupCtx, pool, target, nil, nil, nil)
+	s.runLoadForDuration(warmupCtx, pool, target, bc, nil)
 	warmupCancel()
 
 	// Benchmark
-	var successCount, errorCount atomic.Int64
+	var successCount, errorCount, totalQueries, totalBytes atomic.Int64
 	latencies := make([]int64, 0, 100000)
 	latenciesMu := sync.Mutex{}
 	errorsMu := sync.Mutex{}
@@ -1156,11 +1503,15 @@ func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, targe
 	benchCtx, benchCancel := context.WithTimeout(ctx, s.runCfg.Duration)
 	start := time.Now()
 
-	s.runLoadForDuration(benchCtx, pool, target,
-		func(latency time.Duration, err error) {
+	s.runLoadForDuration(benchCtx, pool, target, bc,
+		func(tr TaskResult, latency time.Duration, err error) {
 			latenciesMu.Lock()
 			latencies = append(latencies, latency.Nanoseconds())
 			latenciesMu.Unlock()
+
+			// Always count partial progress from the task
+			totalQueries.Add(int64(tr.Queries))
+			totalBytes.Add(tr.Bytes)
 
 			if err != nil {
 				errorCount.Add(1)
@@ -1173,23 +1524,27 @@ func (s *BenchmarkSuite) runTarget(ctx context.Context, bc *BenchmarkCase, targe
 				successCount.Add(1)
 			}
 		},
-		&successCount,
-		&errorCount,
 	)
 
 	benchCancel()
 	elapsed := time.Since(start)
 
 	// Calculate results
-	result.TotalQueries = successCount.Load() + errorCount.Load()
+	result.TotalTasks = successCount.Load() + errorCount.Load()
+	result.TotalQueries = totalQueries.Load()
+	result.TotalBytes = totalBytes.Load()
 	result.SuccessCount = successCount.Load()
 	result.ErrorCount = errorCount.Load()
 	result.Duration = elapsed
 	result.SampleErrors = sampleErrors
 
-	if result.TotalQueries > 0 {
-		result.ErrorRate = float64(result.ErrorCount) / float64(result.TotalQueries)
+	if result.TotalTasks > 0 {
+		result.ErrorRate = float64(result.ErrorCount) / float64(result.TotalTasks)
 		result.QueriesPerSec = float64(result.TotalQueries) / elapsed.Seconds()
+	}
+	if result.TotalBytes > 0 {
+		result.BytesPerSec = float64(result.TotalBytes) / elapsed.Seconds()
+		result.MBPerSec = result.BytesPerSec / (1024 * 1024)
 	}
 
 	if len(latencies) > 0 {
@@ -1213,14 +1568,10 @@ func (s *BenchmarkSuite) runLoadForDuration(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	target *BenchmarkTarget,
-	onComplete func(latency time.Duration, err error),
-	successCount *atomic.Int64,
-	errorCount *atomic.Int64,
+	bc *BenchmarkCase,
+	onComplete func(tr TaskResult, latency time.Duration, err error),
 ) {
-	concurrency := target.Concurrency
-	if concurrency == 0 {
-		concurrency = 10
-	}
+	concurrency := s.runCfg.Concurrency
 
 	var wg sync.WaitGroup
 	for i := 0; i < concurrency; i++ {
@@ -1233,8 +1584,8 @@ func (s *BenchmarkSuite) runLoadForDuration(
 					return
 				default:
 					queryStart := time.Now()
-					queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-					err := target.Task(queryCtx, s, pool)
+					queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+					tr, err := target.Task(queryCtx, s, pool, bc)
 					cancel()
 					latency := time.Since(queryStart)
 
@@ -1243,7 +1594,7 @@ func (s *BenchmarkSuite) runLoadForDuration(
 						return
 					default:
 						if onComplete != nil {
-							onComplete(latency, err)
+							onComplete(tr, latency, err)
 						}
 					}
 				}
@@ -1300,9 +1651,8 @@ Generated: {{.Timestamp}}
 
 - **Rounds per target:** {{.Rounds}} (shuffled order to mitigate ordering effects)
 - **Duration per round:** {{.Duration}} measurement + {{.Warmup}} warmup
-- **Max connections tested:** {{.MaxConns}}
-- **Concurrency levels:** {{.Concurrency}}
-- **pglink GOMAXPROCS:** 4, 8, 16 (fixed)
+- **Pool:** max_conns={{.MaxConns}}, concurrency={{.Concurrency}}
+- **Workload seed:** {{.Seed}} (for reproducibility)
 
 ## Results
 {{range .Cases}}
@@ -1310,20 +1660,16 @@ Generated: {{.Timestamp}}
 {{if .Description}}
 {{.Description}}
 {{end}}
-| Target | Max Conns | Concurrency | QPS | Error Rate | P50 (μs) | P99 (μs) |
-|--------|-----------|-------------|-----|------------|----------|----------|
-{{range $i, $r := .Results -}}
-| {{$r.TargetName}} | {{if $r.MaxConns}}{{$r.MaxConns}}{{else}}-{{end}} | {{$r.Concurrency}} | {{fmtQPS $r.QueriesPerSec $.BaselineQPS}} | {{fmtErr $r.ErrorRate}} | {{fmtLatency $r.P50LatencyUs $.BaselineP50}} | {{fmtLatency $r.P99LatencyUs $.BaselineP99}} |
-{{end}}
+| Target | QPS | MB/s | Error Rate | P50 (μs) | P99 (μs) |
+|--------|-----|------|------------|----------|----------|
+{{- $baseline := index .Results 0}}
+{{range $i, $r := .Results}}
+| {{$r.TargetName}} | {{fmtQPS $r.QueriesPerSec $baseline.QueriesPerSec}} | {{fmtMBs $r.MBPerSec $baseline.MBPerSec}} | {{fmtErr $r.ErrorRate}} | {{fmtLatency $r.P50LatencyUs $baseline.P50LatencyUs}} | {{fmtLatency $r.P99LatencyUs $baseline.P99LatencyUs}} |
+{{- end}}
 {{end}}
 ## Analysis
 
-### Error Rates Under Load
-
-High error rates typically indicate:
-- Pool exhaustion (concurrency > max_conns)
-- Connection timeouts
-- Backend overload
+High error rates typically indicate pool exhaustion (concurrency > max_conns) or backend overload.
 
 {{if .ErrorSamples}}
 ### Sample Errors
@@ -1341,17 +1687,17 @@ High error rates typically indicate:
 `
 
 	funcMap := template.FuncMap{
-		"mul": func(a, b float64) float64 { return a * b },
-		// fmtQPS formats QPS with relative comparison (higher is better)
 		"fmtQPS": func(val, baseline float64) string {
+			if val == 0 {
+				return "0 ❌"
+			}
 			if baseline <= 0 || val == baseline {
 				return fmt.Sprintf("%.0f", val)
 			}
 			ratio := val / baseline
-			if ratio >= 1 {
-				return fmt.Sprintf("%.0f", val) // Better or same, no annotation needed
+			if ratio >= 0.98 {
+				return fmt.Sprintf("%.0f", val)
 			}
-			// Slower - show how much slower
 			slowdown := baseline / val
 			if slowdown >= 2 {
 				return fmt.Sprintf("%.0f (%.1fx slower)", val, slowdown)
@@ -1359,23 +1705,48 @@ High error rates typically indicate:
 			pctSlower := (1 - ratio) * 100
 			return fmt.Sprintf("%.0f (%.0f%% slower)", val, pctSlower)
 		},
-		// fmtLatency formats latency with relative comparison (lower is better)
-		"fmtLatency": func(val, baseline float64) string {
+		"fmtMBs": func(val, baseline float64) string {
+			if val <= 0 {
+				return "-"
+			}
 			if baseline <= 0 || val == baseline {
-				return fmt.Sprintf("%.0f", val)
+				return fmt.Sprintf("%.1f", val)
 			}
 			ratio := val / baseline
-			if ratio <= 1 {
-				return fmt.Sprintf("%.0f", val) // Better or same, no annotation needed
+			if ratio >= 0.98 {
+				return fmt.Sprintf("%.1f", val)
 			}
-			// Slower - show how much slower
+			slowdown := baseline / val
+			if slowdown >= 2 {
+				return fmt.Sprintf("%.1f (%.1fx slower)", val, slowdown)
+			}
+			pctSlower := (1 - ratio) * 100
+			return fmt.Sprintf("%.1f (%.0f%% slower)", val, pctSlower)
+		},
+		// fmtLatency formats microseconds in human-readable form
+		"fmtLatency": func(val, baseline float64) string {
+			format := func(us float64) string {
+				if us >= 1000000 {
+					return fmt.Sprintf("%.2fs", us/1000000)
+				} else if us >= 1000 {
+					return fmt.Sprintf("%.1fms", us/1000)
+				}
+				return fmt.Sprintf("%.0fμs", us)
+			}
+			base := format(val)
+			if baseline <= 0 || val == baseline {
+				return base
+			}
+			ratio := val / baseline
+			if ratio <= 1.02 {
+				return base
+			}
 			if ratio >= 2 {
-				return fmt.Sprintf("%.0f (%.1fx slower)", val, ratio)
+				return fmt.Sprintf("%s (%.1fx)", base, ratio)
 			}
 			pctSlower := (ratio - 1) * 100
-			return fmt.Sprintf("%.0f (+%.0f%%)", val, pctSlower)
+			return fmt.Sprintf("%s (+%.0f%%)", base, pctSlower)
 		},
-		// fmtErr formats error rate
 		"fmtErr": func(rate float64) string {
 			pct := rate * 100
 			if pct == 0 {
@@ -1383,6 +1754,9 @@ High error rates typically indicate:
 			}
 			if pct < 0.01 {
 				return "<0.01%"
+			}
+			if pct >= 50 {
+				return fmt.Sprintf("**%.1f%%**", pct) // Bold for high error rates
 			}
 			return fmt.Sprintf("%.2f%%", pct)
 		},
@@ -1416,25 +1790,15 @@ High error rates typically indicate:
 		Title       string
 		Description string
 		Results     []BenchmarkResult
-		BaselineQPS float64 // QPS of first (baseline) target
-		BaselineP50 float64 // P50 latency of first (baseline) target
-		BaselineP99 float64 // P99 latency of first (baseline) target
 	}
 
 	var cases []CaseData
 	for _, title := range caseOrder {
 		results := caseMap[title]
-		cd := CaseData{
+		cases = append(cases, CaseData{
 			Title:   title,
 			Results: results,
-		}
-		// Use first result (typically "direct") as baseline for comparison
-		if len(results) > 0 {
-			cd.BaselineQPS = results[0].QueriesPerSec
-			cd.BaselineP50 = results[0].P50LatencyUs
-			cd.BaselineP99 = results[0].P99LatencyUs
-		}
-		cases = append(cases, cd)
+		})
 	}
 
 	data := struct {
@@ -1442,8 +1806,9 @@ High error rates typically indicate:
 		Rounds       int
 		Duration     string
 		Warmup       string
-		MaxConns     string
-		Concurrency  string
+		MaxConns     int
+		Concurrency  int
+		Seed         int64
 		Cases        []CaseData
 		ErrorSamples []string
 		GoVersion    string
@@ -1455,8 +1820,9 @@ High error rates typically indicate:
 		Rounds:       s.runCfg.Rounds,
 		Duration:     s.runCfg.Duration.String(),
 		Warmup:       s.runCfg.Warmup.String(),
-		MaxConns:     fmt.Sprintf("%v", s.runCfg.MaxConns),
-		Concurrency:  fmt.Sprintf("%v", s.runCfg.Concurrency),
+		MaxConns:     s.runCfg.MaxConns,
+		Concurrency:  s.runCfg.Concurrency,
+		Seed:         s.runCfg.Seed,
 		Cases:        cases,
 		ErrorSamples: errorSamples,
 		GoVersion:    runtime.Version(),
@@ -1479,34 +1845,69 @@ High error rates typically indicate:
 // ============================================================================
 
 func main() {
-	duration := flag.Duration("duration", 25*time.Second, "Duration of each benchmark measurement")
+	duration := flag.Duration("duration", 15*time.Second, "Duration of each benchmark measurement")
 	warmup := flag.Duration("warmup", 5*time.Second, "Warmup duration before measuring")
-	rounds := flag.Int("rounds", 3, "Number of rounds per target (mitigates ordering effects)")
+	rounds := flag.Int("rounds", 2, "Number of rounds per target (mitigates ordering effects)")
 	outputDir := flag.String("output", "out/benchmark", "Output directory for results")
-	maxConnsStr := flag.String("max-conns", "100,500,1000", "Comma-separated max connection values")
-	concurrencyStr := flag.String("concurrency", "100,200,500,600,1000,1500", "Comma-separated concurrency values")
-	flightRecorder := flag.Bool("flight-recorder", false, "Enable flight recorder for pglink targets (captures trace on teardown)")
+	maxConns := flag.Int("max-conns", 100, "Max backend connections in pool")
+	concurrency := flag.Int("concurrency", 100, "Number of concurrent workers")
+	fullTargets := flag.Bool("full-targets", false, "Include all target variants (TLS, session pooling, GOMAXPROCS 4/8/16)")
+	flightRecorder := flag.Bool("flight-recorder", false, "Enable flight recorder for pglink targets")
+	seed := flag.Int64("seed", 0, "Random seed for workload generation (0 = use time-based seed)")
+
+	// A/B comparison flags (mutually exclusive)
+	compareRef := flag.String("compare-ref", "", "Git ref (branch/tag/commit) to compare against. Builds and caches binary.")
+	compareWorktree := flag.String("compare-worktree", "", "Path to existing git worktree to compare against")
+	compareBinary := flag.String("compare-binary", "", "Path to pre-built pglink binary to compare against")
+	compareLabel := flag.String("compare-label", "", "Label for comparison target (default: derived from ref/path)")
+	compareGomaxprocs := flag.Int("compare-gomaxprocs", 16, "GOMAXPROCS for comparison target")
+
 	flag.Parse()
 
-	parseInts := func(s string) []int {
-		parts := strings.Split(s, ",")
-		result := make([]int, 0, len(parts))
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if v, err := strconv.Atoi(p); err == nil {
-				result = append(result, v)
-			}
+	// Generate deterministic seed if not provided
+	if *seed == 0 {
+		h := fnv.New64a()
+		_, _ = h.Write([]byte(time.Now().Format("2006-01-02")))
+		*seed = int64(h.Sum64())
+	}
+
+	// Validate comparison flags (mutually exclusive)
+	compareCount := 0
+	if *compareRef != "" {
+		compareCount++
+	}
+	if *compareWorktree != "" {
+		compareCount++
+	}
+	if *compareBinary != "" {
+		compareCount++
+	}
+	if compareCount > 1 {
+		log.Fatal("Only one of -compare-ref, -compare-worktree, or -compare-binary can be specified")
+	}
+
+	// Build comparison config if specified
+	var compareCfg *CompareConfig
+	if compareCount > 0 {
+		compareCfg = &CompareConfig{
+			Ref:        *compareRef,
+			Worktree:   *compareWorktree,
+			BinaryPath: *compareBinary,
+			Label:      *compareLabel,
 		}
-		return result
 	}
 
 	cfg := RunConfig{
-		MaxConns:       parseInts(*maxConnsStr),
-		Concurrency:    parseInts(*concurrencyStr),
-		Rounds:         *rounds,
-		Duration:       *duration,
-		Warmup:         *warmup,
-		FlightRecorder: *flightRecorder,
+		Duration:          *duration,
+		Warmup:            *warmup,
+		Rounds:            *rounds,
+		MaxConns:          *maxConns,
+		Concurrency:       *concurrency,
+		FullTargets:       *fullTargets,
+		FlightRecorder:    *flightRecorder,
+		Seed:              *seed,
+		Compare:           compareCfg,
+		CompareGomaxprocs: *compareGomaxprocs,
 	}
 
 	projectDir, err := os.Getwd()

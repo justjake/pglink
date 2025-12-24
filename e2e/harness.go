@@ -78,6 +78,10 @@ type Harness struct {
 	projectDir string
 	configPath string
 
+	// Algo is the session algorithm to use ("default" or "ring").
+	// Set this before calling Start().
+	Algo string
+
 	service   *frontend.Service
 	serviceWg sync.WaitGroup
 	cancel    context.CancelFunc
@@ -326,6 +330,12 @@ func (h *Harness) startService(ctx context.Context) {
 		h.fatalf("failed to read config: %v", err)
 	}
 
+	// Apply algo setting if specified
+	if h.Algo != "" {
+		cfg.SetAlgo(h.Algo)
+		h.logger.Info("using session algorithm", "algo", h.Algo)
+	}
+
 	secrets, err := config.NewSecretCacheFromEnv(ctx)
 	if err != nil {
 		h.fatalf("failed to create secrets cache: %v", err)
@@ -358,7 +368,7 @@ func (h *Harness) startService(ctx context.Context) {
 		}
 	}()
 
-	h.logger.Info("pglink service starting")
+	h.logger.Info("pglink service starting", "algo", cfg.GetAlgo())
 }
 
 // waitForService waits for pglink to accept connections
@@ -518,4 +528,21 @@ func (h *Harness) GetTestDatabase(name string) TestDatabase {
 		}
 	}
 	panic(fmt.Sprintf("database %q not found in PredefinedDatabases", name))
+}
+
+// GetAlgo returns the session algorithm being used by this harness.
+// Returns "default" if not explicitly set.
+func (h *Harness) GetAlgo() string {
+	if h.Algo == "" {
+		return config.SessionAlgoDefault
+	}
+	return h.Algo
+}
+
+// AllSessionAlgos returns all valid session algorithm names.
+// Use this to iterate over all algos in tests:
+//
+//	for _, algo := range AllSessionAlgos() { ... }
+func AllSessionAlgos() []string {
+	return config.AllSessionAlgos()
 }

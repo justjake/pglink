@@ -349,6 +349,22 @@ func TestProtocolState_InTxOrQuery(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "ExecutingPortal",
+			setup: func(s *ProtocolState) {
+				name := ""
+				s.Portals.Executing = &name
+			},
+			want: true,
+		},
+		{
+			name: "PendingExecutePortal",
+			setup: func(s *ProtocolState) {
+				name := "portal1"
+				s.Portals.PendingExecute = &name
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
