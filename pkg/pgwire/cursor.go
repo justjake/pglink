@@ -146,31 +146,9 @@ func (c *Cursor) MessageBody() []byte {
 }
 
 // WriteTo writes the current message to dst.
+// The ring buffer stores full wire bytes, so this is a direct write.
 func (c *Cursor) WriteTo(w io.Writer) (int64, error) {
-	start := c.ring.MessageOffset(c.msgIdx)
-	end := c.ring.MessageEnd(c.msgIdx)
-	n := end - start
-	if n <= 0 {
-		return 0, nil
-	}
-
-	// Write header
-	msgType := c.ring.MessageType(c.msgIdx)
-	var header [5]byte
-	header[0] = msgType
-	header[1] = byte((n + 4) >> 24)
-	header[2] = byte((n + 4) >> 16)
-	header[3] = byte((n + 4) >> 8)
-	header[4] = byte(n + 4)
-
-	n1, err := w.Write(header[:])
-	if err != nil {
-		return int64(n1), err
-	}
-
-	// Write body
-	err = c.ring.WriteRange(start, end, w)
-	return int64(n1) + n, err
+	return c.ring.WriteMessage(c.msgIdx, w)
 }
 
 // Retain returns an owned RawBody copy of the current message.
@@ -186,34 +164,22 @@ func (c *Cursor) Retain() RawMessageSource {
 // NextBatch waits for new messages and advances the reader position.
 // Returns error on EOF or context cancellation.
 func (c *Cursor) NextBatch() error {
-	// Advance reader from previous batch (if any)
+	// Release previous batch (if any)
 	if c.batchEnd > 0 {
-		c.ring.AdvanceReader(c.batchEnd)
+		c.ring.ReleaseThrough(c.batchEnd)
 	}
 
-	// Wait for new messages or error
-	for {
-		writeCount := c.ring.MsgWriteCount()
-		if writeCount > c.batchEnd {
-			c.batchStart = c.batchEnd
-			c.batchEnd = writeCount
-			c.msgIdx = c.batchStart - 1 // NextMsg will increment
-			c.writePos = c.batchStart
-			return nil
-		}
-
-		if err := c.ring.Error(); err != nil {
-			return err
-		}
-
-		// Wait for signal
-		select {
-		case <-c.ring.DataReady():
-			// Continue loop to check again
-		case <-c.ring.Done():
-			return c.ring.Error()
-		}
+	// Wait for new messages
+	newEnd, err := c.ring.AvailableMessages(c.batchEnd)
+	if err != nil {
+		return err
 	}
+
+	c.batchStart = c.batchEnd
+	c.batchEnd = newEnd
+	c.msgIdx = c.batchStart - 1 // NextMsg will increment
+	c.writePos = c.batchStart
+	return nil
 }
 
 // NextMsg advances to the next message in the batch.
@@ -236,34 +202,16 @@ func (c *Cursor) FirstMsgIdx() int64 {
 // === Writing ===
 
 // Write writes messages [fromMsg, toMsg) to dst.
+// The ring buffer stores full wire bytes, so this writes directly without
+// reconstructing headers.
 func (c *Cursor) Write(fromMsg, toMsg int64, dst io.Writer) error {
 	if fromMsg >= toMsg {
 		return nil
 	}
 
-	// Write each message with its header
-	for idx := fromMsg; idx < toMsg; idx++ {
-		start := c.ring.MessageOffset(idx)
-		end := c.ring.MessageEnd(idx)
-		msgType := c.ring.MessageType(idx)
-		n := end - start
-
-		// Write header
-		var header [5]byte
-		header[0] = msgType
-		header[1] = byte((n + 4) >> 24)
-		header[2] = byte((n + 4) >> 16)
-		header[3] = byte((n + 4) >> 8)
-		header[4] = byte(n + 4)
-
-		if _, err := dst.Write(header[:]); err != nil {
-			return err
-		}
-
-		// Write body
-		if err := c.ring.WriteRange(start, end, dst); err != nil {
-			return err
-		}
+	_, err := c.ring.WriteBatch(fromMsg, toMsg, dst)
+	if err != nil {
+		return err
 	}
 
 	c.writePos = toMsg

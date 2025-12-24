@@ -20,7 +20,7 @@ func TestReadyForQuery_TxStatusByte(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test with parsed message
-			parsed := ServerResponseReadyForQuery(NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: tt.txStatus))
+			parsed := ServerResponseReadyForQuery(NewLazyServerFromParsed(&pgproto3.ReadyForQuery{TxStatus: tt.txStatus}))
 			if got := parsed.TxStatusByte(); got != tt.txStatus {
 				t.Errorf("TxStatusByte() from parsed = %c, want %c", got, tt.txStatus)
 			}
@@ -53,7 +53,7 @@ func TestDataRow_ColumnCount(t *testing.T) {
 			for i := range values {
 				values[i] = []byte("test")
 			}
-			parsed := ServerResponseDataRow(NewLazyServerFromParsed(&pgproto3.DataRow{Values: values))
+			parsed := ServerResponseDataRow(NewLazyServerFromParsed(&pgproto3.DataRow{Values: values}))
 			if got := parsed.ColumnCount(); got != tt.count {
 				t.Errorf("ColumnCount() from parsed = %d, want %d", got, tt.count)
 			}
@@ -85,7 +85,7 @@ func TestCopyData_DataBytes(t *testing.T) {
 	data := []byte("line1\tvalue1\nline2\tvalue2\n")
 
 	// Test server CopyData with parsed
-	serverParsed := ServerCopyCopyData(NewLazyServerFromParsed(&pgproto3.CopyData{Data: data))
+	serverParsed := ServerCopyCopyData(NewLazyServerFromParsed(&pgproto3.CopyData{Data: data}))
 	if got := serverParsed.DataBytes(); string(got) != string(data) {
 		t.Errorf("ServerCopyCopyData.DataBytes() from parsed = %q, want %q", got, data)
 	}
@@ -99,7 +99,7 @@ func TestCopyData_DataBytes(t *testing.T) {
 	}
 
 	// Test client CopyData with parsed
-	clientParsed := ClientCopyCopyData(NewLazyClientFromParsed(&pgproto3.CopyData{Data: data))
+	clientParsed := ClientCopyCopyData(NewLazyClientFromParsed(&pgproto3.CopyData{Data: data}))
 	if got := clientParsed.DataBytes(); string(got) != string(data) {
 		t.Errorf("ClientCopyCopyData.DataBytes() from parsed = %q, want %q", got, data)
 	}
@@ -134,7 +134,7 @@ func TestCommandComplete_CommandTagBytes(t *testing.T) {
 	tag := []byte("SELECT 100")
 
 	// Test with parsed
-	parsed := ServerResponseCommandComplete(NewLazyServerFromParsed(&pgproto3.CommandComplete{CommandTag: tag))
+	parsed := ServerResponseCommandComplete(NewLazyServerFromParsed(&pgproto3.CommandComplete{CommandTag: tag}))
 	if got := parsed.CommandTagBytes(); string(got) != string(tag) {
 		t.Errorf("CommandTagBytes() from parsed = %q, want %q", got, tag)
 	}
@@ -161,7 +161,7 @@ func TestCopyInResponse_Format(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test with parsed
-			parsed := ServerCopyCopyInResponse(NewLazyServerFromParsed(&pgproto3.CopyInResponse{OverallFormat: tt.format))
+			parsed := ServerCopyCopyInResponse(NewLazyServerFromParsed(&pgproto3.CopyInResponse{OverallFormat: tt.format}))
 			if got := parsed.Format(); got != tt.format {
 				t.Errorf("Format() from parsed = %d, want %d", got, tt.format)
 			}
@@ -180,7 +180,7 @@ func TestCopyInResponse_Format(t *testing.T) {
 
 func TestCopyOutResponse_Format(t *testing.T) {
 	// Test with parsed
-	parsed := ServerCopyCopyOutResponse(NewLazyServerFromParsed(&pgproto3.CopyOutResponse{OverallFormat: 1))
+	parsed := ServerCopyCopyOutResponse(NewLazyServerFromParsed(&pgproto3.CopyOutResponse{OverallFormat: 1}))
 	if got := parsed.Format(); got != 1 {
 		t.Errorf("Format() from parsed = %d, want 1", got)
 	}
@@ -198,7 +198,7 @@ func TestRowDescription_FieldCount(t *testing.T) {
 	// Test with parsed
 	parsed := ServerExtendedQueryRowDescription(NewLazyServerFromParsed(&pgproto3.RowDescription{
 		Fields: []pgproto3.FieldDescription{{Name: []byte("col1")}, {Name: []byte("col2")}},
-	))
+	}))
 	if got := parsed.FieldCount(); got != 2 {
 		t.Errorf("FieldCount() from parsed = %d, want 2", got)
 	}
@@ -218,7 +218,7 @@ func TestParameterDescription_ParameterCount(t *testing.T) {
 	// Test with parsed
 	parsed := ServerExtendedQueryParameterDescription(NewLazyServerFromParsed(&pgproto3.ParameterDescription{
 		ParameterOIDs: []uint32{23, 25, 1043},
-	))
+	}))
 	if got := parsed.ParameterCount(); got != 3 {
 		t.Errorf("ParameterCount() from parsed = %d, want 3", got)
 	}
@@ -238,7 +238,7 @@ func TestQuery_QueryBytes(t *testing.T) {
 	query := "SELECT * FROM users WHERE id = $1"
 
 	// Test with parsed
-	parsed := ClientSimpleQueryQuery(NewLazyClientFromParsed(&pgproto3.Query{String: query))
+	parsed := ClientSimpleQueryQuery(NewLazyClientFromParsed(&pgproto3.Query{String: query}))
 	if got := string(parsed.QueryBytes()); got != query {
 		t.Errorf("QueryBytes() from parsed = %q, want %q", got, query)
 	}
@@ -255,7 +255,7 @@ func TestQuery_QueryBytes(t *testing.T) {
 
 func TestParse_StatementNameBytes(t *testing.T) {
 	// Test with parsed
-	parsed := ClientExtendedQueryParse(NewLazyClientFromParsed(&pgproto3.Parse{Name: "stmt1", Query: "SELECT 1"))
+	parsed := ClientExtendedQueryParse(NewLazyClientFromParsed(&pgproto3.Parse{Name: "stmt1", Query: "SELECT 1"}))
 	if got := string(parsed.StatementNameBytes()); got != "stmt1" {
 		t.Errorf("StatementNameBytes() from parsed = %q, want %q", got, "stmt1")
 	}
@@ -277,7 +277,7 @@ func TestBind_PortalNameBytes(t *testing.T) {
 	parsed := ClientExtendedQueryBind(NewLazyClientFromParsed(&pgproto3.Bind{
 		DestinationPortal: "portal1",
 		PreparedStatement: "stmt1",
-	))
+	}))
 	if got := string(parsed.PortalNameBytes()); got != "portal1" {
 		t.Errorf("PortalNameBytes() from parsed = %q, want %q", got, "portal1")
 	}
@@ -300,7 +300,7 @@ func TestBind_StatementNameBytes(t *testing.T) {
 	parsed := ClientExtendedQueryBind(NewLazyClientFromParsed(&pgproto3.Bind{
 		DestinationPortal: "portal1",
 		PreparedStatement: "stmt1",
-	))
+	}))
 	if got := string(parsed.StatementNameBytes()); got != "stmt1" {
 		t.Errorf("StatementNameBytes() from parsed = %q, want %q", got, "stmt1")
 	}
@@ -320,7 +320,7 @@ func TestBind_StatementNameBytes(t *testing.T) {
 
 func TestExecute_PortalNameBytes(t *testing.T) {
 	// Test with parsed
-	parsed := ClientExtendedQueryExecute(NewLazyClientFromParsed(&pgproto3.Execute{Portal: "my_portal", MaxRows: 100))
+	parsed := ClientExtendedQueryExecute(NewLazyClientFromParsed(&pgproto3.Execute{Portal: "my_portal", MaxRows: 100}))
 	if got := string(parsed.PortalNameBytes()); got != "my_portal" {
 		t.Errorf("PortalNameBytes() from parsed = %q, want %q", got, "my_portal")
 	}
@@ -340,7 +340,7 @@ func TestExecute_PortalNameBytes(t *testing.T) {
 
 func TestExecute_MaxRows(t *testing.T) {
 	// Test with parsed
-	parsed := ClientExtendedQueryExecute(NewLazyClientFromParsed(&pgproto3.Execute{Portal: "", MaxRows: 1000))
+	parsed := ClientExtendedQueryExecute(NewLazyClientFromParsed(&pgproto3.Execute{Portal: "", MaxRows: 1000}))
 	if got := parsed.MaxRows(); got != 1000 {
 		t.Errorf("MaxRows() from parsed = %d, want 1000", got)
 	}
@@ -360,13 +360,13 @@ func TestExecute_MaxRows(t *testing.T) {
 
 func TestDescribe_ObjectType(t *testing.T) {
 	// Test statement describe with parsed
-	parsedStmt := ClientExtendedQueryDescribe(NewLazyClientFromParsed(&pgproto3.Describe{ObjectType: 'S', Name: "stmt1"))
+	parsedStmt := ClientExtendedQueryDescribe(NewLazyClientFromParsed(&pgproto3.Describe{ObjectType: 'S', Name: "stmt1"}))
 	if got := parsedStmt.ObjectType(); got != 'S' {
 		t.Errorf("ObjectType() from parsed statement = %c, want S", got)
 	}
 
 	// Test portal describe with parsed
-	parsedPortal := ClientExtendedQueryDescribe(NewLazyClientFromParsed(&pgproto3.Describe{ObjectType: 'P', Name: "portal1"))
+	parsedPortal := ClientExtendedQueryDescribe(NewLazyClientFromParsed(&pgproto3.Describe{ObjectType: 'P', Name: "portal1"}))
 	if got := parsedPortal.ObjectType(); got != 'P' {
 		t.Errorf("ObjectType() from parsed portal = %c, want P", got)
 	}
@@ -384,7 +384,7 @@ func TestDescribe_ObjectType(t *testing.T) {
 
 func TestDescribe_ObjectNameBytes(t *testing.T) {
 	// Test with parsed
-	parsed := ClientExtendedQueryDescribe(NewLazyClientFromParsed(&pgproto3.Describe{ObjectType: 'S', Name: "test_stmt"))
+	parsed := ClientExtendedQueryDescribe(NewLazyClientFromParsed(&pgproto3.Describe{ObjectType: 'S', Name: "test_stmt"}))
 	if got := string(parsed.ObjectNameBytes()); got != "test_stmt" {
 		t.Errorf("ObjectNameBytes() from parsed = %q, want %q", got, "test_stmt")
 	}
@@ -402,7 +402,7 @@ func TestDescribe_ObjectNameBytes(t *testing.T) {
 
 func TestClose_ObjectType(t *testing.T) {
 	// Test with parsed
-	parsed := ClientExtendedQueryClose(NewLazyClientFromParsed(&pgproto3.Close{ObjectType: 'S', Name: "stmt1"))
+	parsed := ClientExtendedQueryClose(NewLazyClientFromParsed(&pgproto3.Close{ObjectType: 'S', Name: "stmt1"}))
 	if got := parsed.ObjectType(); got != 'S' {
 		t.Errorf("ObjectType() from parsed = %c, want S", got)
 	}
@@ -420,7 +420,7 @@ func TestClose_ObjectType(t *testing.T) {
 
 func TestClose_ObjectNameBytes(t *testing.T) {
 	// Test with parsed
-	parsed := ClientExtendedQueryClose(NewLazyClientFromParsed(&pgproto3.Close{ObjectType: 'S', Name: "to_close"))
+	parsed := ClientExtendedQueryClose(NewLazyClientFromParsed(&pgproto3.Close{ObjectType: 'S', Name: "to_close"}))
 	if got := string(parsed.ObjectNameBytes()); got != "to_close" {
 		t.Errorf("ObjectNameBytes() from parsed = %q, want %q", got, "to_close")
 	}

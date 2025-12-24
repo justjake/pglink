@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"runtime"
 	"sync/atomic"
 )
 
@@ -20,6 +21,15 @@ const (
 
 	// defaultMetaSize is the default number of message metadata slots
 	defaultMetaSize = 4096
+
+	// contextCheckBytes is how often to check context cancellation (amortized)
+	contextCheckBytes = 64 * 1024
+
+	// spaceCheckMsgs is how often to refresh cached consumer positions
+	spaceCheckMsgs = 32
+
+	// readerSpinCount is how many times reader spins before blocking on channel
+	readerSpinCount = 64
 )
 
 // ErrMessageTooLarge is returned when a message exceeds the buffer capacity
@@ -33,47 +43,55 @@ func (e ErrMessageTooLarge) Error() string {
 }
 
 // RingBuffer is a single-producer single-consumer ring buffer for PostgreSQL
-// wire protocol messages. The producer reads from a network connection and
-// parses message boundaries. The consumer iterates over complete messages.
+// wire protocol messages. The producer reads from a network connection directly
+// into the ring buffer and parses message boundaries. The consumer iterates
+// over complete messages and can write them directly to an output connection.
 //
 // Memory layout:
-// - data[]byte: circular buffer for raw message bytes
-// - types[]byte: message type byte for each message
+// - data[]byte: circular buffer for raw wire bytes (including headers)
 // - offsets[]int64: byte offset in data where each message starts
 //
-// Cache-line padding is used to prevent false sharing between producer and
-// consumer positions.
+// The ring stores exact wire bytes, enabling zero-copy proxying: messages that
+// don't need modification can be written directly from the ring to the output.
+//
+// Cache-line padding separates variables with different access patterns to
+// prevent false sharing. Variables with the same writer can share a cache line.
 type RingBuffer struct {
-	// Message data buffer (circular)
+	// === Immutable after construction ===
 	data     []byte
 	dataMask int64
-
-	// Message metadata (circular)
-	types    []byte
 	offsets  []int64
 	metaMask int64
 
-	// === Cache-line padded atomic positions ===
-	// Writer updates these, reader reads them
-	_            [64]byte
-	dataWritePos int64 // Next byte to write in data buffer
-	_            [64 - 8]byte
-	msgWritePos int64 // Next message slot to write
-	_           [64 - 8]byte
+	// === Writer-local state (only writer touches, no synchronization) ===
+	rawEnd      int64 // Where raw bytes from network end
+	parsePos    int64 // Where we've parsed up to (looking for message boundaries)
+	localMsgCnt int64 // Complete messages found (unpublished)
 
-	// Reader updates these, writer reads them
-	dataReadPos int64 // Bytes consumed by reader (can be reclaimed)
-	_           [64 - 8]byte
-	msgReadPos int64 // Messages consumed by reader
-	_          [64 - 8]byte
+	// Cached reader positions (refreshed periodically to reduce atomic loads)
+	cachedConsumedBytes int64
+	cachedConsumedMsgs  int64
 
-	// Signaling channels (buffered(1) for coalescing)
-	spaceReady chan struct{} // Reader signals writer when space freed
-	dataReady  chan struct{} // Writer signals reader when new messages available
+	// === Cache line boundary ===
+	_ [16]byte // Pad writer-local (48 bytes above) to 64
+
+	// === Published positions (writer stores, reader loads) ===
+	// These share a cache line since they have the same access pattern
+	publishedBytes int64 // Bytes available to reader (end of last complete message)
+	publishedMsgs  int64 // Messages available to reader
+	_ [48]byte           // Pad to 64 bytes
+
+	// === Consumed positions (reader stores, writer loads) ===
+	// These share a cache line since they have the same access pattern
+	consumedBytes int64 // Bytes consumed by reader (can be reclaimed)
+	consumedMsgs  int64 // Messages consumed by reader
+	_ [48]byte          // Pad to 64 bytes
+
+	// === Signaling (cold path) ===
+	writerWake chan struct{} // Reader signals writer: space freed
+	readerWake chan struct{} // Writer signals reader: data ready
 	done       chan struct{} // Closed when buffer is done (error or EOF)
-
-	// Error state (written once by writer, read by reader)
-	err atomic.Pointer[error]
+	err        atomic.Pointer[error]
 }
 
 // NewRingBuffer creates a new ring buffer with default sizes.
@@ -84,18 +102,16 @@ func NewRingBuffer() *RingBuffer {
 // NewRingBufferWithSize creates a new ring buffer with custom sizes.
 // dataSize must be a power of 2. metaSize must be a power of 2.
 func NewRingBufferWithSize(dataSize, metaSize int) *RingBuffer {
-	// Round up to power of 2
 	dataSize = nextPowerOf2(dataSize)
 	metaSize = nextPowerOf2(metaSize)
 
 	return &RingBuffer{
 		data:       make([]byte, dataSize),
 		dataMask:   int64(dataSize - 1),
-		types:      make([]byte, metaSize),
 		offsets:    make([]int64, metaSize),
 		metaMask:   int64(metaSize - 1),
-		spaceReady: make(chan struct{}, 1),
-		dataReady:  make(chan struct{}, 1),
+		writerWake: make(chan struct{}, 1),
+		readerWake: make(chan struct{}, 1),
 		done:       make(chan struct{}),
 	}
 }
@@ -112,34 +128,69 @@ func nextPowerOf2(n int) int {
 	return n
 }
 
-// signal sends a non-blocking signal on the channel.
-// Multiple signals coalesce since channel is buffered(1).
-func (r *RingBuffer) signal(ch chan struct{}) {
-	select {
-	case ch <- struct{}{}:
-	default:
-	}
-}
-
-// === Writer methods (called from reader goroutine) ===
+// === Writer methods ===
 
 // ReadFrom reads PostgreSQL wire protocol messages from src until EOF or error.
-// Messages are parsed and stored in the ring buffer for consumption.
-// This method blocks until the source is exhausted or context is cancelled.
+// Bytes are read directly into the ring buffer, then parsed to find message
+// boundaries. Complete messages are published in batches for the consumer.
 func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
-	var header [5]byte
+	bytesUntilContextCheck := int64(contextCheckBytes)
+	msgsUntilSpaceRefresh := spaceCheckMsgs
 
 	for {
-		// Check context
-		select {
-		case <-ctx.Done():
-			r.setError(ctx.Err())
-			return ctx.Err()
-		default:
+		// Calculate available contiguous space
+		used := r.rawEnd - r.cachedConsumedBytes
+		available := int64(len(r.data)) - used - minDataHeadroom
+
+		if available <= 0 {
+			// Refresh cached position and retry
+			r.refreshCachedPositions()
+			used = r.rawEnd - r.cachedConsumedBytes
+			available = int64(len(r.data)) - used - minDataHeadroom
+
+			if available <= 0 {
+				// Actually need to wait for space
+				if err := r.waitForSpace(ctx); err != nil {
+					return err
+				}
+				r.refreshCachedPositions()
+				continue
+			}
 		}
 
-		// Read message header (type + length)
-		_, err := io.ReadFull(src, header[:])
+		// Get contiguous region (handle wraparound)
+		writeOff := r.rawEnd & r.dataMask
+		contiguous := int64(len(r.data)) - writeOff
+		if contiguous > available {
+			contiguous = available
+		}
+
+		// Read directly from network into ring buffer
+		n, err := src.Read(r.data[writeOff : writeOff+contiguous])
+		if n > 0 {
+			r.rawEnd += int64(n)
+
+			// Parse all complete messages from the new data
+			r.parseCompleteMessages(&msgsUntilSpaceRefresh)
+
+			// Publish if we have new complete messages
+			if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
+				r.publish()
+			}
+
+			// Amortized context check
+			bytesUntilContextCheck -= int64(n)
+			if bytesUntilContextCheck <= 0 {
+				select {
+				case <-ctx.Done():
+					r.setError(ctx.Err())
+					return ctx.Err()
+				default:
+				}
+				bytesUntilContextCheck = contextCheckBytes
+			}
+		}
+
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				r.setError(io.EOF)
@@ -148,138 +199,174 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 			r.setError(err)
 			return err
 		}
-
-		msgType := header[0]
-		msgLen := int64(binary.BigEndian.Uint32(header[1:5])) - 4 // Length includes itself
-
-		if msgLen < 0 {
-			err := errors.New("invalid message length")
-			r.setError(err)
-			return err
-		}
-
-		// Check if message fits in buffer (with headroom)
-		if msgLen > int64(len(r.data))-minDataHeadroom {
-			err := ErrMessageTooLarge{MessageLen: msgLen + 5, BufferCap: int64(len(r.data))}
-			r.setError(err)
-			return err
-		}
-
-		// Wait for space in data buffer
-		if err := r.waitForDataSpace(ctx, msgLen); err != nil {
-			return err
-		}
-
-		// Wait for space in metadata buffer
-		if err := r.waitForMetaSpace(ctx); err != nil {
-			return err
-		}
-
-		// Record message start position and type
-		dataPos := atomic.LoadInt64(&r.dataWritePos)
-		msgPos := atomic.LoadInt64(&r.msgWritePos)
-
-		r.types[msgPos&r.metaMask] = msgType
-		r.offsets[msgPos&r.metaMask] = dataPos
-
-		// Read message body into ring buffer
-		if err := r.readIntoRing(src, msgLen); err != nil {
-			r.setError(err)
-			return err
-		}
-
-		// Update write positions (atomic, visible to reader)
-		atomic.AddInt64(&r.dataWritePos, msgLen)
-		atomic.AddInt64(&r.msgWritePos, 1)
-
-		// Signal reader that new data is available
-		r.signal(r.dataReady)
 	}
 }
 
-// waitForDataSpace waits until there's enough space for msgLen bytes.
-func (r *RingBuffer) waitForDataSpace(ctx context.Context, msgLen int64) error {
-	for {
-		dataWrite := atomic.LoadInt64(&r.dataWritePos)
-		dataRead := atomic.LoadInt64(&r.dataReadPos)
-		available := int64(len(r.data)) - (dataWrite - dataRead) - minDataHeadroom
-
-		if available >= msgLen {
-			return nil
-		}
-
-		// Wait for reader to free space
-		select {
-		case <-ctx.Done():
-			r.setError(ctx.Err())
-			return ctx.Err()
-		case <-r.spaceReady:
-			// Retry
-		}
-	}
-}
-
-// waitForMetaSpace waits until there's a metadata slot available.
-func (r *RingBuffer) waitForMetaSpace(ctx context.Context) error {
-	for {
-		msgWrite := atomic.LoadInt64(&r.msgWritePos)
-		msgRead := atomic.LoadInt64(&r.msgReadPos)
-		available := int64(len(r.types)) - (msgWrite - msgRead)
-
-		if available > 0 {
-			return nil
-		}
-
-		// Wait for reader to free space
-		select {
-		case <-ctx.Done():
-			r.setError(ctx.Err())
-			return ctx.Err()
-		case <-r.spaceReady:
-			// Retry
-		}
-	}
-}
-
-// readIntoRing reads exactly n bytes from src into the ring buffer at current write position.
-// Handles wraparound.
-func (r *RingBuffer) readIntoRing(src io.Reader, n int64) error {
-	dataPos := atomic.LoadInt64(&r.dataWritePos)
+// parseCompleteMessages scans from parsePos to rawEnd finding complete messages.
+func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) {
 	bufLen := int64(len(r.data))
+	metaLen := int64(len(r.offsets))
 
-	remaining := n
-	for remaining > 0 {
-		offset := dataPos & r.dataMask
-		// How much can we write before wraparound?
-		chunk := bufLen - offset
-		if chunk > remaining {
-			chunk = remaining
+	for {
+		available := r.rawEnd - r.parsePos
+
+		// Need at least 5 bytes for header
+		if available < 5 {
+			return
 		}
 
-		_, err := io.ReadFull(src, r.data[offset:offset+chunk])
-		if err != nil {
-			return err
+		// Check metadata space
+		usedMeta := r.localMsgCnt - r.cachedConsumedMsgs
+		if usedMeta >= metaLen {
+			// Refresh and check again
+			r.refreshCachedPositions()
+			usedMeta = r.localMsgCnt - r.cachedConsumedMsgs
+			if usedMeta >= metaLen {
+				return // No metadata space, stop parsing
+			}
 		}
 
-		dataPos += chunk
-		remaining -= chunk
+		// Read header (handle wraparound)
+		hdrOff := r.parsePos & r.dataMask
+		var msgLen int64
+
+		if hdrOff+5 <= bufLen {
+			// Fast path: header doesn't wrap
+			msgLen = int64(binary.BigEndian.Uint32(r.data[hdrOff+1:hdrOff+5])) + 1
+		} else {
+			// Slow path: header wraps around
+			var hdr [5]byte
+			for i := 0; i < 5; i++ {
+				hdr[i] = r.data[(hdrOff+int64(i))&r.dataMask]
+			}
+			msgLen = int64(binary.BigEndian.Uint32(hdr[1:5])) + 1
+		}
+
+		// Validate message length
+		if msgLen < 5 {
+			r.setError(errors.New("invalid message length"))
+			return
+		}
+
+		// Check if complete message is available
+		if available < msgLen {
+			return
+		}
+
+		// Check if message fits in buffer
+		if msgLen > bufLen-minDataHeadroom {
+			r.setError(ErrMessageTooLarge{MessageLen: msgLen, BufferCap: bufLen})
+			return
+		}
+
+		// Record message metadata
+		r.offsets[r.localMsgCnt&r.metaMask] = r.parsePos
+		r.localMsgCnt++
+		r.parsePos += msgLen
+
+		// Periodic refresh of cached positions
+		*msgsUntilSpaceRefresh--
+		if *msgsUntilSpaceRefresh <= 0 {
+			r.refreshCachedPositions()
+			*msgsUntilSpaceRefresh = spaceCheckMsgs
+		}
 	}
-
-	return nil
 }
 
-// setError sets the error and closes the done channel.
+func (r *RingBuffer) refreshCachedPositions() {
+	r.cachedConsumedBytes = atomic.LoadInt64(&r.consumedBytes)
+	r.cachedConsumedMsgs = atomic.LoadInt64(&r.consumedMsgs)
+}
+
+func (r *RingBuffer) publish() {
+	// Order matters: bytes first, then message count (commit point)
+	atomic.StoreInt64(&r.publishedBytes, r.parsePos)
+	atomic.StoreInt64(&r.publishedMsgs, r.localMsgCnt)
+
+	// Coalesced signal
+	select {
+	case r.readerWake <- struct{}{}:
+	default:
+	}
+}
+
+func (r *RingBuffer) waitForSpace(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		r.setError(ctx.Err())
+		return ctx.Err()
+	case <-r.writerWake:
+		return nil
+	case <-r.done:
+		return r.Error()
+	}
+}
+
 func (r *RingBuffer) setError(err error) {
 	if r.err.CompareAndSwap(nil, &err) {
 		close(r.done)
 	}
 }
 
-// === Reader methods (called from cursor) ===
+// === Reader methods ===
 
-// DataReady returns a channel that signals when new messages are available.
-func (r *RingBuffer) DataReady() <-chan struct{} {
-	return r.dataReady
+// AvailableMessages waits for messages and returns the count of available messages.
+// Spins briefly before falling back to channel wait for low latency.
+func (r *RingBuffer) AvailableMessages(afterMsg int64) (toMsg int64, err error) {
+	// Hot path: spin check
+	for i := 0; i < readerSpinCount; i++ {
+		toMsg = atomic.LoadInt64(&r.publishedMsgs)
+		if toMsg > afterMsg {
+			return toMsg, nil
+		}
+		select {
+		case <-r.done:
+			// Check for remaining messages before returning error
+			toMsg = atomic.LoadInt64(&r.publishedMsgs)
+			if toMsg > afterMsg {
+				return toMsg, nil
+			}
+			return afterMsg, r.Error()
+		default:
+		}
+		runtime.Gosched()
+	}
+
+	// Cold path: wait on channel
+	for {
+		select {
+		case <-r.readerWake:
+			toMsg = atomic.LoadInt64(&r.publishedMsgs)
+			if toMsg > afterMsg {
+				return toMsg, nil
+			}
+		case <-r.done:
+			toMsg = atomic.LoadInt64(&r.publishedMsgs)
+			if toMsg > afterMsg {
+				return toMsg, nil
+			}
+			return afterMsg, r.Error()
+		}
+	}
+}
+
+// ReleaseThrough marks messages [0, throughMsg) as consumed, freeing space for writer.
+func (r *RingBuffer) ReleaseThrough(throughMsg int64) {
+	if throughMsg <= 0 {
+		return
+	}
+
+	// Get the byte position of the next unconsumed message
+	dataPos := r.offsets[throughMsg&r.metaMask]
+
+	atomic.StoreInt64(&r.consumedMsgs, throughMsg)
+	atomic.StoreInt64(&r.consumedBytes, dataPos)
+
+	// Wake writer if waiting
+	select {
+	case r.writerWake <- struct{}{}:
+	default:
+	}
 }
 
 // Done returns a channel that's closed when the buffer is done (EOF or error).
@@ -296,41 +383,44 @@ func (r *RingBuffer) Error() error {
 	return *errPtr
 }
 
-// MsgWriteCount returns the total number of messages written.
-func (r *RingBuffer) MsgWriteCount() int64 {
-	return atomic.LoadInt64(&r.msgWritePos)
+// PublishedMsgCount returns the total number of messages published.
+func (r *RingBuffer) PublishedMsgCount() int64 {
+	return atomic.LoadInt64(&r.publishedMsgs)
 }
 
-// MsgReadCount returns the total number of messages consumed.
-func (r *RingBuffer) MsgReadCount() int64 {
-	return atomic.LoadInt64(&r.msgReadPos)
-}
+// === Message access methods ===
 
 // MessageType returns the type byte for message at index msgIdx.
+// Reads directly from the ring buffer data.
 func (r *RingBuffer) MessageType(msgIdx int64) byte {
-	return r.types[msgIdx&r.metaMask]
+	off := r.offsets[msgIdx&r.metaMask]
+	return r.data[off&r.dataMask]
 }
 
-// MessageOffset returns the byte offset where message msgIdx starts.
+// MessageOffset returns the byte offset where message msgIdx starts (including header).
 func (r *RingBuffer) MessageOffset(msgIdx int64) int64 {
 	return r.offsets[msgIdx&r.metaMask]
 }
 
 // MessageEnd returns the byte offset where message msgIdx ends (exclusive).
 func (r *RingBuffer) MessageEnd(msgIdx int64) int64 {
-	// End of this message is start of next message, or current write position
 	nextMsgIdx := msgIdx + 1
-	msgWrite := atomic.LoadInt64(&r.msgWritePos)
-	if nextMsgIdx < msgWrite {
+	published := atomic.LoadInt64(&r.publishedMsgs)
+	if nextMsgIdx < published {
 		return r.offsets[nextMsgIdx&r.metaMask]
 	}
-	return atomic.LoadInt64(&r.dataWritePos)
+	return atomic.LoadInt64(&r.publishedBytes)
 }
 
-// MessageBody returns the body bytes for message at msgIdx.
+// MessageLen returns the total wire length of message msgIdx (type + length + body).
+func (r *RingBuffer) MessageLen(msgIdx int64) int64 {
+	return r.MessageEnd(msgIdx) - r.MessageOffset(msgIdx)
+}
+
+// MessageBody returns the body bytes for message at msgIdx (excluding 5-byte header).
 // This may allocate if the message wraps around the ring buffer.
 func (r *RingBuffer) MessageBody(msgIdx int64) []byte {
-	start := r.MessageOffset(msgIdx)
+	start := r.MessageOffset(msgIdx) + 5 // Skip header
 	end := r.MessageEnd(msgIdx)
 	return r.readRange(start, end)
 }
@@ -361,17 +451,38 @@ func (r *RingBuffer) readRange(start, end int64) []byte {
 	return result
 }
 
-// WriteRange writes bytes from start to end (exclusive) to dst, handling wraparound.
-func (r *RingBuffer) WriteRange(start, end int64, dst io.Writer) error {
+// === Batch write methods (for zero-copy proxying) ===
+
+// WriteBatch writes messages [fromIdx, toIdx) directly to dst.
+// This is the hot path for proxying unmodified messages.
+func (r *RingBuffer) WriteBatch(fromIdx, toIdx int64, dst io.Writer) (int64, error) {
+	if fromIdx >= toIdx {
+		return 0, nil
+	}
+
+	start := r.MessageOffset(fromIdx)
+	end := r.MessageEnd(toIdx - 1)
+
+	return r.writeRange(start, end, dst)
+}
+
+// WriteMessage writes a single message to dst.
+func (r *RingBuffer) WriteMessage(msgIdx int64, dst io.Writer) (int64, error) {
+	start := r.MessageOffset(msgIdx)
+	end := r.MessageEnd(msgIdx)
+	return r.writeRange(start, end, dst)
+}
+
+func (r *RingBuffer) writeRange(start, end int64, dst io.Writer) (int64, error) {
 	n := end - start
 	if n <= 0 {
-		return nil
+		return 0, nil
 	}
 
 	startOff := start & r.dataMask
 	endOff := end & r.dataMask
 
-	// Fast path: no wraparound
+	// Fast path: no wraparound - single write syscall
 	if startOff < endOff || endOff == 0 {
 		var data []byte
 		if endOff == 0 {
@@ -379,35 +490,17 @@ func (r *RingBuffer) WriteRange(start, end int64, dst io.Writer) error {
 		} else {
 			data = r.data[startOff:endOff]
 		}
-		_, err := dst.Write(data)
-		return err
+		written, err := dst.Write(data)
+		return int64(written), err
 	}
 
-	// Slow path: wraparound
-	if _, err := dst.Write(r.data[startOff:]); err != nil {
-		return err
+	// Slow path: wraparound - two writes
+	n1, err := dst.Write(r.data[startOff:])
+	if err != nil {
+		return int64(n1), err
 	}
-	if _, err := dst.Write(r.data[:endOff]); err != nil {
-		return err
-	}
-	return nil
-}
-
-// AdvanceReader updates the read position, freeing space for the writer.
-// Called when the reader has finished processing messages up to (but not including) msgIdx.
-func (r *RingBuffer) AdvanceReader(msgIdx int64) {
-	// Update message read position
-	atomic.StoreInt64(&r.msgReadPos, msgIdx)
-
-	// Update data read position to free space
-	if msgIdx > 0 {
-		// Data up to the start of msgIdx is now free
-		dataPos := r.MessageOffset(msgIdx)
-		atomic.StoreInt64(&r.dataReadPos, dataPos)
-	}
-
-	// Signal writer that space is available
-	r.signal(r.spaceReady)
+	n2, err := dst.Write(r.data[:endOff])
+	return int64(n1 + n2), err
 }
 
 // Close closes the ring buffer and wakes up any waiting goroutines.
