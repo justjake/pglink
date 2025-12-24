@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/config/pgbouncer"
 	"github.com/justjake/pglink/pkg/frontend"
+	"github.com/justjake/pglink/pkg/observability"
 	"github.com/lucasb-eyer/go-colorful"
 	"golang.org/x/term"
 )
@@ -144,6 +147,7 @@ func printFullDocs() {
 func main() {
 	configPath := flag.String("config", "", "path to pglink.json config file")
 	listenAddr := flag.String("listen-addr", "", "listen address (overrides config file, e.g. :16432, 0.0.0.0:5432)")
+	prometheusListen := flag.String("prometheus-listen", "", "enable Prometheus metrics (format: :9090 or :9090/metrics)")
 	jsonLogs := flag.Bool("json", false, "output logs in JSON format")
 	showHelp := flag.Bool("help", false, "show full documentation")
 	writePgbouncerDir := flag.String("write-pgbouncer-config-dir", "", "write equivalent pgbouncer config to this directory and exit")
@@ -185,7 +189,17 @@ func main() {
 		cfg.SetListenAddr(*listenAddr)
 	}
 
-	ctx := context.Background()
+	// Apply Prometheus CLI override
+	if *prometheusListen != "" {
+		cfg.Prometheus = config.ParsePrometheusListen(*prometheusListen)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	secrets, err := config.NewSecretCacheFromEnv(ctx)
 	if err != nil {
@@ -220,14 +234,70 @@ func main() {
 		os.Exit(0)
 	}
 
-	svc, err := frontend.NewService(ctx, cfg, fsys, secrets, logger)
+	// Initialize OpenTelemetry tracing if configured
+	tracingEnabled := false
+	var tracerProvider *observability.TracerProvider
+	if cfg.OpenTelemetry != nil && cfg.OpenTelemetry.Enabled {
+		var err error
+		tracerProvider, err = observability.NewTracerProvider(ctx, cfg.OpenTelemetry)
+		if err != nil {
+			logger.Error("failed to create tracer provider", "error", err)
+			os.Exit(1)
+		}
+		if tracerProvider != nil {
+			tracingEnabled = true
+			logger.Info("OpenTelemetry tracing enabled",
+				"service_name", cfg.OpenTelemetry.GetServiceName(),
+				"endpoint", cfg.OpenTelemetry.OTLPEndpoint,
+				"protocol", cfg.OpenTelemetry.GetOTLPProtocol())
+			defer func() {
+				if err := tracerProvider.Shutdown(context.Background()); err != nil {
+					logger.Error("failed to shutdown tracer provider", "error", err)
+				}
+			}()
+		}
+	}
+
+	// Initialize Prometheus metrics if configured
+	var metrics *observability.Metrics
+	var metricsServer *observability.MetricsServer
+	if cfg.Prometheus != nil {
+		metrics = observability.DefaultMetrics()
+		metricsServer = observability.NewMetricsServer(cfg.Prometheus, logger)
+		if err := metricsServer.Start(); err != nil {
+			logger.Error("failed to start metrics server", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("Prometheus metrics enabled",
+			"listen", cfg.Prometheus.GetListen(),
+			"path", cfg.Prometheus.GetPath())
+		defer func() {
+			if err := metricsServer.Shutdown(context.Background()); err != nil {
+				logger.Error("failed to shutdown metrics server", "error", err)
+			}
+		}()
+	}
+
+	svc, err := frontend.NewService(ctx, cfg, fsys, secrets, logger, tracingEnabled, metrics)
 	if err != nil {
 		logger.Error("failed to create service", "error", err)
 		os.Exit(1)
 	}
 
+	// Handle shutdown signal in goroutine
+	go func() {
+		sig := <-sigChan
+		logger.Info("received shutdown signal", "signal", sig)
+		cancel()
+		svc.Shutdown()
+	}()
+
 	if err := svc.Listen(); err != nil {
-		logger.Error("service error", "error", err)
-		os.Exit(1)
+		if err == context.Canceled {
+			logger.Info("service shut down gracefully")
+		} else {
+			logger.Error("service error", "error", err)
+			os.Exit(1)
+		}
 	}
 }

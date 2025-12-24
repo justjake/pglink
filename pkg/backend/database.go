@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -19,10 +20,11 @@ import (
 // All pools are created eagerly in NewDatabase and the userPools map is
 // immutable after construction, so no locking is needed.
 type Database struct {
-	config  *config.DatabaseConfig
-	secrets *config.SecretCache
-	pool    *MultiPool[config.UserConfig]
-	logger  *slog.Logger
+	config        *config.DatabaseConfig
+	secrets       *config.SecretCache
+	pool          *MultiPool[config.UserConfig]
+	logger        *slog.Logger
+	tracingEnabled bool
 
 	destroyedConns atomic.Int32
 }
@@ -30,10 +32,13 @@ type Database struct {
 // NewDatabase creates a new Database with the given database configuration.
 // The global max connections is taken from cfg.Backend.PoolMaxConns.
 // All user pools are created eagerly to respect MinIdleConns settings.
-func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *config.SecretCache, logger *slog.Logger) (*Database, error) {
+// If tracingEnabled is true, otelpgx tracing will be added to connections
+// (assumes the global tracer provider has been configured).
+func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *config.SecretCache, logger *slog.Logger, tracingEnabled bool) (*Database, error) {
 	db := &Database{
-		config:  cfg,
-		secrets: secrets,
+		config:        cfg,
+		secrets:       secrets,
+		tracingEnabled: tracingEnabled,
 	}
 	db.logger = logger.With("backend", db.Name())
 
@@ -74,6 +79,12 @@ func (d *Database) poolConfigForUser(ctx context.Context, user config.UserConfig
 
 	cfg.ConnConfig.User = username
 	cfg.ConnConfig.Password = password
+
+	// Set tracer if enabled (uses global tracer provider set by observability.NewTracerProvider)
+	if d.tracingEnabled {
+		cfg.ConnConfig.Tracer = otelpgx.NewTracer()
+	}
+
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		d.logger.Debug("connected to backend", "user", username, "pid", conn.PgConn().PID())
 		return nil

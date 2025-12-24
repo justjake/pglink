@@ -11,14 +11,20 @@ import (
 	"maps"
 	"math/rand/v2"
 	"net"
+	"regexp"
 	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/justjake/pglink/pkg/backend"
 	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/observability"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
@@ -79,6 +85,14 @@ type Session struct {
 
 	// Message stored until the next call to Recv.
 	lastRecv pgwire.Message
+
+	// Observability
+	tracingEnabled bool                   // Whether OTEL tracing is enabled
+	metrics        *observability.Metrics // May be nil if metrics disabled
+	sessionSpan    trace.Span             // Root span for this session (nil if tracing disabled)
+
+	// For CopyRecognizer: track the last SQL query to associate COPY with its query
+	lastSQL string
 }
 
 // Select over reading from frontend, reading from backend, or receiving a context cancellation.
@@ -93,6 +107,7 @@ func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
 		s.logger.Debug("received (frontend only): from frontend", "msg", fmt.Sprintf("%T", msg.Value))
 		s.lastRecv = msg.Value
 		s.state.UpdateForFrontentMessage(msg.Value.Client())
+		s.state.ProcessFlows(msg.Value)
 		return msg.Value, msg.Error
 	}
 }
@@ -107,6 +122,7 @@ func (s *Session) RecvAny() (pgwire.Message, error) {
 		s.lastRecv = msg.Value
 		s.logger.Debug("receive: from frontend", "msg", fmt.Sprintf("%T", msg.Value))
 		s.state.UpdateForFrontentMessage(msg.Value.Client())
+		s.state.ProcessFlows(msg.Value)
 		return msg.Value, msg.Error
 	case msg := <-s.backend.ReadingChan():
 		s.lastRecv = msg.Value
@@ -114,6 +130,7 @@ func (s *Session) RecvAny() (pgwire.Message, error) {
 		// We never want to rewrite a server message, since they never contain
 		// information like portal or statement names.
 		s.state.UpdateForServerMessage(msg.Value)
+		s.state.ProcessFlows(msg.Value)
 		return msg.Value, msg.Error
 	}
 }
@@ -156,6 +173,19 @@ func (s *Session) Close() {
 	}
 
 	s.releaseBackend()
+
+	// Close any active flows
+	s.state.CloseAllFlows()
+
+	// End session span
+	if s.sessionSpan != nil {
+		s.sessionSpan.End()
+	}
+
+	// Record client disconnection metric
+	if s.metrics != nil && s.databaseName != "" && s.userName != "" {
+		s.metrics.RecordClientDisconnect(s.databaseName, s.userName)
+	}
 
 	if s.logger.Enabled(s.ctx, slog.LevelDebug) {
 		s.logger.Debug("session closed", "state", s.state)
@@ -242,6 +272,14 @@ func (s *Session) Run() {
 		but continue listening for ReadyForQuery or ErrorResponse.
 	*/
 	s.initSessionProcessState()
+
+	// Set up observability after we know the user/database
+	s.startSessionSpan()
+	s.setupFlowRecognizers()
+	if s.metrics != nil {
+		s.metrics.RecordClientConnection(s.databaseName, s.userName)
+	}
+
 	for key, value := range s.state.ParameterStatuses {
 		s.frontend.Send(&pgproto3.ParameterStatus{
 			Name:  key,
@@ -927,4 +965,256 @@ func (w *slogTraceWriter) Write(p []byte) (n int, err error) {
 	}
 
 	return n, nil
+}
+
+// setupFlowRecognizers configures flow recognizers with tracing and metrics callbacks.
+// This should be called after authentication when we know the database/user.
+func (s *Session) setupFlowRecognizers() {
+	// Get OpenTelemetry config for regex patterns
+	var traceparentRegex, appNameRegex *regexp.Regexp
+	if s.config.OpenTelemetry != nil {
+		traceparentRegex = s.config.OpenTelemetry.GetTraceparentRegex()
+		appNameRegex = s.config.OpenTelemetry.GetApplicationNameRegex()
+	}
+
+	// Get the tracer if tracing is enabled
+	var tracer trace.Tracer
+	if s.tracingEnabled {
+		tracer = otel.Tracer("github.com/justjake/pglink/pkg/frontend")
+	}
+
+	// Helper to get application name from startup parameters
+	appName := s.startupParameters["application_name"]
+
+	// SimpleQuery recognizer
+	s.state.AddRecognizer(&pgwire.SimpleQueryRecognizer{
+		OnStart: func(msg pgwire.ClientSimpleQueryQuery) func(*pgwire.SimpleQueryFlow) {
+			s.lastSQL = msg.T.String // Track for CopyRecognizer
+
+			// Start span if tracing enabled
+			var span trace.Span
+			if tracer != nil {
+				ctx := s.ctx
+				// Extract trace context from SQL if configured
+				if traceparentRegex != nil {
+					ctx = s.extractTraceContextFromSQL(ctx, msg.T.String, traceparentRegex)
+				}
+				_, span = tracer.Start(ctx, "pglink.query.simple",
+					trace.WithAttributes(observability.SessionAttributes(s.userName, s.databaseName, appName)...),
+				)
+				// Extract per-query application_name if configured
+				if appNameRegex != nil {
+					if queryAppName := extractRegexMatch(msg.T.String, appNameRegex); queryAppName != "" {
+						span.SetAttributes(attribute.String(observability.AttrApplicationNameQ, queryAppName))
+					}
+				}
+			}
+
+			return func(f *pgwire.SimpleQueryFlow) {
+				// Record metrics
+				if s.metrics != nil {
+					duration := f.EndTime.Sub(f.StartTime).Seconds()
+					s.metrics.RecordQuery(s.databaseName, s.userName, pgwire.FlowTypeSimpleQuery.String(), duration, f.Err == nil)
+				}
+
+				// End span with attributes
+				if span != nil {
+					span.SetAttributes(
+						attribute.String(observability.AttrQueryType, pgwire.FlowTypeSimpleQuery.String()),
+						attribute.Int64(observability.AttrRowCount, f.RowCount),
+					)
+					if s.config.OpenTelemetry != nil && s.config.OpenTelemetry.IncludeQueryText {
+						span.SetAttributes(attribute.String(observability.AttrDBStatement, f.SQL))
+					}
+					if f.CommandTag.String() != "" {
+						span.SetAttributes(attribute.String(observability.AttrDBOperation, f.CommandTag.String()))
+					}
+					if f.Err != nil {
+						span.RecordError(fmt.Errorf("%s: %s", f.Err.Code, f.Err.Message))
+						span.SetStatus(codes.Error, f.Err.Message)
+					}
+					span.End()
+				}
+			}
+		},
+	})
+
+	// ExtendedQuery recognizer
+	s.state.AddRecognizer(&pgwire.ExtendedQueryRecognizer{
+		OnStart: func(msg pgwire.ClientExtendedQueryParse) func(*pgwire.ExtendedQueryFlow) {
+			s.lastSQL = msg.T.Query // Track for CopyRecognizer
+
+			// Start span if tracing enabled
+			var span trace.Span
+			if tracer != nil {
+				ctx := s.ctx
+				// Extract trace context from SQL if configured
+				if traceparentRegex != nil {
+					ctx = s.extractTraceContextFromSQL(ctx, msg.T.Query, traceparentRegex)
+				}
+				_, span = tracer.Start(ctx, "pglink.query.extended",
+					trace.WithAttributes(observability.SessionAttributes(s.userName, s.databaseName, appName)...),
+				)
+				// Extract per-query application_name if configured
+				if appNameRegex != nil {
+					if queryAppName := extractRegexMatch(msg.T.Query, appNameRegex); queryAppName != "" {
+						span.SetAttributes(attribute.String(observability.AttrApplicationNameQ, queryAppName))
+					}
+				}
+				if msg.T.Name != "" {
+					span.SetAttributes(attribute.String(observability.AttrStatementName, msg.T.Name))
+				}
+			}
+
+			return func(f *pgwire.ExtendedQueryFlow) {
+				// Record metrics
+				if s.metrics != nil {
+					duration := f.EndTime.Sub(f.StartTime).Seconds()
+					s.metrics.RecordQuery(s.databaseName, s.userName, f.Type.String(), duration, f.Err == nil)
+				}
+
+				// End span with attributes
+				if span != nil {
+					span.SetAttributes(
+						attribute.String(observability.AttrQueryType, f.Type.String()),
+						attribute.Int64(observability.AttrRowCount, f.RowCount),
+					)
+					if s.config.OpenTelemetry != nil && s.config.OpenTelemetry.IncludeQueryText && f.SQL != "" {
+						span.SetAttributes(attribute.String(observability.AttrDBStatement, f.SQL))
+					}
+					if f.CommandTag.String() != "" {
+						span.SetAttributes(attribute.String(observability.AttrDBOperation, f.CommandTag.String()))
+					}
+					if f.PortalName != "" {
+						span.SetAttributes(attribute.String(observability.AttrPortalName, f.PortalName))
+					}
+					if f.Err != nil {
+						span.RecordError(fmt.Errorf("%s: %s", f.Err.Code, f.Err.Message))
+						span.SetStatus(codes.Error, f.Err.Message)
+					}
+					span.End()
+				}
+			}
+		},
+	})
+
+	// Copy recognizer
+	s.state.AddRecognizer(&pgwire.CopyRecognizer{
+		GetLastSQL: func() string {
+			return s.lastSQL
+		},
+		OnStart: func(flowType pgwire.FlowType, sql string) func(*pgwire.CopyFlow) {
+			// Start span if tracing enabled
+			var span trace.Span
+			if tracer != nil {
+				ctx := s.ctx
+				// Extract trace context from SQL if configured
+				if traceparentRegex != nil && sql != "" {
+					ctx = s.extractTraceContextFromSQL(ctx, sql, traceparentRegex)
+				}
+				_, span = tracer.Start(ctx, "pglink.copy",
+					trace.WithAttributes(observability.SessionAttributes(s.userName, s.databaseName, appName)...),
+				)
+			}
+
+			return func(f *pgwire.CopyFlow) {
+				// Record metrics
+				if s.metrics != nil {
+					duration := f.EndTime.Sub(f.StartTime).Seconds()
+					s.metrics.RecordQuery(s.databaseName, s.userName, f.Type.String(), duration, f.Err == nil)
+				}
+
+				// End span with attributes
+				if span != nil {
+					span.SetAttributes(
+						attribute.String(observability.AttrQueryType, f.Type.String()),
+						attribute.Int64(observability.AttrByteCount, f.ByteCount),
+					)
+					if s.config.OpenTelemetry != nil && s.config.OpenTelemetry.IncludeQueryText && f.SQL != "" {
+						span.SetAttributes(attribute.String(observability.AttrDBStatement, f.SQL))
+					}
+					if f.CommandTag.String() != "" {
+						span.SetAttributes(attribute.String(observability.AttrDBOperation, f.CommandTag.String()))
+					}
+					if f.Err != nil {
+						span.RecordError(fmt.Errorf("%s: %s", f.Err.Code, f.Err.Message))
+						span.SetStatus(codes.Error, f.Err.Message)
+					}
+					span.End()
+				}
+			}
+		},
+	})
+}
+
+// extractTraceContextFromSQL extracts W3C trace context from SQL using the given regex.
+func (s *Session) extractTraceContextFromSQL(ctx context.Context, sql string, regex *regexp.Regexp) context.Context {
+	traceparent := extractRegexMatch(sql, regex)
+	if traceparent == "" {
+		return ctx
+	}
+
+	// Use the global propagator to extract trace context
+	carrier := traceparentCarrier{traceparent: traceparent}
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+}
+
+// extractRegexMatch extracts the first capture group from sql using the regex.
+func extractRegexMatch(sql string, regex *regexp.Regexp) string {
+	if regex == nil {
+		return ""
+	}
+	match := regex.FindStringSubmatch(sql)
+	if len(match) > 1 {
+		return match[1]
+	}
+	return ""
+}
+
+// traceparentCarrier implements propagation.TextMapCarrier for extracting traceparent.
+type traceparentCarrier struct {
+	traceparent string
+}
+
+func (c traceparentCarrier) Get(key string) string {
+	if key == "traceparent" {
+		return c.traceparent
+	}
+	return ""
+}
+
+func (c traceparentCarrier) Set(key, value string) {
+	// No-op, this is read-only
+}
+
+func (c traceparentCarrier) Keys() []string {
+	return []string{"traceparent"}
+}
+
+// startSessionSpan starts the root span for this session.
+// Should be called after authentication when we know the user/database.
+func (s *Session) startSessionSpan() {
+	if !s.tracingEnabled {
+		return
+	}
+
+	tracer := otel.Tracer("github.com/justjake/pglink/pkg/frontend")
+
+	// Check for traceparent in startup parameters
+	ctx := s.ctx
+	if s.config.OpenTelemetry != nil {
+		paramName := s.config.OpenTelemetry.GetTraceparentStartupParameter()
+		if traceparent, ok := s.startupParameters[paramName]; ok && traceparent != "" {
+			carrier := traceparentCarrier{traceparent: traceparent}
+			ctx = otel.GetTextMapPropagator().Extract(ctx, carrier)
+		}
+	}
+
+	appName := s.startupParameters["application_name"]
+	ctx, s.sessionSpan = tracer.Start(ctx, "pglink.session",
+		trace.WithAttributes(observability.SessionAttributes(s.userName, s.databaseName, appName)...),
+		trace.WithAttributes(attribute.Int("pglink.pid", int(s.state.PID))),
+	)
+	// Update context so child spans use the session span as parent
+	s.ctx = ctx
 }

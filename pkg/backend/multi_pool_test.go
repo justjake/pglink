@@ -39,14 +39,8 @@ func newTestPool(t *testing.T, maxConns int32) *MultiPool[string] {
 	return NewMultiPool[string](maxConns, logger)
 }
 
-// addTestPoolUser adds a user pool to the MultiPool with default config.
-func addTestPoolUser(t *testing.T, ctx context.Context, mp *MultiPool[string], userKey string) {
-	addTestPoolUserWithMaxConns(t, ctx, mp, userKey, 100)
-}
-
-// addTestPoolUserWithMaxConns adds a user pool with a specified per-pool max connections.
-// Use this for production-scale tests that need higher per-pool limits.
-func addTestPoolUserWithMaxConns(t *testing.T, ctx context.Context, mp *MultiPool[string], userKey string, poolMaxConns int32) {
+// addTestPoolUser adds a user pool with a specified per-pool max connections.
+func addTestPoolUser(t *testing.T, ctx context.Context, mp *MultiPool[string], userKey string, poolMaxConns int32) {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(testConnStr())
 	require.NoError(t, err, "failed to parse pool config")
@@ -69,10 +63,10 @@ func addTestPoolUserWithMaxConns(t *testing.T, ctx context.Context, mp *MultiPoo
 // all connections are in use and the pool is at its max connection limit.
 func TestMultiPool_MaxConns_BlocksWhenAtLimit(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 3
+	const maxConns = 50
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -104,17 +98,17 @@ func TestMultiPool_MaxConns_BlocksWhenAtLimit(t *testing.T) {
 // limit is shared across all user pools.
 func TestMultiPool_MaxConns_SharedAcrossUsers(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 4
+	const maxConns = 50
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
-	addTestPoolUser(t, ctx, mp, "user2")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
+	addTestPoolUser(t, ctx, mp, "user2", maxConns)
 	mp.Start()
 	defer mp.Close()
 
-	// Acquire 2 connections from each user (total 4 = maxConns)
+	// Acquire maxConns/2 connections from each user (total = maxConns)
 	var conns []*MultiPoolConn
-	for i := 0; i < 2; i++ {
+	for i := 0; i < maxConns/2; i++ {
 		conn, err := mp.Acquire(ctx, "user1")
 		require.NoError(t, err)
 		conns = append(conns, conn)
@@ -152,7 +146,7 @@ func TestMultiPool_MaxConns_ReleaseMakesRoom(t *testing.T) {
 	const maxConns = 2
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -201,10 +195,10 @@ func TestMultiPool_MaxConns_ReleaseMakesRoom(t *testing.T) {
 // totalIdleConns are accurately tracked through acquire/release cycles.
 func TestMultiPool_Counters_AccurateOnAcquireRelease(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 5
+	const maxConns = 50
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -245,12 +239,12 @@ func TestMultiPool_Counters_AccurateOnAcquireRelease(t *testing.T) {
 // TestMultiPool_Counters_MultipleUsers verifies counter accuracy across multiple user pools.
 func TestMultiPool_Counters_MultipleUsers(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 10
+	const maxConns = 50
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
-	addTestPoolUser(t, ctx, mp, "user2")
-	addTestPoolUser(t, ctx, mp, "user3")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
+	addTestPoolUser(t, ctx, mp, "user2", maxConns)
+	addTestPoolUser(t, ctx, mp, "user3", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -282,10 +276,10 @@ func TestMultiPool_Counters_MultipleUsers(t *testing.T) {
 // TestMultiPool_MarkForDestroy verifies that marked connections are destroyed on release.
 func TestMultiPool_MarkForDestroy(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 5
+	const maxConns = 50
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -318,8 +312,8 @@ func TestMultiPool_CrossUserAcquisition(t *testing.T) {
 	const maxConns = 2
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
-	addTestPoolUser(t, ctx, mp, "user2")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
+	addTestPoolUser(t, ctx, mp, "user2", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -353,7 +347,7 @@ func TestMultiPool_SingleMaxConn_Reacquire(t *testing.T) {
 	const maxConns = 1
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -381,8 +375,8 @@ func TestMultiPool_SingleMaxConn_CrossUser(t *testing.T) {
 	const maxConns = 1
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
-	addTestPoolUser(t, ctx, mp, "user2")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
+	addTestPoolUser(t, ctx, mp, "user2", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -414,13 +408,13 @@ func TestMultiPool_SingleMaxConn_CrossUser(t *testing.T) {
 // TestMultiPool_ConcurrentAcquireRelease tests concurrent access to the pool.
 func TestMultiPool_ConcurrentAcquireRelease(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 10
+	const maxConns = 50
 	const numGoroutines = 20
 	const iterationsPerGoroutine = 10
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
-	addTestPoolUser(t, ctx, mp, "user2")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
+	addTestPoolUser(t, ctx, mp, "user2", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -480,13 +474,13 @@ func TestMultiPool_ConcurrentAcquireRelease(t *testing.T) {
 // during concurrent operations.
 func TestMultiPool_ConcurrentAcquire_SettlesToMaxConns(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 5
-	const numGoroutines = 50
-	// Allow temporary overshoot during concurrent operations
-	const maxAllowedOvershoot = 5
+	const maxConns = 50
+	const numGoroutines = 100
+	// Allow temporary overshoot during concurrent operations (10% of maxConns)
+	const maxAllowedOvershoot = 10
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -544,9 +538,10 @@ func TestMultiPool_ConcurrentAcquire_SettlesToMaxConns(t *testing.T) {
 // TestMultiPool_AcquireAfterClose verifies behavior when acquiring after close.
 func TestMultiPool_AcquireAfterClose(t *testing.T) {
 	ctx := context.Background()
+	const maxConns = 5
 
-	mp := newTestPool(t, 5)
-	addTestPoolUser(t, ctx, mp, "user1")
+	mp := newTestPool(t, maxConns)
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	mp.Close()
 
@@ -557,9 +552,10 @@ func TestMultiPool_AcquireAfterClose(t *testing.T) {
 // TestMultiPool_ReleaseConnection verifies basic release behavior.
 func TestMultiPool_ReleaseConnection(t *testing.T) {
 	ctx := context.Background()
+	const maxConns = 5
 
-	mp := newTestPool(t, 5)
-	addTestPoolUser(t, ctx, mp, "user1")
+	mp := newTestPool(t, maxConns)
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -585,11 +581,11 @@ func TestMultiPool_ReleaseConnection(t *testing.T) {
 // back to MaxConns or below.
 func TestMultiPool_MaxConns_EventuallySettles(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 5
-	const numGoroutines = 30
+	const maxConns = 50
+	const numGoroutines = 100
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -652,14 +648,14 @@ func TestMultiPool_MaxConns_EventuallySettles(t *testing.T) {
 // connections do not grow without bound under sustained concurrent load.
 func TestMultiPool_MaxConns_NoUnboundedGrowth(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 5
-	const numWorkers = 10
+	const maxConns = 50
+	const numWorkers = 20
 	const opsPerWorker = 50
-	const maxAllowedOvershoot = 5 // Allow some temporary overshoot
+	const maxAllowedOvershoot = 10 // Allow some temporary overshoot (20% of maxConns)
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
-	addTestPoolUser(t, ctx, mp, "user2")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
+	addTestPoolUser(t, ctx, mp, "user2", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -757,9 +753,9 @@ func TestMultiPool_ProductionScale_OvershootBound(t *testing.T) {
 	mp := newTestPool(t, maxConns)
 	// Each pool needs enough capacity to hold ~1/3 of maxConns
 	// Use 500 per pool to allow for imbalanced distribution
-	addTestPoolUserWithMaxConns(t, ctx, mp, "user1", 500)
-	addTestPoolUserWithMaxConns(t, ctx, mp, "user2", 500)
-	addTestPoolUserWithMaxConns(t, ctx, mp, "user3", 500)
+	addTestPoolUser(t, ctx, mp, "user1", 500)
+	addTestPoolUser(t, ctx, mp, "user2", 500)
+	addTestPoolUser(t, ctx, mp, "user3", 500)
 	mp.Start()
 	defer mp.Close()
 
@@ -900,7 +896,7 @@ func TestMultiPool_ProductionScale_BurstRecovery(t *testing.T) {
 
 	mp := newTestPool(t, maxConns)
 	// Single pool needs capacity for the full burst
-	addTestPoolUserWithMaxConns(t, ctx, mp, "user1", 1000)
+	addTestPoolUser(t, ctx, mp, "user1", 1000)
 	mp.Start()
 	defer mp.Close()
 
@@ -974,7 +970,7 @@ func TestMultiPool_ProductionScale_CrossPoolContention(t *testing.T) {
 	mp := newTestPool(t, maxConns)
 	for i := 0; i < numPools; i++ {
 		// Each pool needs enough capacity for its goroutines plus headroom
-		addTestPoolUserWithMaxConns(t, ctx, mp, fmt.Sprintf("pool%d", i), 200)
+		addTestPoolUser(t, ctx, mp, fmt.Sprintf("pool%d", i), 200)
 	}
 	mp.Start()
 	defer mp.Close()
@@ -1060,10 +1056,10 @@ func TestMultiPool_ProductionScale_CrossPoolContention(t *testing.T) {
 // counters are properly maintained and return to zero after operations complete.
 func TestMultiPool_PendingCounters(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 3
+	const maxConns = 50
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -1099,11 +1095,11 @@ func TestMultiPool_PendingCounters(t *testing.T) {
 // idle connection is reclaimed to make room.
 func TestMultiPool_CrossPool_IdleReclamation(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 3
+	const maxConns = 50
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "userA")
-	addTestPoolUser(t, ctx, mp, "userB")
+	addTestPoolUser(t, ctx, mp, "userA", maxConns)
+	addTestPoolUser(t, ctx, mp, "userB", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -1163,16 +1159,16 @@ func TestMultiPool_CrossPool_IdleReclamation(t *testing.T) {
 // high contention. Some failures are expected during extreme contention.
 func TestMultiPool_CrossPool_ConcurrentReclamation(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 5
-	const numPools = 3
-	const numGoroutinesPerPool = 5
+	const maxConns = 50
+	const numPools = 5
+	const numGoroutinesPerPool = 10
 	const opsPerGoroutine = 10
-	// Allow temporary overshoot during high contention
-	const maxAllowedOvershoot = 5
+	// Allow temporary overshoot during high contention (20% of maxConns)
+	const maxAllowedOvershoot = 10
 
 	mp := newTestPool(t, maxConns)
 	for i := 0; i < numPools; i++ {
-		addTestPoolUser(t, ctx, mp, fmt.Sprintf("pool%d", i))
+		addTestPoolUser(t, ctx, mp, fmt.Sprintf("pool%d", i), maxConns)
 	}
 	mp.Start()
 	defer mp.Close()
@@ -1239,10 +1235,10 @@ func TestMultiPool_CrossPool_ConcurrentReclamation(t *testing.T) {
 // fails to be created, the pendingCreates counter is properly decremented.
 func TestMultiPool_AcquireFailure_CounterCleanup(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 5
+	const maxConns = 50
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -1277,11 +1273,11 @@ func TestMultiPool_AcquireFailure_CounterCleanup(t *testing.T) {
 // This test validates that sequential acquire/release properly reuses connections.
 func TestMultiPool_RapidAcquireRelease(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 3
-	const iterations = 100
+	const maxConns = 50
+	const iterations = 200
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -1323,11 +1319,11 @@ func TestMultiPool_RapidAcquireRelease(t *testing.T) {
 // to verify connection cleanup works correctly.
 func TestMultiPool_BurstThenIdle(t *testing.T) {
 	ctx := context.Background()
-	const maxConns = 5
-	const burstSize = 20
+	const maxConns = 50
+	const burstSize = 100
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -1387,8 +1383,8 @@ func TestMultiPool_AllConnectionsInUse_NewUserBlocks(t *testing.T) {
 	const maxConns = 2
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
-	addTestPoolUser(t, ctx, mp, "user2")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
+	addTestPoolUser(t, ctx, mp, "user2", maxConns)
 	mp.Start()
 	defer mp.Close()
 
@@ -1423,7 +1419,7 @@ func TestMultiPool_ConnectionReuse(t *testing.T) {
 	const maxConns = 2
 
 	mp := newTestPool(t, maxConns)
-	addTestPoolUser(t, ctx, mp, "user1")
+	addTestPoolUser(t, ctx, mp, "user1", maxConns)
 	mp.Start()
 	defer mp.Close()
 

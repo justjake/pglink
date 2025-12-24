@@ -53,6 +53,7 @@ func IsSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	case *pgproto3.Query:
 		// Simple query.
 		// Destroys unnamed prepared statement & portal.
+		return true
 	case *pgproto3.FunctionCall:
 		// Call a function; seems to work like a simple query? Or maybe it works with both modes?
 		return true
@@ -66,8 +67,10 @@ func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	// Extended Query flow:
 	case *pgproto3.Parse:
 		// Extended Query 1: parse text into a prepared statement.
+		return true
 	case *pgproto3.Bind:
 		// Extended Query 2: Bind parameters to a prepared statement.
+		return true
 	case *pgproto3.Execute:
 		// Extended Query 3: Execute a prepared statement, requesting N or all rows.
 		// May need to be called again if server replies PortalSuspended.
@@ -77,11 +80,12 @@ func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 		// - CommandComplete: success
 		// - ErrorResponse: failure
 		// - EmptyQueryResponse: the portal was created from an empty query string
+		return true
 	case *pgproto3.Sync:
 		// Extended Query 4: Command pipeline complete.
 		//
 		// Causes the backend to close the current transaction if it's not inside a
-		// BEGIN/COMMIT transaction block (“close” meaning to commit if no error, or
+		// BEGIN/COMMIT transaction block ("close" meaning to commit if no error, or
 		// roll back if error).
 		// then, a ReadyForQuery response is issued.
 		//
@@ -92,6 +96,7 @@ func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 		// to normal message processing. (But note that no skipping occurs if an
 		// error is detected while processing Sync — this ensures that there is
 		// one and only one ReadyForQuery sent for each Sync.)
+		return true
 
 	// In addition to these fundamental, required operations, there are several
 	// optional operations that can be used with extended-query protocol.
@@ -116,10 +121,12 @@ func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 		// the formats to be used for returned columns are not yet known to the
 		// backend; the format code fields in the RowDescription message will be
 		// zeroes in this case.
+		return true
 	case *pgproto3.Close:
 		// Close prepared statement/portal.
 		// Note that closing a prepared statement implicitly closes any open
 		// portals that were constructed from that statement.
+		return true
 	case *pgproto3.Flush:
 		// The Flush message does not cause any specific output to be generated,
 		// but forces the backend to deliver any data pending in its output
@@ -137,7 +144,9 @@ func IsExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 func IsCopyModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CopyData:
+		return true
 	case *pgproto3.CopyDone:
+		return true
 	case *pgproto3.CopyFail:
 		return true
 	}
@@ -168,12 +177,19 @@ func IsTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
 func IsBackendStartupModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.AuthenticationCleartextPassword:
+		return true
 	case *pgproto3.AuthenticationGSS:
+		return true
 	case *pgproto3.AuthenticationGSSContinue:
+		return true
 	case *pgproto3.AuthenticationMD5Password:
+		return true
 	case *pgproto3.AuthenticationOk:
+		return true
 	case *pgproto3.AuthenticationSASL:
+		return true
 	case *pgproto3.AuthenticationSASLContinue:
+		return true
 	case *pgproto3.AuthenticationSASLFinal:
 		return true
 	case *pgproto3.BackendKeyData:
@@ -190,17 +206,23 @@ func IsBackendExtendedQueryModeMessage(msg pgproto3.BackendMessage) bool {
 	// Extended Query mode:
 	case *pgproto3.ParseComplete:
 		// Response to Parse.
+		return true
 	case *pgproto3.BindComplete:
 		// Response to Bind.
+		return true
 	case *pgproto3.ParameterDescription:
-		// Response to Describe of prepared statemnt
+		// Response to Describe of prepared statement.
+		return true
 	case *pgproto3.RowDescription:
 		// Response to Describe of portal or statement that returns data.
+		return true
 	case *pgproto3.NoData:
 		// Response to Describe of portal or statement that doesn't return data.
+		return true
 	case *pgproto3.PortalSuspended:
 		// Response to Execute if there are additional rows / the execute did not
 		// complete during the Execute call, the client should call Execute again.
+		return true
 	case *pgproto3.CloseComplete:
 		// Response to Close of prepared statement or portal.
 		return true
@@ -215,14 +237,18 @@ func IsBackendCopyModeMessage(msg pgproto3.BackendMessage) bool {
 		// Response to COPY FROM STDIN.
 		// Backend ready to copy data from client to server.
 		// Starts CopyIn mode.
+		return true
 	case *pgproto3.CopyOutResponse:
 		// Response to COPY TO STDOUT.
 		// Backend ready to copy data from server to client.
 		// Starts CopyOut mode.
+		return true
 	case *pgproto3.CopyBothResponse:
 		// Response to Replication.
+		return true
 	case *pgproto3.CopyData:
 		// Copy Mode: data row.
+		return true
 	case *pgproto3.CopyDone:
 		// Copy Mode: copy completed.
 		return true
@@ -240,14 +266,19 @@ func IsBackendResponseMessage(msg pgproto3.BackendMessage) bool {
 		// Start-up completed.
 		// Simple Query mode: ready for next query.
 		// Extended Query mode: response to Sync; backend no longer ignoring messages, ready for next command.
+		return true
 	case *pgproto3.CommandComplete:
 		// SQL command completed normally.
+		return true
 	case *pgproto3.DataRow:
 		// Query results (both query modes)
+		return true
 	case *pgproto3.EmptyQueryResponse:
 		// Response to empty query.
+		return true
 	case *pgproto3.ErrorResponse:
 		// Error response.
+		return true
 	case *pgproto3.FunctionCallResponse:
 		// Response to function call.
 		return true
@@ -260,8 +291,10 @@ func IsBackendAsyncMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.NoticeResponse:
 		// Warning message.
+		return true
 	case *pgproto3.NotificationResponse:
 		// LISTEN/NOTIFY notification.
+		return true
 	case *pgproto3.ParameterStatus:
 		// Informs client that runtime parameter value changed.
 		return true

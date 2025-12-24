@@ -9,6 +9,7 @@ import (
 // NewProtocolState creates a new ProtocolState with all maps initialized.
 func NewProtocolState() ProtocolState {
 	return ProtocolState{
+		TxStatus:          TxIdle,
 		ParameterStatuses: ParameterStatuses{},
 		Statements: NamedObjectState[bool]{
 			Alive:         make(map[string]bool),
@@ -20,6 +21,8 @@ func NewProtocolState() ProtocolState {
 			PendingCreate: make(map[string]bool),
 			PendingClose:  make(map[string]bool),
 		},
+		recognizers: nil,
+		activeFlows: nil,
 	}
 }
 
@@ -56,6 +59,10 @@ type ProtocolState struct {
 
 	Statements NamedObjectState[bool]
 	Portals    NamedObjectState[bool]
+
+	// Flow tracking for observability
+	recognizers []FlowRecognizer
+	activeFlows []Flow
 
 	// TODO: do we have to track what portals are suspended?
 }
@@ -139,7 +146,7 @@ func (s *ProtocolState) UpdateForExtendedQueryMessage(msg ClientExtendedQuery) {
 		}
 	case ClientExtendedQueryBind:
 		s.ExtendedQueryMode = true
-		s.Statements.PendingCreate[msg.T.DestinationPortal] = true
+		s.Portals.PendingCreate[msg.T.DestinationPortal] = true
 		if s.Statements.PendingExecute != nil && *s.Statements.PendingExecute == msg.T.PreparedStatement {
 			dest := msg.T.DestinationPortal
 			s.Portals.PendingExecute = &dest
@@ -273,4 +280,47 @@ func wrapVoid[T any](fn func(T)) func(T) (struct{}, error) {
 		fn(t)
 		return struct{}{}, nil
 	}
+}
+
+// AddRecognizer adds a flow recognizer to track protocol flows.
+// Recognizers are called in order when processing messages.
+func (s *ProtocolState) AddRecognizer(r FlowRecognizer) {
+	s.recognizers = append(s.recognizers, r)
+}
+
+// ProcessFlows updates active flows and detects new flows from the message.
+// This should be called for each message after the protocol state is updated.
+func (s *ProtocolState) ProcessFlows(msg Message) {
+	// Check if any recognizer detects a new flow
+	for _, r := range s.recognizers {
+		handlers := r.StartHandlers(s)
+		if flow := handlers.Start(msg); flow != nil {
+			s.activeFlows = append(s.activeFlows, flow)
+		}
+	}
+
+	// Update active flows, remove completed ones
+	remaining := s.activeFlows[:0]
+	for _, flow := range s.activeFlows {
+		handlers := flow.UpdateHandlers(s)
+		if handlers.Update(msg) { // returns true to continue
+			remaining = append(remaining, flow)
+		} else {
+			flow.Close() // flow handles its own callbacks
+		}
+	}
+	s.activeFlows = remaining
+}
+
+// ActiveFlowCount returns the number of currently active flows.
+func (s *ProtocolState) ActiveFlowCount() int {
+	return len(s.activeFlows)
+}
+
+// CloseAllFlows closes all active flows. Called when session ends.
+func (s *ProtocolState) CloseAllFlows() {
+	for _, flow := range s.activeFlows {
+		flow.Close()
+	}
+	s.activeFlows = nil
 }

@@ -343,7 +343,7 @@ func (h *Harness) startService(ctx context.Context) {
 	svcCtx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 
-	svc, err := frontend.NewService(svcCtx, cfg, fsys, secrets, h.logger)
+	svc, err := frontend.NewService(svcCtx, cfg, fsys, secrets, h.logger, false, nil)
 	if err != nil {
 		h.fatalf("failed to create service: %v", err)
 	}

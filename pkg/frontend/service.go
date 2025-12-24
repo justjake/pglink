@@ -16,6 +16,7 @@ import (
 
 	"github.com/justjake/pglink/pkg/backend"
 	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/observability"
 )
 
 // Service handles incoming client connections.
@@ -30,6 +31,10 @@ type Service struct {
 
 	listener  net.Listener
 	databases map[*config.DatabaseConfig]*backend.Database
+
+	// Observability
+	tracingEnabled bool                   // Whether OTEL tracing is enabled
+	metrics        *observability.Metrics // May be nil if metrics disabled
 
 	// Connection tracking
 	activeConns atomic.Int32
@@ -50,7 +55,9 @@ type Service struct {
 // NewService creates a new frontend Service with the given configuration.
 // The caller should validate the config before calling this function.
 // The fsys parameter should be rooted at the config file's directory for resolving relative paths.
-func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *config.SecretCache, logger *slog.Logger) (*Service, error) {
+// If tracingEnabled is true, OTEL tracing will be used (assumes global provider is configured).
+// The metrics parameter is optional; pass nil to disable metrics.
+func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *config.SecretCache, logger *slog.Logger, tracingEnabled bool, metrics *observability.Metrics) (*Service, error) {
 	tlsResult, err := cfg.TLSConfig(fsys)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TLS config: %w", err)
@@ -71,6 +78,8 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 		databases:      make(map[*config.DatabaseConfig]*backend.Database),
 		sessions:       make(map[*Session]struct{}),
 		cancelRegistry: make(map[uint32]*Session),
+		tracingEnabled: tracingEnabled,
+		metrics:        metrics,
 	}, nil
 }
 
@@ -81,7 +90,7 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 func (s *Service) Listen() error {
 	// Set up all databases
 	for name, dbConfig := range s.config.Databases {
-		db, err := backend.NewDatabase(s.ctx, dbConfig, s.secrets, s.logger)
+		db, err := backend.NewDatabase(s.ctx, dbConfig, s.secrets, s.logger, s.tracingEnabled)
 		if err != nil {
 			return fmt.Errorf("failed to create database %s: %w", name, err)
 		}
@@ -190,14 +199,16 @@ func (s *Service) rejectConnection(conn net.Conn, reason string) {
 func (s *Service) newSession(conn net.Conn) *Session {
 	ctx, cancel := context.WithCancel(s.ctx)
 	return &Session{
-		ctx:       ctx,
-		cancel:    cancel,
-		service:   s,
-		conn:      conn,
-		logger:    s.logger.With("client", conn.RemoteAddr().String()),
-		tlsConfig: s.tlsConfig,
-		secrets:   s.secrets,
-		config:    s.config,
+		ctx:            ctx,
+		cancel:         cancel,
+		service:        s,
+		conn:           conn,
+		logger:         s.logger.With("client", conn.RemoteAddr().String()),
+		tlsConfig:      s.tlsConfig,
+		secrets:        s.secrets,
+		config:         s.config,
+		tracingEnabled: s.tracingEnabled,
+		metrics:        s.metrics,
 	}
 }
 

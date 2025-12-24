@@ -77,6 +77,14 @@ type Config struct {
 	// rejected with an error. Defaults to 1000.
 	MaxClientConnections *int32 `json:"max_client_connections,omitzero"`
 
+	// OpenTelemetry configures distributed tracing via OpenTelemetry.
+	// If nil, tracing is disabled.
+	OpenTelemetry *OpenTelemetryConfig `json:"opentelemetry,omitzero"`
+
+	// Prometheus configures Prometheus metrics export.
+	// If nil, metrics are disabled. Presence of this config enables metrics.
+	Prometheus *PrometheusConfig `json:"prometheus,omitzero"`
+
 	// filePath is the path to the config file on disk (not serialized).
 	// Used for resolving relative paths in the config.
 	filePath string
@@ -269,6 +277,20 @@ func (c *Config) Validate(ctx context.Context, fsys fs.FS, secrets *SecretCache,
 	for path, ref := range c.Secrets() {
 		if _, err := secrets.Get(ctx, ref); err != nil {
 			errs = append(errs, errors.Join(errors.New(path), err))
+		}
+	}
+
+	// Validate OpenTelemetry config if present
+	if c.OpenTelemetry != nil {
+		if err := c.OpenTelemetry.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("opentelemetry: %w", err))
+		}
+	}
+
+	// Validate Prometheus config if present
+	if c.Prometheus != nil {
+		if err := c.Prometheus.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("prometheus: %w", err))
 		}
 	}
 
