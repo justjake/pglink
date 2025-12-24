@@ -5,7 +5,6 @@ package pgwire
 import (
 	"fmt"
 
-
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -39,20 +38,8 @@ func (t ServerStartupAuthenticationCleartextPassword) PgwireMessage() pgproto3.M
 func (t ServerStartupAuthenticationCleartextPassword) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(&t).Parse()
 }
-func (m ServerStartupAuthenticationCleartextPassword) Raw() RawBody {
-	return FromServer[*pgproto3.AuthenticationCleartextPassword](m).Raw()
-}
 func (m *ServerStartupAuthenticationCleartextPassword) Parse() *pgproto3.AuthenticationCleartextPassword {
 	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(m).Parse()
-}
-func (m ServerStartupAuthenticationCleartextPassword) IsParsed() bool {
-	return FromServer[*pgproto3.AuthenticationCleartextPassword](m).IsParsed()
-}
-func (m ServerStartupAuthenticationCleartextPassword) Body() []byte {
-	return FromServer[*pgproto3.AuthenticationCleartextPassword](m).Body()
-}
-func (m *ServerStartupAuthenticationCleartextPassword) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -72,20 +59,8 @@ func (t ServerStartupAuthenticationGSS) PgwireMessage() pgproto3.Message {
 func (t ServerStartupAuthenticationGSS) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.AuthenticationGSS])(&t).Parse()
 }
-func (m ServerStartupAuthenticationGSS) Raw() RawBody {
-	return FromServer[*pgproto3.AuthenticationGSS](m).Raw()
-}
 func (m *ServerStartupAuthenticationGSS) Parse() *pgproto3.AuthenticationGSS {
 	return (*FromServer[*pgproto3.AuthenticationGSS])(m).Parse()
-}
-func (m ServerStartupAuthenticationGSS) IsParsed() bool {
-	return FromServer[*pgproto3.AuthenticationGSS](m).IsParsed()
-}
-func (m ServerStartupAuthenticationGSS) Body() []byte {
-	return FromServer[*pgproto3.AuthenticationGSS](m).Body()
-}
-func (m *ServerStartupAuthenticationGSS) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.AuthenticationGSS])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -105,20 +80,8 @@ func (t ServerStartupAuthenticationGSSContinue) PgwireMessage() pgproto3.Message
 func (t ServerStartupAuthenticationGSSContinue) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(&t).Parse()
 }
-func (m ServerStartupAuthenticationGSSContinue) Raw() RawBody {
-	return FromServer[*pgproto3.AuthenticationGSSContinue](m).Raw()
-}
 func (m *ServerStartupAuthenticationGSSContinue) Parse() *pgproto3.AuthenticationGSSContinue {
 	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(m).Parse()
-}
-func (m ServerStartupAuthenticationGSSContinue) IsParsed() bool {
-	return FromServer[*pgproto3.AuthenticationGSSContinue](m).IsParsed()
-}
-func (m ServerStartupAuthenticationGSSContinue) Body() []byte {
-	return FromServer[*pgproto3.AuthenticationGSSContinue](m).Body()
-}
-func (m *ServerStartupAuthenticationGSSContinue) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -138,20 +101,8 @@ func (t ServerStartupAuthenticationMD5Password) PgwireMessage() pgproto3.Message
 func (t ServerStartupAuthenticationMD5Password) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.AuthenticationMD5Password])(&t).Parse()
 }
-func (m ServerStartupAuthenticationMD5Password) Raw() RawBody {
-	return FromServer[*pgproto3.AuthenticationMD5Password](m).Raw()
-}
 func (m *ServerStartupAuthenticationMD5Password) Parse() *pgproto3.AuthenticationMD5Password {
 	return (*FromServer[*pgproto3.AuthenticationMD5Password])(m).Parse()
-}
-func (m ServerStartupAuthenticationMD5Password) IsParsed() bool {
-	return FromServer[*pgproto3.AuthenticationMD5Password](m).IsParsed()
-}
-func (m ServerStartupAuthenticationMD5Password) Body() []byte {
-	return FromServer[*pgproto3.AuthenticationMD5Password](m).Body()
-}
-func (m *ServerStartupAuthenticationMD5Password) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.AuthenticationMD5Password])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -171,20 +122,8 @@ func (t ServerStartupAuthenticationOk) PgwireMessage() pgproto3.Message {
 func (t ServerStartupAuthenticationOk) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.AuthenticationOk])(&t).Parse()
 }
-func (m ServerStartupAuthenticationOk) Raw() RawBody {
-	return FromServer[*pgproto3.AuthenticationOk](m).Raw()
-}
 func (m *ServerStartupAuthenticationOk) Parse() *pgproto3.AuthenticationOk {
 	return (*FromServer[*pgproto3.AuthenticationOk])(m).Parse()
-}
-func (m ServerStartupAuthenticationOk) IsParsed() bool {
-	return FromServer[*pgproto3.AuthenticationOk](m).IsParsed()
-}
-func (m ServerStartupAuthenticationOk) Body() []byte {
-	return FromServer[*pgproto3.AuthenticationOk](m).Body()
-}
-func (m *ServerStartupAuthenticationOk) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.AuthenticationOk])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -204,20 +143,8 @@ func (t ServerStartupAuthenticationSASL) PgwireMessage() pgproto3.Message {
 func (t ServerStartupAuthenticationSASL) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.AuthenticationSASL])(&t).Parse()
 }
-func (m ServerStartupAuthenticationSASL) Raw() RawBody {
-	return FromServer[*pgproto3.AuthenticationSASL](m).Raw()
-}
 func (m *ServerStartupAuthenticationSASL) Parse() *pgproto3.AuthenticationSASL {
 	return (*FromServer[*pgproto3.AuthenticationSASL])(m).Parse()
-}
-func (m ServerStartupAuthenticationSASL) IsParsed() bool {
-	return FromServer[*pgproto3.AuthenticationSASL](m).IsParsed()
-}
-func (m ServerStartupAuthenticationSASL) Body() []byte {
-	return FromServer[*pgproto3.AuthenticationSASL](m).Body()
-}
-func (m *ServerStartupAuthenticationSASL) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.AuthenticationSASL])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -237,20 +164,8 @@ func (t ServerStartupAuthenticationSASLContinue) PgwireMessage() pgproto3.Messag
 func (t ServerStartupAuthenticationSASLContinue) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(&t).Parse()
 }
-func (m ServerStartupAuthenticationSASLContinue) Raw() RawBody {
-	return FromServer[*pgproto3.AuthenticationSASLContinue](m).Raw()
-}
 func (m *ServerStartupAuthenticationSASLContinue) Parse() *pgproto3.AuthenticationSASLContinue {
 	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(m).Parse()
-}
-func (m ServerStartupAuthenticationSASLContinue) IsParsed() bool {
-	return FromServer[*pgproto3.AuthenticationSASLContinue](m).IsParsed()
-}
-func (m ServerStartupAuthenticationSASLContinue) Body() []byte {
-	return FromServer[*pgproto3.AuthenticationSASLContinue](m).Body()
-}
-func (m *ServerStartupAuthenticationSASLContinue) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -270,20 +185,8 @@ func (t ServerStartupAuthenticationSASLFinal) PgwireMessage() pgproto3.Message {
 func (t ServerStartupAuthenticationSASLFinal) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(&t).Parse()
 }
-func (m ServerStartupAuthenticationSASLFinal) Raw() RawBody {
-	return FromServer[*pgproto3.AuthenticationSASLFinal](m).Raw()
-}
 func (m *ServerStartupAuthenticationSASLFinal) Parse() *pgproto3.AuthenticationSASLFinal {
 	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(m).Parse()
-}
-func (m ServerStartupAuthenticationSASLFinal) IsParsed() bool {
-	return FromServer[*pgproto3.AuthenticationSASLFinal](m).IsParsed()
-}
-func (m ServerStartupAuthenticationSASLFinal) Body() []byte {
-	return FromServer[*pgproto3.AuthenticationSASLFinal](m).Body()
-}
-func (m *ServerStartupAuthenticationSASLFinal) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -304,20 +207,8 @@ func (t ServerStartupBackendKeyData) PgwireMessage() pgproto3.Message {
 func (t ServerStartupBackendKeyData) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.BackendKeyData])(&t).Parse()
 }
-func (m ServerStartupBackendKeyData) Raw() RawBody {
-	return FromServer[*pgproto3.BackendKeyData](m).Raw()
-}
 func (m *ServerStartupBackendKeyData) Parse() *pgproto3.BackendKeyData {
 	return (*FromServer[*pgproto3.BackendKeyData])(m).Parse()
-}
-func (m ServerStartupBackendKeyData) IsParsed() bool {
-	return FromServer[*pgproto3.BackendKeyData](m).IsParsed()
-}
-func (m ServerStartupBackendKeyData) Body() []byte {
-	return FromServer[*pgproto3.BackendKeyData](m).Body()
-}
-func (m *ServerStartupBackendKeyData) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.BackendKeyData])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

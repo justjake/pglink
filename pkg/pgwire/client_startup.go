@@ -4,7 +4,6 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +13,6 @@ type ClientStartup interface {
 	Startup()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -38,20 +36,8 @@ func (t ClientStartupGSSEncRequest) PgwireMessage() pgproto3.Message {
 func (t ClientStartupGSSEncRequest) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.GSSEncRequest])(&t).Parse()
 }
-func (m ClientStartupGSSEncRequest) Raw() RawBody {
-	return FromClient[*pgproto3.GSSEncRequest](m).Raw()
-}
 func (m *ClientStartupGSSEncRequest) Parse() *pgproto3.GSSEncRequest {
 	return (*FromClient[*pgproto3.GSSEncRequest])(m).Parse()
-}
-func (m ClientStartupGSSEncRequest) IsParsed() bool {
-	return FromClient[*pgproto3.GSSEncRequest](m).IsParsed()
-}
-func (m ClientStartupGSSEncRequest) Body() []byte {
-	return FromClient[*pgproto3.GSSEncRequest](m).Body()
-}
-func (m *ClientStartupGSSEncRequest) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.GSSEncRequest])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -71,16 +57,8 @@ func (t ClientStartupGSSResponse) PgwireMessage() pgproto3.Message {
 func (t ClientStartupGSSResponse) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.GSSResponse])(&t).Parse()
 }
-func (m ClientStartupGSSResponse) Raw() RawBody { return FromClient[*pgproto3.GSSResponse](m).Raw() }
 func (m *ClientStartupGSSResponse) Parse() *pgproto3.GSSResponse {
 	return (*FromClient[*pgproto3.GSSResponse])(m).Parse()
-}
-func (m ClientStartupGSSResponse) IsParsed() bool {
-	return FromClient[*pgproto3.GSSResponse](m).IsParsed()
-}
-func (m ClientStartupGSSResponse) Body() []byte { return FromClient[*pgproto3.GSSResponse](m).Body() }
-func (m *ClientStartupGSSResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.GSSResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -100,20 +78,8 @@ func (t ClientStartupPasswordMessage) PgwireMessage() pgproto3.Message {
 func (t ClientStartupPasswordMessage) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.PasswordMessage])(&t).Parse()
 }
-func (m ClientStartupPasswordMessage) Raw() RawBody {
-	return FromClient[*pgproto3.PasswordMessage](m).Raw()
-}
 func (m *ClientStartupPasswordMessage) Parse() *pgproto3.PasswordMessage {
 	return (*FromClient[*pgproto3.PasswordMessage])(m).Parse()
-}
-func (m ClientStartupPasswordMessage) IsParsed() bool {
-	return FromClient[*pgproto3.PasswordMessage](m).IsParsed()
-}
-func (m ClientStartupPasswordMessage) Body() []byte {
-	return FromClient[*pgproto3.PasswordMessage](m).Body()
-}
-func (m *ClientStartupPasswordMessage) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.PasswordMessage])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -133,20 +99,8 @@ func (t ClientStartupSASLInitialResponse) PgwireMessage() pgproto3.Message {
 func (t ClientStartupSASLInitialResponse) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.SASLInitialResponse])(&t).Parse()
 }
-func (m ClientStartupSASLInitialResponse) Raw() RawBody {
-	return FromClient[*pgproto3.SASLInitialResponse](m).Raw()
-}
 func (m *ClientStartupSASLInitialResponse) Parse() *pgproto3.SASLInitialResponse {
 	return (*FromClient[*pgproto3.SASLInitialResponse])(m).Parse()
-}
-func (m ClientStartupSASLInitialResponse) IsParsed() bool {
-	return FromClient[*pgproto3.SASLInitialResponse](m).IsParsed()
-}
-func (m ClientStartupSASLInitialResponse) Body() []byte {
-	return FromClient[*pgproto3.SASLInitialResponse](m).Body()
-}
-func (m *ClientStartupSASLInitialResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.SASLInitialResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -166,16 +120,8 @@ func (t ClientStartupSASLResponse) PgwireMessage() pgproto3.Message {
 func (t ClientStartupSASLResponse) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.SASLResponse])(&t).Parse()
 }
-func (m ClientStartupSASLResponse) Raw() RawBody { return FromClient[*pgproto3.SASLResponse](m).Raw() }
 func (m *ClientStartupSASLResponse) Parse() *pgproto3.SASLResponse {
 	return (*FromClient[*pgproto3.SASLResponse])(m).Parse()
-}
-func (m ClientStartupSASLResponse) IsParsed() bool {
-	return FromClient[*pgproto3.SASLResponse](m).IsParsed()
-}
-func (m ClientStartupSASLResponse) Body() []byte { return FromClient[*pgproto3.SASLResponse](m).Body() }
-func (m *ClientStartupSASLResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.SASLResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -195,16 +141,8 @@ func (t ClientStartupSSLRequest) PgwireMessage() pgproto3.Message {
 func (t ClientStartupSSLRequest) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.SSLRequest])(&t).Parse()
 }
-func (m ClientStartupSSLRequest) Raw() RawBody { return FromClient[*pgproto3.SSLRequest](m).Raw() }
 func (m *ClientStartupSSLRequest) Parse() *pgproto3.SSLRequest {
 	return (*FromClient[*pgproto3.SSLRequest])(m).Parse()
-}
-func (m ClientStartupSSLRequest) IsParsed() bool {
-	return FromClient[*pgproto3.SSLRequest](m).IsParsed()
-}
-func (m ClientStartupSSLRequest) Body() []byte { return FromClient[*pgproto3.SSLRequest](m).Body() }
-func (m *ClientStartupSSLRequest) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.SSLRequest])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -224,20 +162,8 @@ func (t ClientStartupStartupMessage) PgwireMessage() pgproto3.Message {
 func (t ClientStartupStartupMessage) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.StartupMessage])(&t).Parse()
 }
-func (m ClientStartupStartupMessage) Raw() RawBody {
-	return FromClient[*pgproto3.StartupMessage](m).Raw()
-}
 func (m *ClientStartupStartupMessage) Parse() *pgproto3.StartupMessage {
 	return (*FromClient[*pgproto3.StartupMessage])(m).Parse()
-}
-func (m ClientStartupStartupMessage) IsParsed() bool {
-	return FromClient[*pgproto3.StartupMessage](m).IsParsed()
-}
-func (m ClientStartupStartupMessage) Body() []byte {
-	return FromClient[*pgproto3.StartupMessage](m).Body()
-}
-func (m *ClientStartupStartupMessage) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.StartupMessage])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

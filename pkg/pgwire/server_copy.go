@@ -5,7 +5,6 @@ package pgwire
 import (
 	"fmt"
 
-
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -40,15 +39,6 @@ func (t ServerCopyCopyInResponse) Server() pgproto3.BackendMessage {
 func (m *ServerCopyCopyInResponse) Parse() *pgproto3.CopyInResponse {
 	return (*FromServer[*pgproto3.CopyInResponse])(m).Parse()
 }
-func (m ServerCopyCopyInResponse) IsParsed() bool {
-	return FromServer[*pgproto3.CopyInResponse](m).IsParsed()
-}
-func (m ServerCopyCopyInResponse) Body() []byte {
-	return FromServer[*pgproto3.CopyInResponse](m).Body()
-}
-func (m *ServerCopyCopyInResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.CopyInResponse])(m).WriteTo(w)
-}
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -69,20 +59,8 @@ func (t ServerCopyCopyOutResponse) PgwireMessage() pgproto3.Message {
 func (t ServerCopyCopyOutResponse) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.CopyOutResponse])(&t).Parse()
 }
-func (m ServerCopyCopyOutResponse) Raw() RawBody {
-	return FromServer[*pgproto3.CopyOutResponse](m).Raw()
-}
 func (m *ServerCopyCopyOutResponse) Parse() *pgproto3.CopyOutResponse {
 	return (*FromServer[*pgproto3.CopyOutResponse])(m).Parse()
-}
-func (m ServerCopyCopyOutResponse) IsParsed() bool {
-	return FromServer[*pgproto3.CopyOutResponse](m).IsParsed()
-}
-func (m ServerCopyCopyOutResponse) Body() []byte {
-	return FromServer[*pgproto3.CopyOutResponse](m).Body()
-}
-func (m *ServerCopyCopyOutResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.CopyOutResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -102,20 +80,8 @@ func (t ServerCopyCopyBothResponse) PgwireMessage() pgproto3.Message {
 func (t ServerCopyCopyBothResponse) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.CopyBothResponse])(&t).Parse()
 }
-func (m ServerCopyCopyBothResponse) Raw() RawBody {
-	return FromServer[*pgproto3.CopyBothResponse](m).Raw()
-}
 func (m *ServerCopyCopyBothResponse) Parse() *pgproto3.CopyBothResponse {
 	return (*FromServer[*pgproto3.CopyBothResponse])(m).Parse()
-}
-func (m ServerCopyCopyBothResponse) IsParsed() bool {
-	return FromServer[*pgproto3.CopyBothResponse](m).IsParsed()
-}
-func (m ServerCopyCopyBothResponse) Body() []byte {
-	return FromServer[*pgproto3.CopyBothResponse](m).Body()
-}
-func (m *ServerCopyCopyBothResponse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.CopyBothResponse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -138,9 +104,6 @@ func (t ServerCopyCopyData) Server() pgproto3.BackendMessage {
 func (m *ServerCopyCopyData) Parse() *pgproto3.CopyData {
 	return (*FromServer[*pgproto3.CopyData])(m).Parse()
 }
-func (m *ServerCopyCopyData) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.CopyData])(m).WriteTo(w)
-}
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -161,9 +124,6 @@ func (t ServerCopyCopyDone) Server() pgproto3.BackendMessage {
 }
 func (m *ServerCopyCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromServer[*pgproto3.CopyDone])(m).Parse()
-}
-func (m *ServerCopyCopyDone) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.CopyDone])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

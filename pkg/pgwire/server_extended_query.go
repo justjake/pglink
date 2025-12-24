@@ -5,7 +5,6 @@ package pgwire
 import (
 	"fmt"
 
-
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -37,20 +36,8 @@ func (t ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message {
 func (t ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.ParseComplete])(&t).Parse()
 }
-func (m ServerExtendedQueryParseComplete) Raw() RawBody {
-	return FromServer[*pgproto3.ParseComplete](m).Raw()
-}
 func (m *ServerExtendedQueryParseComplete) Parse() *pgproto3.ParseComplete {
 	return (*FromServer[*pgproto3.ParseComplete])(m).Parse()
-}
-func (m ServerExtendedQueryParseComplete) IsParsed() bool {
-	return FromServer[*pgproto3.ParseComplete](m).IsParsed()
-}
-func (m ServerExtendedQueryParseComplete) Body() []byte {
-	return FromServer[*pgproto3.ParseComplete](m).Body()
-}
-func (m *ServerExtendedQueryParseComplete) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.ParseComplete])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -70,20 +57,8 @@ func (t ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message {
 func (t ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.BindComplete])(&t).Parse()
 }
-func (m ServerExtendedQueryBindComplete) Raw() RawBody {
-	return FromServer[*pgproto3.BindComplete](m).Raw()
-}
 func (m *ServerExtendedQueryBindComplete) Parse() *pgproto3.BindComplete {
 	return (*FromServer[*pgproto3.BindComplete])(m).Parse()
-}
-func (m ServerExtendedQueryBindComplete) IsParsed() bool {
-	return FromServer[*pgproto3.BindComplete](m).IsParsed()
-}
-func (m ServerExtendedQueryBindComplete) Body() []byte {
-	return FromServer[*pgproto3.BindComplete](m).Body()
-}
-func (m *ServerExtendedQueryBindComplete) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.BindComplete])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -103,20 +78,8 @@ func (t ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Messag
 func (t ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.ParameterDescription])(&t).Parse()
 }
-func (m ServerExtendedQueryParameterDescription) Raw() RawBody {
-	return FromServer[*pgproto3.ParameterDescription](m).Raw()
-}
 func (m *ServerExtendedQueryParameterDescription) Parse() *pgproto3.ParameterDescription {
 	return (*FromServer[*pgproto3.ParameterDescription])(m).Parse()
-}
-func (m ServerExtendedQueryParameterDescription) IsParsed() bool {
-	return FromServer[*pgproto3.ParameterDescription](m).IsParsed()
-}
-func (m ServerExtendedQueryParameterDescription) Body() []byte {
-	return FromServer[*pgproto3.ParameterDescription](m).Body()
-}
-func (m *ServerExtendedQueryParameterDescription) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.ParameterDescription])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -136,20 +99,8 @@ func (t ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message {
 func (t ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.RowDescription])(&t).Parse()
 }
-func (m ServerExtendedQueryRowDescription) Raw() RawBody {
-	return FromServer[*pgproto3.RowDescription](m).Raw()
-}
 func (m *ServerExtendedQueryRowDescription) Parse() *pgproto3.RowDescription {
 	return (*FromServer[*pgproto3.RowDescription])(m).Parse()
-}
-func (m ServerExtendedQueryRowDescription) IsParsed() bool {
-	return FromServer[*pgproto3.RowDescription](m).IsParsed()
-}
-func (m ServerExtendedQueryRowDescription) Body() []byte {
-	return FromServer[*pgproto3.RowDescription](m).Body()
-}
-func (m *ServerExtendedQueryRowDescription) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.RowDescription])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -172,9 +123,6 @@ func (t ServerExtendedQueryNoData) Server() pgproto3.BackendMessage {
 func (m *ServerExtendedQueryNoData) Parse() *pgproto3.NoData {
 	return (*FromServer[*pgproto3.NoData])(m).Parse()
 }
-func (m *ServerExtendedQueryNoData) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.NoData])(m).WriteTo(w)
-}
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -194,20 +142,8 @@ func (t ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message {
 func (t ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.PortalSuspended])(&t).Parse()
 }
-func (m ServerExtendedQueryPortalSuspended) Raw() RawBody {
-	return FromServer[*pgproto3.PortalSuspended](m).Raw()
-}
 func (m *ServerExtendedQueryPortalSuspended) Parse() *pgproto3.PortalSuspended {
 	return (*FromServer[*pgproto3.PortalSuspended])(m).Parse()
-}
-func (m ServerExtendedQueryPortalSuspended) IsParsed() bool {
-	return FromServer[*pgproto3.PortalSuspended](m).IsParsed()
-}
-func (m ServerExtendedQueryPortalSuspended) Body() []byte {
-	return FromServer[*pgproto3.PortalSuspended](m).Body()
-}
-func (m *ServerExtendedQueryPortalSuspended) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.PortalSuspended])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -227,20 +163,8 @@ func (t ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message {
 func (t ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage {
 	return (*FromServer[*pgproto3.CloseComplete])(&t).Parse()
 }
-func (m ServerExtendedQueryCloseComplete) Raw() RawBody {
-	return FromServer[*pgproto3.CloseComplete](m).Raw()
-}
 func (m *ServerExtendedQueryCloseComplete) Parse() *pgproto3.CloseComplete {
 	return (*FromServer[*pgproto3.CloseComplete])(m).Parse()
-}
-func (m ServerExtendedQueryCloseComplete) IsParsed() bool {
-	return FromServer[*pgproto3.CloseComplete](m).IsParsed()
-}
-func (m ServerExtendedQueryCloseComplete) Body() []byte {
-	return FromServer[*pgproto3.CloseComplete](m).Body()
-}
-func (m *ServerExtendedQueryCloseComplete) WriteTo(w io.Writer) (int64, error) {
-	return (*FromServer[*pgproto3.CloseComplete])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

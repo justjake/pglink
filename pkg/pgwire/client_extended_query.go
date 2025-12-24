@@ -4,7 +4,6 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +13,6 @@ type ClientExtendedQuery interface {
 	ExtendedQuery()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -38,14 +36,8 @@ func (t ClientExtendedQueryParse) PgwireMessage() pgproto3.Message {
 func (t ClientExtendedQueryParse) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Parse])(&t).Parse()
 }
-func (m ClientExtendedQueryParse) Raw() RawBody { return FromClient[*pgproto3.Parse](m).Raw() }
 func (m *ClientExtendedQueryParse) Parse() *pgproto3.Parse {
 	return (*FromClient[*pgproto3.Parse])(m).Parse()
-}
-func (m ClientExtendedQueryParse) IsParsed() bool { return FromClient[*pgproto3.Parse](m).IsParsed() }
-func (m ClientExtendedQueryParse) Body() []byte   { return FromClient[*pgproto3.Parse](m).Body() }
-func (m *ClientExtendedQueryParse) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Parse])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -65,14 +57,8 @@ func (t ClientExtendedQueryBind) PgwireMessage() pgproto3.Message {
 func (t ClientExtendedQueryBind) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Bind])(&t).Parse()
 }
-func (m ClientExtendedQueryBind) Raw() RawBody { return FromClient[*pgproto3.Bind](m).Raw() }
 func (m *ClientExtendedQueryBind) Parse() *pgproto3.Bind {
 	return (*FromClient[*pgproto3.Bind])(m).Parse()
-}
-func (m ClientExtendedQueryBind) IsParsed() bool { return FromClient[*pgproto3.Bind](m).IsParsed() }
-func (m ClientExtendedQueryBind) Body() []byte   { return FromClient[*pgproto3.Bind](m).Body() }
-func (m *ClientExtendedQueryBind) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Bind])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -99,16 +85,8 @@ func (t ClientExtendedQueryExecute) PgwireMessage() pgproto3.Message {
 func (t ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Execute])(&t).Parse()
 }
-func (m ClientExtendedQueryExecute) Raw() RawBody { return FromClient[*pgproto3.Execute](m).Raw() }
 func (m *ClientExtendedQueryExecute) Parse() *pgproto3.Execute {
 	return (*FromClient[*pgproto3.Execute])(m).Parse()
-}
-func (m ClientExtendedQueryExecute) IsParsed() bool {
-	return FromClient[*pgproto3.Execute](m).IsParsed()
-}
-func (m ClientExtendedQueryExecute) Body() []byte { return FromClient[*pgproto3.Execute](m).Body() }
-func (m *ClientExtendedQueryExecute) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Execute])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -143,14 +121,8 @@ func (t ClientExtendedQuerySync) PgwireMessage() pgproto3.Message {
 func (t ClientExtendedQuerySync) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Sync])(&t).Parse()
 }
-func (m ClientExtendedQuerySync) Raw() RawBody { return FromClient[*pgproto3.Sync](m).Raw() }
 func (m *ClientExtendedQuerySync) Parse() *pgproto3.Sync {
 	return (*FromClient[*pgproto3.Sync])(m).Parse()
-}
-func (m ClientExtendedQuerySync) IsParsed() bool { return FromClient[*pgproto3.Sync](m).IsParsed() }
-func (m ClientExtendedQuerySync) Body() []byte   { return FromClient[*pgproto3.Sync](m).Body() }
-func (m *ClientExtendedQuerySync) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Sync])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -189,16 +161,8 @@ func (t ClientExtendedQueryDescribe) PgwireMessage() pgproto3.Message {
 func (t ClientExtendedQueryDescribe) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Describe])(&t).Parse()
 }
-func (m ClientExtendedQueryDescribe) Raw() RawBody { return FromClient[*pgproto3.Describe](m).Raw() }
 func (m *ClientExtendedQueryDescribe) Parse() *pgproto3.Describe {
 	return (*FromClient[*pgproto3.Describe])(m).Parse()
-}
-func (m ClientExtendedQueryDescribe) IsParsed() bool {
-	return FromClient[*pgproto3.Describe](m).IsParsed()
-}
-func (m ClientExtendedQueryDescribe) Body() []byte { return FromClient[*pgproto3.Describe](m).Body() }
-func (m *ClientExtendedQueryDescribe) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Describe])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -220,14 +184,8 @@ func (t ClientExtendedQueryClose) PgwireMessage() pgproto3.Message {
 func (t ClientExtendedQueryClose) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Close])(&t).Parse()
 }
-func (m ClientExtendedQueryClose) Raw() RawBody { return FromClient[*pgproto3.Close](m).Raw() }
 func (m *ClientExtendedQueryClose) Parse() *pgproto3.Close {
 	return (*FromClient[*pgproto3.Close])(m).Parse()
-}
-func (m ClientExtendedQueryClose) IsParsed() bool { return FromClient[*pgproto3.Close](m).IsParsed() }
-func (m ClientExtendedQueryClose) Body() []byte   { return FromClient[*pgproto3.Close](m).Body() }
-func (m *ClientExtendedQueryClose) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Close])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -253,14 +211,8 @@ func (t ClientExtendedQueryFlush) PgwireMessage() pgproto3.Message {
 func (t ClientExtendedQueryFlush) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Flush])(&t).Parse()
 }
-func (m ClientExtendedQueryFlush) Raw() RawBody { return FromClient[*pgproto3.Flush](m).Raw() }
 func (m *ClientExtendedQueryFlush) Parse() *pgproto3.Flush {
 	return (*FromClient[*pgproto3.Flush])(m).Parse()
-}
-func (m ClientExtendedQueryFlush) IsParsed() bool { return FromClient[*pgproto3.Flush](m).IsParsed() }
-func (m ClientExtendedQueryFlush) Body() []byte   { return FromClient[*pgproto3.Flush](m).Body() }
-func (m *ClientExtendedQueryFlush) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Flush])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

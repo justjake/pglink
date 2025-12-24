@@ -276,8 +276,7 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 
 	// Imports
 	buf.WriteString("import (\n")
-	buf.WriteString("\t\"fmt\"\n")
-	buf.WriteString("\t\"io\"\n\n")
+	buf.WriteString("\t\"fmt\"\n\n")
 	for _, imp := range imports {
 		fmt.Fprintf(&buf, "\t%s\n", imp)
 	}
@@ -290,7 +289,7 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	}
 
 	// Determine the lazy wrapper type based on from (Server or Client)
-	lazyType := "Lazy" + from
+	lazyType := "From" + from
 
 	// Interface
 	interfaceName := from + prefix
@@ -311,8 +310,6 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	for _, rm := range returnMethods {
 		fmt.Fprintf(&buf, "\t%s() %s\n", rm.name, rm.returnType)
 	}
-	// Add Raw() method for fast forwarding
-	buf.WriteString("\tRaw() RawBody\n")
 	buf.WriteString("}\n\n")
 
 	// Compile-time interface checks
@@ -360,20 +357,8 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 			fmt.Fprintf(&buf, "func (t %s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, expr)
 		}
 
-		// Raw() method wrapper - required by interface, delegates to underlying type
-		fmt.Fprintf(&buf, "func (m %s) Raw() RawBody { return %s[%s](m).Raw() }\n", newTypeName, lazyType, ti.qualified)
-
 		// Parse() method wrapper - delegates to underlying type (needs pointer receiver for caching)
 		fmt.Fprintf(&buf, "func (m *%s) Parse() %s { return (*%s[%s])(m).Parse() }\n", newTypeName, ti.qualified, lazyType, ti.qualified)
-
-		// IsParsed() method wrapper - delegates to underlying type
-		fmt.Fprintf(&buf, "func (m %s) IsParsed() bool { return %s[%s](m).IsParsed() }\n", newTypeName, lazyType, ti.qualified)
-
-		// Body() method wrapper - delegates to underlying type
-		fmt.Fprintf(&buf, "func (m %s) Body() []byte { return %s[%s](m).Body() }\n", newTypeName, lazyType, ti.qualified)
-
-		// WriteTo() method wrapper - delegates to underlying type (needs pointer receiver)
-		fmt.Fprintf(&buf, "func (m *%s) WriteTo(w io.Writer) (int64, error) { return (*%s[%s])(m).WriteTo(w) }\n", newTypeName, lazyType, ti.qualified)
 
 		// Retain method - returns a copy with retained source bytes
 		// This is needed for messages that must outlive cursor iteration
@@ -388,9 +373,9 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	}
 
 	// Conversion function: To<From><Prefix>(inputType) -> (interface, bool)
-	// This now uses NewLazy*FromParsed for backward compatibility
+	// This uses *Parsed helper functions for backward compatibility
 	funcName := "To" + from + prefix
-	newLazyFunc := "NewLazy" + from + "FromParsed"
+	newLazyFunc := from + "Parsed"
 	fmt.Fprintf(&buf, "// %s converts a %s to a %s if it matches one of the known types.\n", funcName, inputType, interfaceName)
 	fmt.Fprintf(&buf, "func %s(msg %s) (%s, bool) {\n", funcName, inputType, interfaceName)
 	buf.WriteString("\tswitch m := msg.(type) {\n")

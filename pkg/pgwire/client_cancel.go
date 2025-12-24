@@ -4,7 +4,6 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +13,6 @@ type ClientCancel interface {
 	Cancel()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -32,18 +30,8 @@ func (t ClientCancelCancelRequest) PgwireMessage() pgproto3.Message {
 func (t ClientCancelCancelRequest) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.CancelRequest])(&t).Parse()
 }
-func (m ClientCancelCancelRequest) Raw() RawBody { return FromClient[*pgproto3.CancelRequest](m).Raw() }
 func (m *ClientCancelCancelRequest) Parse() *pgproto3.CancelRequest {
 	return (*FromClient[*pgproto3.CancelRequest])(m).Parse()
-}
-func (m ClientCancelCancelRequest) IsParsed() bool {
-	return FromClient[*pgproto3.CancelRequest](m).IsParsed()
-}
-func (m ClientCancelCancelRequest) Body() []byte {
-	return FromClient[*pgproto3.CancelRequest](m).Body()
-}
-func (m *ClientCancelCancelRequest) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.CancelRequest])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

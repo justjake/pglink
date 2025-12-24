@@ -4,7 +4,6 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +13,6 @@ type ClientCopy interface {
 	Copy()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -34,14 +32,8 @@ func (t ClientCopyCopyData) PgwireMessage() pgproto3.Message {
 func (t ClientCopyCopyData) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.CopyData])(&t).Parse()
 }
-func (m ClientCopyCopyData) Raw() RawBody { return FromClient[*pgproto3.CopyData](m).Raw() }
 func (m *ClientCopyCopyData) Parse() *pgproto3.CopyData {
 	return (*FromClient[*pgproto3.CopyData])(m).Parse()
-}
-func (m ClientCopyCopyData) IsParsed() bool { return FromClient[*pgproto3.CopyData](m).IsParsed() }
-func (m ClientCopyCopyData) Body() []byte   { return FromClient[*pgproto3.CopyData](m).Body() }
-func (m *ClientCopyCopyData) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.CopyData])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -61,14 +53,8 @@ func (t ClientCopyCopyDone) PgwireMessage() pgproto3.Message {
 func (t ClientCopyCopyDone) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.CopyDone])(&t).Parse()
 }
-func (m ClientCopyCopyDone) Raw() RawBody { return FromClient[*pgproto3.CopyDone](m).Raw() }
 func (m *ClientCopyCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromClient[*pgproto3.CopyDone])(m).Parse()
-}
-func (m ClientCopyCopyDone) IsParsed() bool { return FromClient[*pgproto3.CopyDone](m).IsParsed() }
-func (m ClientCopyCopyDone) Body() []byte   { return FromClient[*pgproto3.CopyDone](m).Body() }
-func (m *ClientCopyCopyDone) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.CopyDone])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -88,14 +74,8 @@ func (t ClientCopyCopyFail) PgwireMessage() pgproto3.Message {
 func (t ClientCopyCopyFail) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.CopyFail])(&t).Parse()
 }
-func (m ClientCopyCopyFail) Raw() RawBody { return FromClient[*pgproto3.CopyFail](m).Raw() }
 func (m *ClientCopyCopyFail) Parse() *pgproto3.CopyFail {
 	return (*FromClient[*pgproto3.CopyFail])(m).Parse()
-}
-func (m ClientCopyCopyFail) IsParsed() bool { return FromClient[*pgproto3.CopyFail](m).IsParsed() }
-func (m ClientCopyCopyFail) Body() []byte   { return FromClient[*pgproto3.CopyFail](m).Body() }
-func (m *ClientCopyCopyFail) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.CopyFail])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

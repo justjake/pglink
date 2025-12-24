@@ -4,7 +4,6 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +13,6 @@ type ClientSimpleQuery interface {
 	SimpleQuery()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -34,14 +32,8 @@ func (t ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message {
 func (t ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Query])(&t).Parse()
 }
-func (m ClientSimpleQueryQuery) Raw() RawBody { return FromClient[*pgproto3.Query](m).Raw() }
 func (m *ClientSimpleQueryQuery) Parse() *pgproto3.Query {
 	return (*FromClient[*pgproto3.Query])(m).Parse()
-}
-func (m ClientSimpleQueryQuery) IsParsed() bool { return FromClient[*pgproto3.Query](m).IsParsed() }
-func (m ClientSimpleQueryQuery) Body() []byte   { return FromClient[*pgproto3.Query](m).Body() }
-func (m *ClientSimpleQueryQuery) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Query])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
@@ -61,20 +53,8 @@ func (t ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message {
 func (t ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.FunctionCall])(&t).Parse()
 }
-func (m ClientSimpleQueryFunctionCall) Raw() RawBody {
-	return FromClient[*pgproto3.FunctionCall](m).Raw()
-}
 func (m *ClientSimpleQueryFunctionCall) Parse() *pgproto3.FunctionCall {
 	return (*FromClient[*pgproto3.FunctionCall])(m).Parse()
-}
-func (m ClientSimpleQueryFunctionCall) IsParsed() bool {
-	return FromClient[*pgproto3.FunctionCall](m).IsParsed()
-}
-func (m ClientSimpleQueryFunctionCall) Body() []byte {
-	return FromClient[*pgproto3.FunctionCall](m).Body()
-}
-func (m *ClientSimpleQueryFunctionCall) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.FunctionCall])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.

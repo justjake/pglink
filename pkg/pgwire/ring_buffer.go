@@ -25,16 +25,6 @@ const (
 	spaceCheckMsgs = 32
 )
 
-// ErrMessageTooLarge is returned when a message exceeds the buffer capacity
-type ErrMessageTooLarge struct {
-	MessageLen int64
-	BufferCap  int64
-}
-
-func (e ErrMessageTooLarge) Error() string {
-	return "message too large for ring buffer"
-}
-
 // RingBuffer is a single-producer single-consumer ring buffer for PostgreSQL
 // wire protocol messages. The producer reads from a network connection directly
 // into the ring buffer and parses message boundaries. The consumer iterates
@@ -46,6 +36,11 @@ func (e ErrMessageTooLarge) Error() string {
 //
 // The ring stores exact wire bytes, enabling zero-copy proxying: messages that
 // don't need modification can be written directly from the ring to the output.
+//
+// For messages too large to buffer, the ring buffer supports streaming: the
+// header and any buffered portion are written from the ring, then the remaining
+// bytes are streamed directly from the source to the destination. This is
+// transparent to the consumer - WriteBatch handles both cases internally.
 //
 // Cache-line padding separates variables with different access patterns to
 // prevent false sharing. Variables with the same writer can share a cache line.
@@ -80,11 +75,29 @@ type RingBuffer struct {
 	consumedMsgs  int64    // Messages consumed by reader
 	_             [48]byte // Pad to 64 bytes
 
+	// === Streaming state (for oversized messages) ===
+	// When a message is too large to buffer, we record it as "streaming".
+	// The reader goroutine blocks until the consumer streams the message through.
+	streaming struct {
+		active     bool  // True if current message is streaming
+		msgIdx     int64 // Which message is streaming
+		totalLen   int64 // Total wire length of the message
+		bodyInRing int64 // How many body bytes are in the ring buffer
+	}
+	streamReq  chan streamRequest // Consumer sends request to stream remaining bytes
+	streamDone chan error         // Reader goroutine signals completion
+
 	// === Signaling (cold path) ===
 	writerWake chan struct{} // Reader signals writer: space freed
 	readerWake chan struct{} // Writer signals reader: data ready
 	done       chan struct{} // Closed when buffer is done (error or EOF)
 	err        atomic.Pointer[error]
+}
+
+// streamRequest is sent from consumer to reader goroutine to stream remaining bytes.
+type streamRequest struct {
+	dst       io.Writer
+	remaining int64
 }
 
 // NewRingBuffer creates a new ring buffer with default sizes.
@@ -107,10 +120,17 @@ func NewRingBufferWithSize(dataSize, metaSize int) *RingBuffer {
 		dataMask:   int64(dataSize - 1),
 		offsets:    make([]int64, metaSize),
 		metaMask:   int64(metaSize - 1),
+		streamReq:  make(chan streamRequest),
+		streamDone: make(chan error),
 		writerWake: make(chan struct{}, 1),
 		readerWake: make(chan struct{}, 1),
 		done:       make(chan struct{}),
 	}
+}
+
+// maxBufferableSize returns the maximum message size that can be fully buffered.
+func (r *RingBuffer) maxBufferableSize() int64 {
+	return int64(len(r.data)) - minDataHeadroom
 }
 
 // === Writer methods ===
@@ -118,6 +138,7 @@ func NewRingBufferWithSize(dataSize, metaSize int) *RingBuffer {
 // ReadFrom reads PostgreSQL wire protocol messages from src until EOF or error.
 // Bytes are read directly into the ring buffer, then parsed to find message
 // boundaries. Complete messages are published in batches for the consumer.
+// For oversized messages, coordinates with the consumer to stream them through.
 func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 	msgsUntilSpaceRefresh := spaceCheckMsgs
 
@@ -163,11 +184,18 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 			r.rawEnd += int64(n)
 
 			// Parse all complete messages from the new data
-			r.parseCompleteMessages(&msgsUntilSpaceRefresh)
+			streamingDetected := r.parseCompleteMessages(&msgsUntilSpaceRefresh)
 
 			// Publish if we have new complete messages
 			if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
 				r.publish()
+			}
+
+			// If we detected a streaming message, wait for consumer to handle it
+			if streamingDetected {
+				if err := r.handleStreamingMessage(ctx, src); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -183,16 +211,18 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 }
 
 // parseCompleteMessages scans from parsePos to rawEnd finding complete messages.
-func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) {
+// Returns true if a streaming (oversized) message was detected.
+func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) bool {
 	bufLen := int64(len(r.data))
 	metaLen := int64(len(r.offsets))
+	maxSize := r.maxBufferableSize()
 
 	for {
 		available := r.rawEnd - r.parsePos
 
 		// Need at least 5 bytes for header
 		if available < 5 {
-			return
+			return false
 		}
 
 		// Check metadata space
@@ -202,7 +232,7 @@ func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) {
 			r.refreshCachedPositions()
 			usedMeta = r.localMsgCnt - r.cachedConsumedMsgs
 			if usedMeta >= metaLen {
-				return // No metadata space, stop parsing
+				return false // No metadata space, stop parsing
 			}
 		}
 
@@ -225,18 +255,33 @@ func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) {
 		// Validate message length
 		if msgLen < 5 {
 			r.setError(errors.New("invalid message length"))
-			return
+			return false
+		}
+
+		// Check if message is too large to buffer
+		if msgLen > maxSize {
+			// Set up streaming for this message
+			bodyInRing := available - 5 // How much body we already have
+			if bodyInRing < 0 {
+				bodyInRing = 0
+			}
+
+			r.streaming.active = true
+			r.streaming.msgIdx = r.localMsgCnt
+			r.streaming.totalLen = msgLen
+			r.streaming.bodyInRing = bodyInRing
+
+			// Record message metadata (offset points to header start)
+			r.offsets[r.localMsgCnt&r.metaMask] = r.parsePos
+			r.localMsgCnt++
+
+			// Don't advance parsePos - streaming will handle the rest
+			return true
 		}
 
 		// Check if complete message is available
 		if available < msgLen {
-			return
-		}
-
-		// Check if message fits in buffer
-		if msgLen > bufLen-minDataHeadroom {
-			r.setError(ErrMessageTooLarge{MessageLen: msgLen, BufferCap: bufLen})
-			return
+			return false
 		}
 
 		// Record message metadata
@@ -250,6 +295,34 @@ func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) {
 			r.refreshCachedPositions()
 			*msgsUntilSpaceRefresh = spaceCheckMsgs
 		}
+	}
+}
+
+// handleStreamingMessage waits for the consumer to request streaming,
+// then streams the remaining bytes directly from src to the consumer's dst.
+func (r *RingBuffer) handleStreamingMessage(ctx context.Context, src io.Reader) error {
+	select {
+	case <-ctx.Done():
+		r.setError(ctx.Err())
+		return ctx.Err()
+	case req := <-r.streamReq:
+		// Stream remaining bytes directly from src to dst
+		_, err := io.CopyN(req.dst, src, req.remaining)
+		r.streamDone <- err
+
+		if err != nil {
+			r.setError(err)
+			return err
+		}
+
+		// Reset streaming state and advance parsePos
+		r.parsePos += r.streaming.totalLen
+		r.rawEnd = r.parsePos // Discard any buffered data
+		r.streaming.active = false
+
+		return nil
+	case <-r.done:
+		return r.Error()
 	}
 }
 
@@ -362,6 +435,11 @@ func (r *RingBuffer) PublishedMsgCount() int64 {
 
 // === Message access methods ===
 
+// isStreaming returns true if msgIdx is a streaming (oversized) message.
+func (r *RingBuffer) isStreaming(msgIdx int64) bool {
+	return r.streaming.active && r.streaming.msgIdx == msgIdx
+}
+
 // MessageType returns the message type for message at index msgIdx.
 // Reads directly from the ring buffer data.
 func (r *RingBuffer) MessageType(msgIdx int64) MsgType {
@@ -375,7 +453,11 @@ func (r *RingBuffer) MessageOffset(msgIdx int64) int64 {
 }
 
 // MessageEnd returns the byte offset where message msgIdx ends (exclusive).
+// For streaming messages, returns the end based on the total message length.
 func (r *RingBuffer) MessageEnd(msgIdx int64) int64 {
+	if r.isStreaming(msgIdx) {
+		return r.MessageOffset(msgIdx) + r.streaming.totalLen
+	}
 	nextMsgIdx := msgIdx + 1
 	published := atomic.LoadInt64(&r.publishedMsgs)
 	if nextMsgIdx < published {
@@ -386,12 +468,19 @@ func (r *RingBuffer) MessageEnd(msgIdx int64) int64 {
 
 // MessageLen returns the total wire length of message msgIdx (type + length + body).
 func (r *RingBuffer) MessageLen(msgIdx int64) int64 {
+	if r.isStreaming(msgIdx) {
+		return r.streaming.totalLen
+	}
 	return r.MessageEnd(msgIdx) - r.MessageOffset(msgIdx)
 }
 
 // MessageBody returns the body bytes for message at msgIdx (excluding 5-byte header).
+// Panics if the message is streaming (too large to buffer).
 // This may allocate if the message wraps around the ring buffer.
 func (r *RingBuffer) MessageBody(msgIdx int64) []byte {
+	if r.isStreaming(msgIdx) {
+		panic("MessageBody called on streaming message - message too large to buffer")
+	}
 	start := r.MessageOffset(msgIdx) + 5 // Skip header
 	end := r.MessageEnd(msgIdx)
 	return r.readRange(start, end)
@@ -427,19 +516,108 @@ func (r *RingBuffer) readRange(start, end int64) []byte {
 
 // WriteBatch writes messages [fromIdx, toIdx) directly to dst.
 // This is the hot path for proxying unmodified messages.
+// Handles streaming messages transparently - if the last message in the batch
+// is streaming, coordinates with the reader goroutine to stream it through.
 func (r *RingBuffer) WriteBatch(fromIdx, toIdx int64, dst io.Writer) (int64, error) {
 	if fromIdx >= toIdx {
 		return 0, nil
 	}
 
-	start := r.MessageOffset(fromIdx)
-	end := r.MessageEnd(toIdx - 1)
+	lastIdx := toIdx - 1
 
+	// Check if last message is streaming
+	if r.isStreaming(lastIdx) {
+		var written int64
+
+		// Write all fully-buffered messages first [fromIdx, lastIdx)
+		if lastIdx > fromIdx {
+			start := r.MessageOffset(fromIdx)
+			end := r.MessageOffset(lastIdx)
+			n, err := r.writeRange(start, end, dst)
+			written += n
+			if err != nil {
+				return written, err
+			}
+		}
+
+		// Stream the last message
+		n, err := r.writeStreamingMessage(lastIdx, dst)
+		return written + n, err
+	}
+
+	// All buffered - simple batch write
+	start := r.MessageOffset(fromIdx)
+	end := r.MessageEnd(lastIdx)
 	return r.writeRange(start, end, dst)
+}
+
+// writeStreamingMessage writes a streaming message to dst.
+// Writes header + buffered body portion, then coordinates with reader goroutine
+// to stream the remaining bytes directly from the source.
+func (r *RingBuffer) writeStreamingMessage(msgIdx int64, dst io.Writer) (int64, error) {
+	if !r.isStreaming(msgIdx) {
+		// Not streaming, use normal write
+		return r.WriteMessage(msgIdx, dst)
+	}
+
+	var written int64
+	offset := r.MessageOffset(msgIdx)
+
+	// Write header (5 bytes)
+	hdrOff := offset & r.dataMask
+	if hdrOff+5 <= int64(len(r.data)) {
+		n, err := dst.Write(r.data[hdrOff : hdrOff+5])
+		written += int64(n)
+		if err != nil {
+			return written, err
+		}
+	} else {
+		// Header wraps around
+		var hdr [5]byte
+		for i := 0; i < 5; i++ {
+			hdr[i] = r.data[(hdrOff+int64(i))&r.dataMask]
+		}
+		n, err := dst.Write(hdr[:])
+		written += int64(n)
+		if err != nil {
+			return written, err
+		}
+	}
+
+	// Write buffered body portion
+	bodyStart := offset + 5
+	bodyBuffered := r.streaming.bodyInRing
+	if bodyBuffered > 0 {
+		n, err := r.writeRange(bodyStart, bodyStart+bodyBuffered, dst)
+		written += n
+		if err != nil {
+			return written, err
+		}
+	}
+
+	// Calculate remaining bytes to stream
+	totalBodyLen := r.streaming.totalLen - 5
+	remaining := totalBodyLen - bodyBuffered
+
+	if remaining > 0 {
+		// Send request to reader goroutine to stream remaining bytes
+		r.streamReq <- streamRequest{dst: dst, remaining: remaining}
+
+		// Wait for completion
+		if err := <-r.streamDone; err != nil {
+			return written, err
+		}
+		written += remaining
+	}
+
+	return written, nil
 }
 
 // WriteMessage writes a single message to dst.
 func (r *RingBuffer) WriteMessage(msgIdx int64, dst io.Writer) (int64, error) {
+	if r.isStreaming(msgIdx) {
+		return r.writeStreamingMessage(msgIdx, dst)
+	}
 	start := r.MessageOffset(msgIdx)
 	end := r.MessageEnd(msgIdx)
 	return r.writeRange(start, end, dst)

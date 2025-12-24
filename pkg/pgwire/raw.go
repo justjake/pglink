@@ -3,7 +3,6 @@ package pgwire
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -19,10 +18,10 @@ type RawMessageSource interface {
 	// MessageBody returns the message body bytes (after 5-byte header).
 	// This may allocate if the bytes need to be copied (e.g., ring buffer wraparound).
 	// Only call this when you need to parse the message.
+	//
+	// May panic if the message is enormous.
+	// TODO: return []byte, error
 	MessageBody() []byte
-
-	// WriteTo writes the complete wire protocol message (header + body) to w.
-	WriteTo(w io.Writer) (int64, error)
 
 	// Retain returns an owned copy of this message source that is safe to keep
 	// beyond the current iteration. For already-owned sources like RawBody,
@@ -64,35 +63,8 @@ func (r RawBody) Len() int {
 	return 5 + len(r.Body)
 }
 
-// BodyLen returns just the body length.
-func (r RawBody) BodyLen() int {
-	return len(r.Body)
-}
-
 // WriteTo writes the complete wire protocol message to w.
 // This is the fast path for forwarding messages without parsing.
-func (r RawBody) WriteTo(w io.Writer) (int64, error) {
-	var header [5]byte
-	header[0] = byte(r.Type)
-	binary.BigEndian.PutUint32(header[1:5], uint32(len(r.Body)+4))
-
-	n1, err := w.Write(header[:])
-	if err != nil {
-		return int64(n1), err
-	}
-
-	n2, err := w.Write(r.Body)
-	return int64(n1 + n2), err
-}
-
-// AppendTo appends the complete wire protocol message to buf.
-func (r RawBody) AppendTo(buf []byte) []byte {
-	buf = append(buf, byte(r.Type))
-	buf = binary.BigEndian.AppendUint32(buf, uint32(len(r.Body)+4))
-	buf = append(buf, r.Body...)
-	return buf
-}
-
 // decodeBackendMessage decodes raw bytes into a pgproto3.BackendMessage.
 // The returned message is newly allocated.
 func decodeBackendMessage(raw RawBody) (pgproto3.BackendMessage, error) {

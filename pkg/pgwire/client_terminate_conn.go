@@ -4,7 +4,6 @@ package pgwire
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -14,7 +13,6 @@ type ClientTerminateConn interface {
 	TerminateConn()
 	PgwireMessage() pgproto3.Message
 	Client() pgproto3.FrontendMessage
-	Raw() RawBody
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -32,16 +30,8 @@ func (t ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message {
 func (t ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage {
 	return (*FromClient[*pgproto3.Terminate])(&t).Parse()
 }
-func (m ClientTerminateConnTerminate) Raw() RawBody { return FromClient[*pgproto3.Terminate](m).Raw() }
 func (m *ClientTerminateConnTerminate) Parse() *pgproto3.Terminate {
 	return (*FromClient[*pgproto3.Terminate])(m).Parse()
-}
-func (m ClientTerminateConnTerminate) IsParsed() bool {
-	return FromClient[*pgproto3.Terminate](m).IsParsed()
-}
-func (m ClientTerminateConnTerminate) Body() []byte { return FromClient[*pgproto3.Terminate](m).Body() }
-func (m *ClientTerminateConnTerminate) WriteTo(w io.Writer) (int64, error) {
-	return (*FromClient[*pgproto3.Terminate])(m).WriteTo(w)
 }
 
 // Retain returns a copy of this message with retained source bytes.
