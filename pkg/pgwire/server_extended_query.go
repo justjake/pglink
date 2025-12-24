@@ -17,24 +17,24 @@ type ServerExtendedQuery interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ServerExtendedQuery = ServerExtendedQueryParseComplete{}
-	_ ServerExtendedQuery = ServerExtendedQueryBindComplete{}
-	_ ServerExtendedQuery = ServerExtendedQueryParameterDescription{}
-	_ ServerExtendedQuery = ServerExtendedQueryRowDescription{}
-	_ ServerExtendedQuery = ServerExtendedQueryNoData{}
-	_ ServerExtendedQuery = ServerExtendedQueryPortalSuspended{}
-	_ ServerExtendedQuery = ServerExtendedQueryCloseComplete{}
+	_ ServerExtendedQuery = (*ServerExtendedQueryParseComplete)(nil)
+	_ ServerExtendedQuery = (*ServerExtendedQueryBindComplete)(nil)
+	_ ServerExtendedQuery = (*ServerExtendedQueryParameterDescription)(nil)
+	_ ServerExtendedQuery = (*ServerExtendedQueryRowDescription)(nil)
+	_ ServerExtendedQuery = (*ServerExtendedQueryNoData)(nil)
+	_ ServerExtendedQuery = (*ServerExtendedQueryPortalSuspended)(nil)
+	_ ServerExtendedQuery = (*ServerExtendedQueryCloseComplete)(nil)
 )
 
 // Response to Parse.
 type ServerExtendedQueryParseComplete FromServer[*pgproto3.ParseComplete]
 
-func (ServerExtendedQueryParseComplete) ExtendedQuery() {}
-func (t ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ParseComplete])(&t).Parse()
+func (*ServerExtendedQueryParseComplete) ExtendedQuery() {}
+func (t *ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.ParseComplete])(t).Parse()
 }
-func (t ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ParseComplete])(&t).Parse()
+func (t *ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.ParseComplete])(t).Parse()
 }
 func (m *ServerExtendedQueryParseComplete) Parse() *pgproto3.ParseComplete {
 	return (*FromServer[*pgproto3.ParseComplete])(m).Parse()
@@ -50,12 +50,12 @@ func (m ServerExtendedQueryParseComplete) Retain() ServerExtendedQueryParseCompl
 // Response to Bind.
 type ServerExtendedQueryBindComplete FromServer[*pgproto3.BindComplete]
 
-func (ServerExtendedQueryBindComplete) ExtendedQuery() {}
-func (t ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.BindComplete])(&t).Parse()
+func (*ServerExtendedQueryBindComplete) ExtendedQuery() {}
+func (t *ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.BindComplete])(t).Parse()
 }
-func (t ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.BindComplete])(&t).Parse()
+func (t *ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.BindComplete])(t).Parse()
 }
 func (m *ServerExtendedQueryBindComplete) Parse() *pgproto3.BindComplete {
 	return (*FromServer[*pgproto3.BindComplete])(m).Parse()
@@ -71,12 +71,12 @@ func (m ServerExtendedQueryBindComplete) Retain() ServerExtendedQueryBindComplet
 // Response to Describe of prepared statement.
 type ServerExtendedQueryParameterDescription FromServer[*pgproto3.ParameterDescription]
 
-func (ServerExtendedQueryParameterDescription) ExtendedQuery() {}
-func (t ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ParameterDescription])(&t).Parse()
+func (*ServerExtendedQueryParameterDescription) ExtendedQuery() {}
+func (t *ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.ParameterDescription])(t).Parse()
 }
-func (t ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ParameterDescription])(&t).Parse()
+func (t *ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.ParameterDescription])(t).Parse()
 }
 func (m *ServerExtendedQueryParameterDescription) Parse() *pgproto3.ParameterDescription {
 	return (*FromServer[*pgproto3.ParameterDescription])(m).Parse()
@@ -92,12 +92,12 @@ func (m ServerExtendedQueryParameterDescription) Retain() ServerExtendedQueryPar
 // Response to Describe of portal or statement that returns data.
 type ServerExtendedQueryRowDescription FromServer[*pgproto3.RowDescription]
 
-func (ServerExtendedQueryRowDescription) ExtendedQuery() {}
-func (t ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.RowDescription])(&t).Parse()
+func (*ServerExtendedQueryRowDescription) ExtendedQuery() {}
+func (t *ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.RowDescription])(t).Parse()
 }
-func (t ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.RowDescription])(&t).Parse()
+func (t *ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.RowDescription])(t).Parse()
 }
 func (m *ServerExtendedQueryRowDescription) Parse() *pgproto3.RowDescription {
 	return (*FromServer[*pgproto3.RowDescription])(m).Parse()
@@ -113,12 +113,12 @@ func (m ServerExtendedQueryRowDescription) Retain() ServerExtendedQueryRowDescri
 // Response to Describe of portal or statement that doesn't return data.
 type ServerExtendedQueryNoData FromServer[*pgproto3.NoData]
 
-func (ServerExtendedQueryNoData) ExtendedQuery() {}
-func (t ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.NoData])(&t).Parse()
+func (*ServerExtendedQueryNoData) ExtendedQuery() {}
+func (t *ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.NoData])(t).Parse()
 }
-func (t ServerExtendedQueryNoData) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.NoData])(&t).Parse()
+func (t *ServerExtendedQueryNoData) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.NoData])(t).Parse()
 }
 func (m *ServerExtendedQueryNoData) Parse() *pgproto3.NoData {
 	return (*FromServer[*pgproto3.NoData])(m).Parse()
@@ -135,12 +135,12 @@ func (m ServerExtendedQueryNoData) Retain() ServerExtendedQueryNoData {
 // complete during the Execute call, the client should call Execute again.
 type ServerExtendedQueryPortalSuspended FromServer[*pgproto3.PortalSuspended]
 
-func (ServerExtendedQueryPortalSuspended) ExtendedQuery() {}
-func (t ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.PortalSuspended])(&t).Parse()
+func (*ServerExtendedQueryPortalSuspended) ExtendedQuery() {}
+func (t *ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.PortalSuspended])(t).Parse()
 }
-func (t ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.PortalSuspended])(&t).Parse()
+func (t *ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.PortalSuspended])(t).Parse()
 }
 func (m *ServerExtendedQueryPortalSuspended) Parse() *pgproto3.PortalSuspended {
 	return (*FromServer[*pgproto3.PortalSuspended])(m).Parse()
@@ -156,12 +156,12 @@ func (m ServerExtendedQueryPortalSuspended) Retain() ServerExtendedQueryPortalSu
 // Response to Close of prepared statement or portal.
 type ServerExtendedQueryCloseComplete FromServer[*pgproto3.CloseComplete]
 
-func (ServerExtendedQueryCloseComplete) ExtendedQuery() {}
-func (t ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CloseComplete])(&t).Parse()
+func (*ServerExtendedQueryCloseComplete) ExtendedQuery() {}
+func (t *ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.CloseComplete])(t).Parse()
 }
-func (t ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CloseComplete])(&t).Parse()
+func (t *ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.CloseComplete])(t).Parse()
 }
 func (m *ServerExtendedQueryCloseComplete) Parse() *pgproto3.CloseComplete {
 	return (*FromServer[*pgproto3.CloseComplete])(m).Parse()
@@ -175,77 +175,78 @@ func (m ServerExtendedQueryCloseComplete) Retain() ServerExtendedQueryCloseCompl
 }
 
 // ToServerExtendedQuery converts a pgproto3.BackendMessage to a ServerExtendedQuery if it matches one of the known types.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsServer().
 func ToServerExtendedQuery(msg pgproto3.BackendMessage) (ServerExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ParseComplete:
-		return ServerExtendedQueryParseComplete(ServerParsed(m)), true
+		return (*ServerExtendedQueryParseComplete)(ServerParsed(m)), true
 	case *pgproto3.BindComplete:
-		return ServerExtendedQueryBindComplete(ServerParsed(m)), true
+		return (*ServerExtendedQueryBindComplete)(ServerParsed(m)), true
 	case *pgproto3.ParameterDescription:
-		return ServerExtendedQueryParameterDescription(ServerParsed(m)), true
+		return (*ServerExtendedQueryParameterDescription)(ServerParsed(m)), true
 	case *pgproto3.RowDescription:
-		return ServerExtendedQueryRowDescription(ServerParsed(m)), true
+		return (*ServerExtendedQueryRowDescription)(ServerParsed(m)), true
 	case *pgproto3.NoData:
-		return ServerExtendedQueryNoData(ServerParsed(m)), true
+		return (*ServerExtendedQueryNoData)(ServerParsed(m)), true
 	case *pgproto3.PortalSuspended:
-		return ServerExtendedQueryPortalSuspended(ServerParsed(m)), true
+		return (*ServerExtendedQueryPortalSuspended)(ServerParsed(m)), true
 	case *pgproto3.CloseComplete:
-		return ServerExtendedQueryCloseComplete(ServerParsed(m)), true
+		return (*ServerExtendedQueryCloseComplete)(ServerParsed(m)), true
 	}
 	return nil, false
 }
 
 // ServerExtendedQueryHandlers provides type-safe handlers for each ServerExtendedQuery variant.
 type ServerExtendedQueryHandlers[T any] struct {
-	ParseComplete        func(msg ServerExtendedQueryParseComplete) (T, error)
-	BindComplete         func(msg ServerExtendedQueryBindComplete) (T, error)
-	ParameterDescription func(msg ServerExtendedQueryParameterDescription) (T, error)
-	RowDescription       func(msg ServerExtendedQueryRowDescription) (T, error)
-	NoData               func(msg ServerExtendedQueryNoData) (T, error)
-	PortalSuspended      func(msg ServerExtendedQueryPortalSuspended) (T, error)
-	CloseComplete        func(msg ServerExtendedQueryCloseComplete) (T, error)
+	ParseComplete        func(msg *ServerExtendedQueryParseComplete) (T, error)
+	BindComplete         func(msg *ServerExtendedQueryBindComplete) (T, error)
+	ParameterDescription func(msg *ServerExtendedQueryParameterDescription) (T, error)
+	RowDescription       func(msg *ServerExtendedQueryRowDescription) (T, error)
+	NoData               func(msg *ServerExtendedQueryNoData) (T, error)
+	PortalSuspended      func(msg *ServerExtendedQueryPortalSuspended) (T, error)
+	CloseComplete        func(msg *ServerExtendedQueryCloseComplete) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
 func (h ServerExtendedQueryHandlers[T]) HandleDefault(msg ServerExtendedQuery, defaultHandler func(msg ServerExtendedQuery) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
-	case ServerExtendedQueryParseComplete:
+	case *ServerExtendedQueryParseComplete:
 		if h.ParseComplete != nil {
 			return h.ParseComplete(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerExtendedQueryBindComplete:
+	case *ServerExtendedQueryBindComplete:
 		if h.BindComplete != nil {
 			return h.BindComplete(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerExtendedQueryParameterDescription:
+	case *ServerExtendedQueryParameterDescription:
 		if h.ParameterDescription != nil {
 			return h.ParameterDescription(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerExtendedQueryRowDescription:
+	case *ServerExtendedQueryRowDescription:
 		if h.RowDescription != nil {
 			return h.RowDescription(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerExtendedQueryNoData:
+	case *ServerExtendedQueryNoData:
 		if h.NoData != nil {
 			return h.NoData(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerExtendedQueryPortalSuspended:
+	case *ServerExtendedQueryPortalSuspended:
 		if h.PortalSuspended != nil {
 			return h.PortalSuspended(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerExtendedQueryCloseComplete:
+	case *ServerExtendedQueryCloseComplete:
 		if h.CloseComplete != nil {
 			return h.CloseComplete(msg)
 		} else {

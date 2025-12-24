@@ -202,7 +202,7 @@ type SimpleQueryFlow struct {
 }
 
 // NewSimpleQueryFlow creates a new SimpleQueryFlow from a Query message.
-func NewSimpleQueryFlow(msg ClientSimpleQueryQuery, onClose func(*SimpleQueryFlow)) *SimpleQueryFlow {
+func NewSimpleQueryFlow(msg *ClientSimpleQueryQuery, onClose func(*SimpleQueryFlow)) *SimpleQueryFlow {
 	return &SimpleQueryFlow{
 		SQL:       msg.Parse().String,
 		StartTime: time.Now(),
@@ -215,16 +215,16 @@ func (f *SimpleQueryFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandler
 		Server: FlowUpdateServerHandlers{
 			Response: func(msg ServerResponse) bool {
 				switch m := msg.(type) {
-				case ServerResponseCommandComplete:
+				case *ServerResponseCommandComplete:
 					f.CommandTag = pgconn.NewCommandTag(string(m.Parse().CommandTag))
 					return true // Continue until ReadyForQuery
-				case ServerResponseErrorResponse:
+				case *ServerResponseErrorResponse:
 					f.Err = m.Parse()
 					return true // Continue until ReadyForQuery
-				case ServerResponseReadyForQuery:
+				case *ServerResponseReadyForQuery:
 					f.EndTime = time.Now()
 					return false // FLOW COMPLETE
-				case ServerResponseDataRow:
+				case *ServerResponseDataRow:
 					f.RowCount++
 					return true
 				}
@@ -262,7 +262,7 @@ type ExtendedQueryFlow struct {
 }
 
 // NewExtendedQueryFlow creates a new ExtendedQueryFlow from a Parse message.
-func NewExtendedQueryFlow(msg ClientExtendedQueryParse, onClose func(*ExtendedQueryFlow)) *ExtendedQueryFlow {
+func NewExtendedQueryFlow(msg *ClientExtendedQueryParse, onClose func(*ExtendedQueryFlow)) *ExtendedQueryFlow {
 	parsed := msg.Parse()
 	return &ExtendedQueryFlow{
 		Type:          FlowTypePrepare, // Will be updated to FlowTypeExecute if we see Bind+Execute
@@ -278,10 +278,10 @@ func (f *ExtendedQueryFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandl
 		Client: FlowUpdateClientHandlers{
 			ExtendedQuery: func(msg ClientExtendedQuery) bool {
 				switch m := msg.(type) {
-				case ClientExtendedQueryBind:
+				case *ClientExtendedQueryBind:
 					f.seenBind = true
 					f.PortalName = m.Parse().DestinationPortal
-				case ClientExtendedQueryExecute:
+				case *ClientExtendedQueryExecute:
 					f.seenExecute = true
 					if f.seenBind {
 						f.Type = FlowTypeExecute
@@ -293,16 +293,16 @@ func (f *ExtendedQueryFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandl
 		Server: FlowUpdateServerHandlers{
 			Response: func(msg ServerResponse) bool {
 				switch m := msg.(type) {
-				case ServerResponseCommandComplete:
+				case *ServerResponseCommandComplete:
 					f.CommandTag = pgconn.NewCommandTag(string(m.Parse().CommandTag))
 					return true
-				case ServerResponseErrorResponse:
+				case *ServerResponseErrorResponse:
 					f.Err = m.Parse()
 					return true
-				case ServerResponseReadyForQuery:
+				case *ServerResponseReadyForQuery:
 					f.EndTime = time.Now()
 					return false // FLOW COMPLETE
-				case ServerResponseDataRow:
+				case *ServerResponseDataRow:
 					f.RowCount++
 					return true
 				}
@@ -357,7 +357,7 @@ func (f *CopyFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandlers {
 		Client: FlowUpdateClientHandlers{
 			Copy: func(msg ClientCopy) bool {
 				switch m := msg.(type) {
-				case ClientCopyCopyData:
+				case *ClientCopyCopyData:
 					// Fast path: use DataSize() to avoid parsing
 					f.ByteCount += int64(m.DataSize())
 				}
@@ -367,7 +367,7 @@ func (f *CopyFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandlers {
 		Server: FlowUpdateServerHandlers{
 			Copy: func(msg ServerCopy) bool {
 				switch m := msg.(type) {
-				case ServerCopyCopyData:
+				case *ServerCopyCopyData:
 					// Fast path: use DataSize() to avoid parsing
 					f.ByteCount += int64(m.DataSize())
 				}
@@ -375,13 +375,13 @@ func (f *CopyFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandlers {
 			},
 			Response: func(msg ServerResponse) bool {
 				switch m := msg.(type) {
-				case ServerResponseCommandComplete:
+				case *ServerResponseCommandComplete:
 					f.CommandTag = pgconn.NewCommandTag(string(m.Parse().CommandTag))
 					return true
-				case ServerResponseErrorResponse:
+				case *ServerResponseErrorResponse:
 					f.Err = m.Parse()
 					return true
-				case ServerResponseReadyForQuery:
+				case *ServerResponseReadyForQuery:
 					f.EndTime = time.Now()
 					return false // FLOW COMPLETE
 				}
@@ -401,14 +401,14 @@ func (f *CopyFlow) Close() {
 type SimpleQueryRecognizer struct {
 	// OnStart is called when a simple query flow starts. The returned function
 	// becomes the flow's OnClose callback.
-	OnStart func(msg ClientSimpleQueryQuery) func(*SimpleQueryFlow)
+	OnStart func(msg *ClientSimpleQueryQuery) func(*SimpleQueryFlow)
 }
 
 func (r *SimpleQueryRecognizer) StartHandlers(state *ProtocolState) FlowStartHandlers {
 	return FlowStartHandlers{
 		Client: FlowStartClientHandlers{
 			SimpleQuery: func(msg ClientSimpleQuery) Flow {
-				if query, ok := msg.(ClientSimpleQueryQuery); ok {
+				if query, ok := msg.(*ClientSimpleQueryQuery); ok {
 					var onClose func(*SimpleQueryFlow)
 					if r.OnStart != nil {
 						onClose = r.OnStart(query)
@@ -425,14 +425,14 @@ func (r *SimpleQueryRecognizer) StartHandlers(state *ProtocolState) FlowStartHan
 type ExtendedQueryRecognizer struct {
 	// OnStart is called when an extended query flow starts. The returned function
 	// becomes the flow's OnClose callback.
-	OnStart func(msg ClientExtendedQueryParse) func(*ExtendedQueryFlow)
+	OnStart func(msg *ClientExtendedQueryParse) func(*ExtendedQueryFlow)
 }
 
 func (r *ExtendedQueryRecognizer) StartHandlers(state *ProtocolState) FlowStartHandlers {
 	return FlowStartHandlers{
 		Client: FlowStartClientHandlers{
 			ExtendedQuery: func(msg ClientExtendedQuery) Flow {
-				if parse, ok := msg.(ClientExtendedQueryParse); ok {
+				if parse, ok := msg.(*ClientExtendedQueryParse); ok {
 					var onClose func(*ExtendedQueryFlow)
 					if r.OnStart != nil {
 						onClose = r.OnStart(parse)
@@ -463,9 +463,9 @@ func (r *CopyRecognizer) StartHandlers(state *ProtocolState) FlowStartHandlers {
 			Copy: func(msg ServerCopy) Flow {
 				var flowType FlowType
 				switch msg.(type) {
-				case ServerCopyCopyInResponse:
+				case *ServerCopyCopyInResponse:
 					flowType = FlowTypeCopyIn
-				case ServerCopyCopyOutResponse:
+				case *ServerCopyCopyOutResponse:
 					flowType = FlowTypeCopyOut
 				default:
 					return nil

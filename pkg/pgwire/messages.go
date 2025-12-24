@@ -20,127 +20,131 @@ type ServerMessage interface {
 	Server() pgproto3.BackendMessage
 }
 
+// ToClientMessage converts a pgproto3.FrontendMessage to a ClientMessage.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsClient().
 func ToClientMessage(msg pgproto3.FrontendMessage) (ClientMessage, bool) {
 	switch m := msg.(type) {
 	// Cancel
 	case *pgproto3.CancelRequest:
-		return ClientCancelCancelRequest(ClientParsed(m)), true
+		return (*ClientCancelCancelRequest)(ClientParsed(m)), true
 	// Copy
 	case *pgproto3.CopyData:
-		return ClientCopyCopyData(ClientParsed(m)), true
+		return (*ClientCopyCopyData)(ClientParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ClientCopyCopyDone(ClientParsed(m)), true
+		return (*ClientCopyCopyDone)(ClientParsed(m)), true
 	case *pgproto3.CopyFail:
-		return ClientCopyCopyFail(ClientParsed(m)), true
+		return (*ClientCopyCopyFail)(ClientParsed(m)), true
 	// SimpleQuery
 	case *pgproto3.Query:
-		return ClientSimpleQueryQuery(ClientParsed(m)), true
+		return (*ClientSimpleQueryQuery)(ClientParsed(m)), true
 	case *pgproto3.FunctionCall:
-		return ClientSimpleQueryFunctionCall(ClientParsed(m)), true
+		return (*ClientSimpleQueryFunctionCall)(ClientParsed(m)), true
 	// ExtendedQuery
 	case *pgproto3.Parse:
-		return ClientExtendedQueryParse(ClientParsed(m)), true
+		return (*ClientExtendedQueryParse)(ClientParsed(m)), true
 	case *pgproto3.Bind:
-		return ClientExtendedQueryBind(ClientParsed(m)), true
+		return (*ClientExtendedQueryBind)(ClientParsed(m)), true
 	case *pgproto3.Execute:
-		return ClientExtendedQueryExecute(ClientParsed(m)), true
+		return (*ClientExtendedQueryExecute)(ClientParsed(m)), true
 	case *pgproto3.Sync:
-		return ClientExtendedQuerySync(ClientParsed(m)), true
+		return (*ClientExtendedQuerySync)(ClientParsed(m)), true
 	case *pgproto3.Describe:
-		return ClientExtendedQueryDescribe(ClientParsed(m)), true
+		return (*ClientExtendedQueryDescribe)(ClientParsed(m)), true
 	case *pgproto3.Close:
-		return ClientExtendedQueryClose(ClientParsed(m)), true
+		return (*ClientExtendedQueryClose)(ClientParsed(m)), true
 	case *pgproto3.Flush:
-		return ClientExtendedQueryFlush(ClientParsed(m)), true
+		return (*ClientExtendedQueryFlush)(ClientParsed(m)), true
 	// TerminateConn
 	case *pgproto3.Terminate:
-		return ClientTerminateConnTerminate(ClientParsed(m)), true
+		return (*ClientTerminateConnTerminate)(ClientParsed(m)), true
 	// Startup
 	case *pgproto3.GSSEncRequest:
-		return ClientStartupGSSEncRequest(ClientParsed(m)), true
+		return (*ClientStartupGSSEncRequest)(ClientParsed(m)), true
 	case *pgproto3.GSSResponse:
-		return ClientStartupGSSResponse(ClientParsed(m)), true
+		return (*ClientStartupGSSResponse)(ClientParsed(m)), true
 	case *pgproto3.PasswordMessage:
-		return ClientStartupPasswordMessage(ClientParsed(m)), true
+		return (*ClientStartupPasswordMessage)(ClientParsed(m)), true
 	case *pgproto3.SASLInitialResponse:
-		return ClientStartupSASLInitialResponse(ClientParsed(m)), true
+		return (*ClientStartupSASLInitialResponse)(ClientParsed(m)), true
 	case *pgproto3.SASLResponse:
-		return ClientStartupSASLResponse(ClientParsed(m)), true
+		return (*ClientStartupSASLResponse)(ClientParsed(m)), true
 	case *pgproto3.SSLRequest:
-		return ClientStartupSSLRequest(ClientParsed(m)), true
+		return (*ClientStartupSSLRequest)(ClientParsed(m)), true
 	case *pgproto3.StartupMessage:
-		return ClientStartupStartupMessage(ClientParsed(m)), true
+		return (*ClientStartupStartupMessage)(ClientParsed(m)), true
 	}
 	return nil, false
 }
 
+// ToServerMessage converts a pgproto3.BackendMessage to a ServerMessage.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsServer().
 func ToServerMessage(msg pgproto3.BackendMessage) (ServerMessage, bool) {
 	switch m := msg.(type) {
 	// Async
 	case *pgproto3.NoticeResponse:
-		return ServerAsyncNoticeResponse(ServerParsed(m)), true
+		return (*ServerAsyncNoticeResponse)(ServerParsed(m)), true
 	case *pgproto3.NotificationResponse:
-		return ServerAsyncNotificationResponse(ServerParsed(m)), true
+		return (*ServerAsyncNotificationResponse)(ServerParsed(m)), true
 	case *pgproto3.ParameterStatus:
-		return ServerAsyncParameterStatus(ServerParsed(m)), true
+		return (*ServerAsyncParameterStatus)(ServerParsed(m)), true
 	// Copy
 	case *pgproto3.CopyInResponse:
-		return ServerCopyCopyInResponse(ServerParsed(m)), true
+		return (*ServerCopyCopyInResponse)(ServerParsed(m)), true
 	case *pgproto3.CopyOutResponse:
-		return ServerCopyCopyOutResponse(ServerParsed(m)), true
+		return (*ServerCopyCopyOutResponse)(ServerParsed(m)), true
 	case *pgproto3.CopyBothResponse:
-		return ServerCopyCopyBothResponse(ServerParsed(m)), true
+		return (*ServerCopyCopyBothResponse)(ServerParsed(m)), true
 	case *pgproto3.CopyData:
-		return ServerCopyCopyData(ServerParsed(m)), true
+		return (*ServerCopyCopyData)(ServerParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ServerCopyCopyDone(ServerParsed(m)), true
+		return (*ServerCopyCopyDone)(ServerParsed(m)), true
 	// ExtendedQuery
 	case *pgproto3.ParseComplete:
-		return ServerExtendedQueryParseComplete(ServerParsed(m)), true
+		return (*ServerExtendedQueryParseComplete)(ServerParsed(m)), true
 	case *pgproto3.BindComplete:
-		return ServerExtendedQueryBindComplete(ServerParsed(m)), true
+		return (*ServerExtendedQueryBindComplete)(ServerParsed(m)), true
 	case *pgproto3.ParameterDescription:
-		return ServerExtendedQueryParameterDescription(ServerParsed(m)), true
+		return (*ServerExtendedQueryParameterDescription)(ServerParsed(m)), true
 	case *pgproto3.RowDescription:
-		return ServerExtendedQueryRowDescription(ServerParsed(m)), true
+		return (*ServerExtendedQueryRowDescription)(ServerParsed(m)), true
 	case *pgproto3.NoData:
-		return ServerExtendedQueryNoData(ServerParsed(m)), true
+		return (*ServerExtendedQueryNoData)(ServerParsed(m)), true
 	case *pgproto3.PortalSuspended:
-		return ServerExtendedQueryPortalSuspended(ServerParsed(m)), true
+		return (*ServerExtendedQueryPortalSuspended)(ServerParsed(m)), true
 	case *pgproto3.CloseComplete:
-		return ServerExtendedQueryCloseComplete(ServerParsed(m)), true
+		return (*ServerExtendedQueryCloseComplete)(ServerParsed(m)), true
 	// Response
 	case *pgproto3.ReadyForQuery:
-		return ServerResponseReadyForQuery(ServerParsed(m)), true
+		return (*ServerResponseReadyForQuery)(ServerParsed(m)), true
 	case *pgproto3.CommandComplete:
-		return ServerResponseCommandComplete(ServerParsed(m)), true
+		return (*ServerResponseCommandComplete)(ServerParsed(m)), true
 	case *pgproto3.DataRow:
-		return ServerResponseDataRow(ServerParsed(m)), true
+		return (*ServerResponseDataRow)(ServerParsed(m)), true
 	case *pgproto3.EmptyQueryResponse:
-		return ServerResponseEmptyQueryResponse(ServerParsed(m)), true
+		return (*ServerResponseEmptyQueryResponse)(ServerParsed(m)), true
 	case *pgproto3.ErrorResponse:
-		return ServerResponseErrorResponse(ServerParsed(m)), true
+		return (*ServerResponseErrorResponse)(ServerParsed(m)), true
 	case *pgproto3.FunctionCallResponse:
-		return ServerResponseFunctionCallResponse(ServerParsed(m)), true
+		return (*ServerResponseFunctionCallResponse)(ServerParsed(m)), true
 	// Startup
 	case *pgproto3.AuthenticationCleartextPassword:
-		return ServerStartupAuthenticationCleartextPassword(ServerParsed(m)), true
+		return (*ServerStartupAuthenticationCleartextPassword)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationGSS:
-		return ServerStartupAuthenticationGSS(ServerParsed(m)), true
+		return (*ServerStartupAuthenticationGSS)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationGSSContinue:
-		return ServerStartupAuthenticationGSSContinue(ServerParsed(m)), true
+		return (*ServerStartupAuthenticationGSSContinue)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationMD5Password:
-		return ServerStartupAuthenticationMD5Password(ServerParsed(m)), true
+		return (*ServerStartupAuthenticationMD5Password)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationOk:
-		return ServerStartupAuthenticationOk(ServerParsed(m)), true
+		return (*ServerStartupAuthenticationOk)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASL:
-		return ServerStartupAuthenticationSASL(ServerParsed(m)), true
+		return (*ServerStartupAuthenticationSASL)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASLContinue:
-		return ServerStartupAuthenticationSASLContinue(ServerParsed(m)), true
+		return (*ServerStartupAuthenticationSASLContinue)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASLFinal:
-		return ServerStartupAuthenticationSASLFinal(ServerParsed(m)), true
+		return (*ServerStartupAuthenticationSASLFinal)(ServerParsed(m)), true
 	case *pgproto3.BackendKeyData:
-		return ServerStartupBackendKeyData(ServerParsed(m)), true
+		return (*ServerStartupBackendKeyData)(ServerParsed(m)), true
 	}
 	return nil, false
 }

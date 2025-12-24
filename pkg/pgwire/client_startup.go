@@ -17,24 +17,24 @@ type ClientStartup interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientStartup = ClientStartupGSSEncRequest{}
-	_ ClientStartup = ClientStartupGSSResponse{}
-	_ ClientStartup = ClientStartupPasswordMessage{}
-	_ ClientStartup = ClientStartupSASLInitialResponse{}
-	_ ClientStartup = ClientStartupSASLResponse{}
-	_ ClientStartup = ClientStartupSSLRequest{}
-	_ ClientStartup = ClientStartupStartupMessage{}
+	_ ClientStartup = (*ClientStartupGSSEncRequest)(nil)
+	_ ClientStartup = (*ClientStartupGSSResponse)(nil)
+	_ ClientStartup = (*ClientStartupPasswordMessage)(nil)
+	_ ClientStartup = (*ClientStartupSASLInitialResponse)(nil)
+	_ ClientStartup = (*ClientStartupSASLResponse)(nil)
+	_ ClientStartup = (*ClientStartupSSLRequest)(nil)
+	_ ClientStartup = (*ClientStartupStartupMessage)(nil)
 )
 
 // ClientStartupGSSEncRequest wraps *pgproto3.GSSEncRequest from the client.
 type ClientStartupGSSEncRequest FromClient[*pgproto3.GSSEncRequest]
 
-func (ClientStartupGSSEncRequest) Startup() {}
-func (t ClientStartupGSSEncRequest) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.GSSEncRequest])(&t).Parse()
+func (*ClientStartupGSSEncRequest) Startup() {}
+func (t *ClientStartupGSSEncRequest) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.GSSEncRequest])(t).Parse()
 }
-func (t ClientStartupGSSEncRequest) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.GSSEncRequest])(&t).Parse()
+func (t *ClientStartupGSSEncRequest) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.GSSEncRequest])(t).Parse()
 }
 func (m *ClientStartupGSSEncRequest) Parse() *pgproto3.GSSEncRequest {
 	return (*FromClient[*pgproto3.GSSEncRequest])(m).Parse()
@@ -50,12 +50,12 @@ func (m ClientStartupGSSEncRequest) Retain() ClientStartupGSSEncRequest {
 // ClientStartupGSSResponse wraps *pgproto3.GSSResponse from the client.
 type ClientStartupGSSResponse FromClient[*pgproto3.GSSResponse]
 
-func (ClientStartupGSSResponse) Startup() {}
-func (t ClientStartupGSSResponse) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.GSSResponse])(&t).Parse()
+func (*ClientStartupGSSResponse) Startup() {}
+func (t *ClientStartupGSSResponse) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.GSSResponse])(t).Parse()
 }
-func (t ClientStartupGSSResponse) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.GSSResponse])(&t).Parse()
+func (t *ClientStartupGSSResponse) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.GSSResponse])(t).Parse()
 }
 func (m *ClientStartupGSSResponse) Parse() *pgproto3.GSSResponse {
 	return (*FromClient[*pgproto3.GSSResponse])(m).Parse()
@@ -71,12 +71,12 @@ func (m ClientStartupGSSResponse) Retain() ClientStartupGSSResponse {
 // ClientStartupPasswordMessage wraps *pgproto3.PasswordMessage from the client.
 type ClientStartupPasswordMessage FromClient[*pgproto3.PasswordMessage]
 
-func (ClientStartupPasswordMessage) Startup() {}
-func (t ClientStartupPasswordMessage) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.PasswordMessage])(&t).Parse()
+func (*ClientStartupPasswordMessage) Startup() {}
+func (t *ClientStartupPasswordMessage) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.PasswordMessage])(t).Parse()
 }
-func (t ClientStartupPasswordMessage) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.PasswordMessage])(&t).Parse()
+func (t *ClientStartupPasswordMessage) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.PasswordMessage])(t).Parse()
 }
 func (m *ClientStartupPasswordMessage) Parse() *pgproto3.PasswordMessage {
 	return (*FromClient[*pgproto3.PasswordMessage])(m).Parse()
@@ -92,12 +92,12 @@ func (m ClientStartupPasswordMessage) Retain() ClientStartupPasswordMessage {
 // ClientStartupSASLInitialResponse wraps *pgproto3.SASLInitialResponse from the client.
 type ClientStartupSASLInitialResponse FromClient[*pgproto3.SASLInitialResponse]
 
-func (ClientStartupSASLInitialResponse) Startup() {}
-func (t ClientStartupSASLInitialResponse) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.SASLInitialResponse])(&t).Parse()
+func (*ClientStartupSASLInitialResponse) Startup() {}
+func (t *ClientStartupSASLInitialResponse) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.SASLInitialResponse])(t).Parse()
 }
-func (t ClientStartupSASLInitialResponse) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.SASLInitialResponse])(&t).Parse()
+func (t *ClientStartupSASLInitialResponse) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.SASLInitialResponse])(t).Parse()
 }
 func (m *ClientStartupSASLInitialResponse) Parse() *pgproto3.SASLInitialResponse {
 	return (*FromClient[*pgproto3.SASLInitialResponse])(m).Parse()
@@ -113,12 +113,12 @@ func (m ClientStartupSASLInitialResponse) Retain() ClientStartupSASLInitialRespo
 // ClientStartupSASLResponse wraps *pgproto3.SASLResponse from the client.
 type ClientStartupSASLResponse FromClient[*pgproto3.SASLResponse]
 
-func (ClientStartupSASLResponse) Startup() {}
-func (t ClientStartupSASLResponse) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.SASLResponse])(&t).Parse()
+func (*ClientStartupSASLResponse) Startup() {}
+func (t *ClientStartupSASLResponse) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.SASLResponse])(t).Parse()
 }
-func (t ClientStartupSASLResponse) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.SASLResponse])(&t).Parse()
+func (t *ClientStartupSASLResponse) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.SASLResponse])(t).Parse()
 }
 func (m *ClientStartupSASLResponse) Parse() *pgproto3.SASLResponse {
 	return (*FromClient[*pgproto3.SASLResponse])(m).Parse()
@@ -134,12 +134,12 @@ func (m ClientStartupSASLResponse) Retain() ClientStartupSASLResponse {
 // ClientStartupSSLRequest wraps *pgproto3.SSLRequest from the client.
 type ClientStartupSSLRequest FromClient[*pgproto3.SSLRequest]
 
-func (ClientStartupSSLRequest) Startup() {}
-func (t ClientStartupSSLRequest) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.SSLRequest])(&t).Parse()
+func (*ClientStartupSSLRequest) Startup() {}
+func (t *ClientStartupSSLRequest) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.SSLRequest])(t).Parse()
 }
-func (t ClientStartupSSLRequest) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.SSLRequest])(&t).Parse()
+func (t *ClientStartupSSLRequest) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.SSLRequest])(t).Parse()
 }
 func (m *ClientStartupSSLRequest) Parse() *pgproto3.SSLRequest {
 	return (*FromClient[*pgproto3.SSLRequest])(m).Parse()
@@ -155,12 +155,12 @@ func (m ClientStartupSSLRequest) Retain() ClientStartupSSLRequest {
 // ClientStartupStartupMessage wraps *pgproto3.StartupMessage from the client.
 type ClientStartupStartupMessage FromClient[*pgproto3.StartupMessage]
 
-func (ClientStartupStartupMessage) Startup() {}
-func (t ClientStartupStartupMessage) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.StartupMessage])(&t).Parse()
+func (*ClientStartupStartupMessage) Startup() {}
+func (t *ClientStartupStartupMessage) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.StartupMessage])(t).Parse()
 }
-func (t ClientStartupStartupMessage) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.StartupMessage])(&t).Parse()
+func (t *ClientStartupStartupMessage) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.StartupMessage])(t).Parse()
 }
 func (m *ClientStartupStartupMessage) Parse() *pgproto3.StartupMessage {
 	return (*FromClient[*pgproto3.StartupMessage])(m).Parse()
@@ -174,77 +174,78 @@ func (m ClientStartupStartupMessage) Retain() ClientStartupStartupMessage {
 }
 
 // ToClientStartup converts a pgproto3.FrontendMessage to a ClientStartup if it matches one of the known types.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsClient().
 func ToClientStartup(msg pgproto3.FrontendMessage) (ClientStartup, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.GSSEncRequest:
-		return ClientStartupGSSEncRequest(ClientParsed(m)), true
+		return (*ClientStartupGSSEncRequest)(ClientParsed(m)), true
 	case *pgproto3.GSSResponse:
-		return ClientStartupGSSResponse(ClientParsed(m)), true
+		return (*ClientStartupGSSResponse)(ClientParsed(m)), true
 	case *pgproto3.PasswordMessage:
-		return ClientStartupPasswordMessage(ClientParsed(m)), true
+		return (*ClientStartupPasswordMessage)(ClientParsed(m)), true
 	case *pgproto3.SASLInitialResponse:
-		return ClientStartupSASLInitialResponse(ClientParsed(m)), true
+		return (*ClientStartupSASLInitialResponse)(ClientParsed(m)), true
 	case *pgproto3.SASLResponse:
-		return ClientStartupSASLResponse(ClientParsed(m)), true
+		return (*ClientStartupSASLResponse)(ClientParsed(m)), true
 	case *pgproto3.SSLRequest:
-		return ClientStartupSSLRequest(ClientParsed(m)), true
+		return (*ClientStartupSSLRequest)(ClientParsed(m)), true
 	case *pgproto3.StartupMessage:
-		return ClientStartupStartupMessage(ClientParsed(m)), true
+		return (*ClientStartupStartupMessage)(ClientParsed(m)), true
 	}
 	return nil, false
 }
 
 // ClientStartupHandlers provides type-safe handlers for each ClientStartup variant.
 type ClientStartupHandlers[T any] struct {
-	GSSEncRequest       func(msg ClientStartupGSSEncRequest) (T, error)
-	GSSResponse         func(msg ClientStartupGSSResponse) (T, error)
-	PasswordMessage     func(msg ClientStartupPasswordMessage) (T, error)
-	SASLInitialResponse func(msg ClientStartupSASLInitialResponse) (T, error)
-	SASLResponse        func(msg ClientStartupSASLResponse) (T, error)
-	SSLRequest          func(msg ClientStartupSSLRequest) (T, error)
-	StartupMessage      func(msg ClientStartupStartupMessage) (T, error)
+	GSSEncRequest       func(msg *ClientStartupGSSEncRequest) (T, error)
+	GSSResponse         func(msg *ClientStartupGSSResponse) (T, error)
+	PasswordMessage     func(msg *ClientStartupPasswordMessage) (T, error)
+	SASLInitialResponse func(msg *ClientStartupSASLInitialResponse) (T, error)
+	SASLResponse        func(msg *ClientStartupSASLResponse) (T, error)
+	SSLRequest          func(msg *ClientStartupSSLRequest) (T, error)
+	StartupMessage      func(msg *ClientStartupStartupMessage) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
 func (h ClientStartupHandlers[T]) HandleDefault(msg ClientStartup, defaultHandler func(msg ClientStartup) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
-	case ClientStartupGSSEncRequest:
+	case *ClientStartupGSSEncRequest:
 		if h.GSSEncRequest != nil {
 			return h.GSSEncRequest(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientStartupGSSResponse:
+	case *ClientStartupGSSResponse:
 		if h.GSSResponse != nil {
 			return h.GSSResponse(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientStartupPasswordMessage:
+	case *ClientStartupPasswordMessage:
 		if h.PasswordMessage != nil {
 			return h.PasswordMessage(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientStartupSASLInitialResponse:
+	case *ClientStartupSASLInitialResponse:
 		if h.SASLInitialResponse != nil {
 			return h.SASLInitialResponse(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientStartupSASLResponse:
+	case *ClientStartupSASLResponse:
 		if h.SASLResponse != nil {
 			return h.SASLResponse(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientStartupSSLRequest:
+	case *ClientStartupSSLRequest:
 		if h.SSLRequest != nil {
 			return h.SSLRequest(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientStartupStartupMessage:
+	case *ClientStartupStartupMessage:
 		if h.StartupMessage != nil {
 			return h.StartupMessage(msg)
 		} else {

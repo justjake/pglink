@@ -17,12 +17,12 @@ type ServerResponse interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ServerResponse = ServerResponseReadyForQuery{}
-	_ ServerResponse = ServerResponseCommandComplete{}
-	_ ServerResponse = ServerResponseDataRow{}
-	_ ServerResponse = ServerResponseEmptyQueryResponse{}
-	_ ServerResponse = ServerResponseErrorResponse{}
-	_ ServerResponse = ServerResponseFunctionCallResponse{}
+	_ ServerResponse = (*ServerResponseReadyForQuery)(nil)
+	_ ServerResponse = (*ServerResponseCommandComplete)(nil)
+	_ ServerResponse = (*ServerResponseDataRow)(nil)
+	_ ServerResponse = (*ServerResponseEmptyQueryResponse)(nil)
+	_ ServerResponse = (*ServerResponseErrorResponse)(nil)
+	_ ServerResponse = (*ServerResponseFunctionCallResponse)(nil)
 )
 
 // Start-up completed.
@@ -30,12 +30,12 @@ var (
 // Extended Query mode: response to Sync; backend no longer ignoring messages, ready for next command.
 type ServerResponseReadyForQuery FromServer[*pgproto3.ReadyForQuery]
 
-func (ServerResponseReadyForQuery) Response() {}
-func (t ServerResponseReadyForQuery) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ReadyForQuery])(&t).Parse()
+func (*ServerResponseReadyForQuery) Response() {}
+func (t *ServerResponseReadyForQuery) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.ReadyForQuery])(t).Parse()
 }
-func (t ServerResponseReadyForQuery) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ReadyForQuery])(&t).Parse()
+func (t *ServerResponseReadyForQuery) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.ReadyForQuery])(t).Parse()
 }
 func (m *ServerResponseReadyForQuery) Parse() *pgproto3.ReadyForQuery {
 	return (*FromServer[*pgproto3.ReadyForQuery])(m).Parse()
@@ -51,12 +51,12 @@ func (m ServerResponseReadyForQuery) Retain() ServerResponseReadyForQuery {
 // SQL command completed normally.
 type ServerResponseCommandComplete FromServer[*pgproto3.CommandComplete]
 
-func (ServerResponseCommandComplete) Response() {}
-func (t ServerResponseCommandComplete) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CommandComplete])(&t).Parse()
+func (*ServerResponseCommandComplete) Response() {}
+func (t *ServerResponseCommandComplete) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.CommandComplete])(t).Parse()
 }
-func (t ServerResponseCommandComplete) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CommandComplete])(&t).Parse()
+func (t *ServerResponseCommandComplete) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.CommandComplete])(t).Parse()
 }
 func (m *ServerResponseCommandComplete) Parse() *pgproto3.CommandComplete {
 	return (*FromServer[*pgproto3.CommandComplete])(m).Parse()
@@ -72,12 +72,12 @@ func (m ServerResponseCommandComplete) Retain() ServerResponseCommandComplete {
 // Query results (both query modes)
 type ServerResponseDataRow FromServer[*pgproto3.DataRow]
 
-func (ServerResponseDataRow) Response() {}
-func (t ServerResponseDataRow) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.DataRow])(&t).Parse()
+func (*ServerResponseDataRow) Response() {}
+func (t *ServerResponseDataRow) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.DataRow])(t).Parse()
 }
-func (t ServerResponseDataRow) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.DataRow])(&t).Parse()
+func (t *ServerResponseDataRow) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.DataRow])(t).Parse()
 }
 func (m *ServerResponseDataRow) Parse() *pgproto3.DataRow {
 	return (*FromServer[*pgproto3.DataRow])(m).Parse()
@@ -93,12 +93,12 @@ func (m ServerResponseDataRow) Retain() ServerResponseDataRow {
 // Response to empty query.
 type ServerResponseEmptyQueryResponse FromServer[*pgproto3.EmptyQueryResponse]
 
-func (ServerResponseEmptyQueryResponse) Response() {}
-func (t ServerResponseEmptyQueryResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.EmptyQueryResponse])(&t).Parse()
+func (*ServerResponseEmptyQueryResponse) Response() {}
+func (t *ServerResponseEmptyQueryResponse) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.EmptyQueryResponse])(t).Parse()
 }
-func (t ServerResponseEmptyQueryResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.EmptyQueryResponse])(&t).Parse()
+func (t *ServerResponseEmptyQueryResponse) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.EmptyQueryResponse])(t).Parse()
 }
 func (m *ServerResponseEmptyQueryResponse) Parse() *pgproto3.EmptyQueryResponse {
 	return (*FromServer[*pgproto3.EmptyQueryResponse])(m).Parse()
@@ -114,12 +114,12 @@ func (m ServerResponseEmptyQueryResponse) Retain() ServerResponseEmptyQueryRespo
 // Error response.
 type ServerResponseErrorResponse FromServer[*pgproto3.ErrorResponse]
 
-func (ServerResponseErrorResponse) Response() {}
-func (t ServerResponseErrorResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ErrorResponse])(&t).Parse()
+func (*ServerResponseErrorResponse) Response() {}
+func (t *ServerResponseErrorResponse) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.ErrorResponse])(t).Parse()
 }
-func (t ServerResponseErrorResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ErrorResponse])(&t).Parse()
+func (t *ServerResponseErrorResponse) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.ErrorResponse])(t).Parse()
 }
 func (m *ServerResponseErrorResponse) Parse() *pgproto3.ErrorResponse {
 	return (*FromServer[*pgproto3.ErrorResponse])(m).Parse()
@@ -135,12 +135,12 @@ func (m ServerResponseErrorResponse) Retain() ServerResponseErrorResponse {
 // Response to function call.
 type ServerResponseFunctionCallResponse FromServer[*pgproto3.FunctionCallResponse]
 
-func (ServerResponseFunctionCallResponse) Response() {}
-func (t ServerResponseFunctionCallResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.FunctionCallResponse])(&t).Parse()
+func (*ServerResponseFunctionCallResponse) Response() {}
+func (t *ServerResponseFunctionCallResponse) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.FunctionCallResponse])(t).Parse()
 }
-func (t ServerResponseFunctionCallResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.FunctionCallResponse])(&t).Parse()
+func (t *ServerResponseFunctionCallResponse) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.FunctionCallResponse])(t).Parse()
 }
 func (m *ServerResponseFunctionCallResponse) Parse() *pgproto3.FunctionCallResponse {
 	return (*FromServer[*pgproto3.FunctionCallResponse])(m).Parse()
@@ -154,68 +154,69 @@ func (m ServerResponseFunctionCallResponse) Retain() ServerResponseFunctionCallR
 }
 
 // ToServerResponse converts a pgproto3.BackendMessage to a ServerResponse if it matches one of the known types.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsServer().
 func ToServerResponse(msg pgproto3.BackendMessage) (ServerResponse, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ReadyForQuery:
-		return ServerResponseReadyForQuery(ServerParsed(m)), true
+		return (*ServerResponseReadyForQuery)(ServerParsed(m)), true
 	case *pgproto3.CommandComplete:
-		return ServerResponseCommandComplete(ServerParsed(m)), true
+		return (*ServerResponseCommandComplete)(ServerParsed(m)), true
 	case *pgproto3.DataRow:
-		return ServerResponseDataRow(ServerParsed(m)), true
+		return (*ServerResponseDataRow)(ServerParsed(m)), true
 	case *pgproto3.EmptyQueryResponse:
-		return ServerResponseEmptyQueryResponse(ServerParsed(m)), true
+		return (*ServerResponseEmptyQueryResponse)(ServerParsed(m)), true
 	case *pgproto3.ErrorResponse:
-		return ServerResponseErrorResponse(ServerParsed(m)), true
+		return (*ServerResponseErrorResponse)(ServerParsed(m)), true
 	case *pgproto3.FunctionCallResponse:
-		return ServerResponseFunctionCallResponse(ServerParsed(m)), true
+		return (*ServerResponseFunctionCallResponse)(ServerParsed(m)), true
 	}
 	return nil, false
 }
 
 // ServerResponseHandlers provides type-safe handlers for each ServerResponse variant.
 type ServerResponseHandlers[T any] struct {
-	ReadyForQuery        func(msg ServerResponseReadyForQuery) (T, error)
-	CommandComplete      func(msg ServerResponseCommandComplete) (T, error)
-	DataRow              func(msg ServerResponseDataRow) (T, error)
-	EmptyQueryResponse   func(msg ServerResponseEmptyQueryResponse) (T, error)
-	ErrorResponse        func(msg ServerResponseErrorResponse) (T, error)
-	FunctionCallResponse func(msg ServerResponseFunctionCallResponse) (T, error)
+	ReadyForQuery        func(msg *ServerResponseReadyForQuery) (T, error)
+	CommandComplete      func(msg *ServerResponseCommandComplete) (T, error)
+	DataRow              func(msg *ServerResponseDataRow) (T, error)
+	EmptyQueryResponse   func(msg *ServerResponseEmptyQueryResponse) (T, error)
+	ErrorResponse        func(msg *ServerResponseErrorResponse) (T, error)
+	FunctionCallResponse func(msg *ServerResponseFunctionCallResponse) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
 func (h ServerResponseHandlers[T]) HandleDefault(msg ServerResponse, defaultHandler func(msg ServerResponse) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
-	case ServerResponseReadyForQuery:
+	case *ServerResponseReadyForQuery:
 		if h.ReadyForQuery != nil {
 			return h.ReadyForQuery(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerResponseCommandComplete:
+	case *ServerResponseCommandComplete:
 		if h.CommandComplete != nil {
 			return h.CommandComplete(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerResponseDataRow:
+	case *ServerResponseDataRow:
 		if h.DataRow != nil {
 			return h.DataRow(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerResponseEmptyQueryResponse:
+	case *ServerResponseEmptyQueryResponse:
 		if h.EmptyQueryResponse != nil {
 			return h.EmptyQueryResponse(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerResponseErrorResponse:
+	case *ServerResponseErrorResponse:
 		if h.ErrorResponse != nil {
 			return h.ErrorResponse(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerResponseFunctionCallResponse:
+	case *ServerResponseFunctionCallResponse:
 		if h.FunctionCallResponse != nil {
 			return h.FunctionCallResponse(msg)
 		} else {

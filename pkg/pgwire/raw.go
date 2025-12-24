@@ -23,6 +23,10 @@ type RawMessageSource interface {
 	// TODO: return []byte, error
 	MessageBody() []byte
 
+	// BodyLen returns the length of the message body without copying.
+	// This is useful for tracking bytes transferred without allocation.
+	BodyLen() int
+
 	// Retain returns an owned copy of this message source that is safe to keep
 	// beyond the current iteration. For already-owned sources like RawBody,
 	// this returns the receiver. For borrowed sources like Cursor, this copies the bytes.
@@ -52,6 +56,11 @@ func (r RawBody) MessageBody() []byte {
 	return r.Body
 }
 
+// BodyLen implements RawMessageSource.
+func (r RawBody) BodyLen() int {
+	return len(r.Body)
+}
+
 // Retain implements RawMessageSource. Since RawBody already owns its bytes,
 // it returns itself.
 func (r RawBody) Retain() RawMessageSource {
@@ -63,8 +72,6 @@ func (r RawBody) Len() int {
 	return 5 + len(r.Body)
 }
 
-// WriteTo writes the complete wire protocol message to w.
-// This is the fast path for forwarding messages without parsing.
 // decodeBackendMessage decodes raw bytes into a pgproto3.BackendMessage.
 // The returned message is newly allocated.
 func decodeBackendMessage(raw RawBody) (pgproto3.BackendMessage, error) {
@@ -249,14 +256,16 @@ func (m *FromClient[T]) retainFields() (RawMessageSource, T, bool) {
 
 // ServerParsed creates a FromServer from an already-parsed message.
 // This is used for backward compatibility with code that already has parsed messages.
-func ServerParsed[T pgproto3.BackendMessage](msg T) FromServer[T] {
-	return FromServer[T]{parsed: msg, isParsed: true}
+// Returns a pointer for use with pointer-receiver interfaces.
+func ServerParsed[T pgproto3.BackendMessage](msg T) *FromServer[T] {
+	return &FromServer[T]{parsed: msg, isParsed: true}
 }
 
 // ClientParsed creates a FromClient from an already-parsed message.
 // This is used for backward compatibility with code that already has parsed messages.
-func ClientParsed[T pgproto3.FrontendMessage](msg T) FromClient[T] {
-	return FromClient[T]{parsed: msg, isParsed: true}
+// Returns a pointer for use with pointer-receiver interfaces.
+func ClientParsed[T pgproto3.FrontendMessage](msg T) *FromClient[T] {
+	return &FromClient[T]{parsed: msg, isParsed: true}
 }
 
 // EncodeBackendMessage encodes a pgproto3.BackendMessage to RawBody.

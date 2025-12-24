@@ -2,67 +2,10 @@ package pgwire
 
 import (
 	"bytes"
-	"encoding/binary"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
-
-func TestRawBody_WriteTo(t *testing.T) {
-	tests := []struct {
-		name     string
-		raw      RawBody
-		expected []byte
-	}{
-		{
-			name: "empty body",
-			raw:  RawBody{Type: 'Z', Body: nil},
-			// Type byte + 4-byte length (4, because length includes itself)
-			expected: []byte{'Z', 0, 0, 0, 4},
-		},
-		{
-			name: "single byte body",
-			raw:  RawBody{Type: 'Z', Body: []byte{'I'}},
-			// Type byte + 4-byte length (5) + body
-			expected: []byte{'Z', 0, 0, 0, 5, 'I'},
-		},
-		{
-			name: "multi-byte body",
-			raw:  RawBody{Type: 'D', Body: []byte{0, 2, 0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o'}},
-			// Type byte + 4-byte length (15) + body (11 bytes)
-			expected: append([]byte{'D', 0, 0, 0, 15}, []byte{0, 2, 0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o'}...),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			n, err := tt.raw.WriteTo(&buf)
-			if err != nil {
-				t.Fatalf("WriteTo error: %v", err)
-			}
-			if n != int64(len(tt.expected)) {
-				t.Errorf("WriteTo returned %d bytes, expected %d", n, len(tt.expected))
-			}
-			if !bytes.Equal(buf.Bytes(), tt.expected) {
-				t.Errorf("WriteTo wrote %v, expected %v", buf.Bytes(), tt.expected)
-			}
-		})
-	}
-}
-
-func TestRawBody_AppendTo(t *testing.T) {
-	raw := RawBody{Type: 'Z', Body: []byte{'I'}}
-
-	// Append to existing buffer
-	existing := []byte("prefix")
-	result := raw.AppendTo(existing)
-
-	expected := append([]byte("prefix"), []byte{'Z', 0, 0, 0, 5, 'I'}...)
-	if !bytes.Equal(result, expected) {
-		t.Errorf("AppendTo returned %v, expected %v", result, expected)
-	}
-}
 
 func TestRawBody_Len(t *testing.T) {
 	tests := []struct {
@@ -276,17 +219,9 @@ func TestFromServer(t *testing.T) {
 		raw := RawBody{Type: 'Z', Body: []byte{'I'}}
 		lazy := FromServer[*pgproto3.ReadyForQuery]{source: raw}
 
-		if lazy.IsParsed() {
-			t.Error("IsParsed() should be false before Parse()")
-		}
-
 		msg := lazy.Parse()
 		if msg.TxStatus != 'I' {
 			t.Errorf("TxStatus = %c, want I", msg.TxStatus)
-		}
-
-		if !lazy.IsParsed() {
-			t.Error("IsParsed() should be true after Parse()")
 		}
 
 		// Second parse should return cached value
@@ -300,23 +235,19 @@ func TestFromServer(t *testing.T) {
 		parsed := &pgproto3.ReadyForQuery{TxStatus: 'T'}
 		lazy := ServerParsed(parsed)
 
-		if !lazy.IsParsed() {
-			t.Error("IsParsed() should be true for pre-parsed")
-		}
-
 		msg := lazy.Parse()
 		if msg != parsed {
 			t.Error("Parse() should return original parsed message")
 		}
 	})
 
-	t.Run("raw accessor", func(t *testing.T) {
+	t.Run("source accessor", func(t *testing.T) {
 		raw := RawBody{Type: 'Z', Body: []byte{'E'}}
 		lazy := FromServer[*pgproto3.ReadyForQuery]{source: raw}
 
-		gotRaw := lazy.Raw()
-		if gotRaw.Type != 'Z' || !bytes.Equal(gotRaw.Body, []byte{'E'}) {
-			t.Errorf("Raw() = %v, want %v", gotRaw, raw)
+		gotSource := lazy.Source()
+		if gotSource.MessageType() != 'Z' || !bytes.Equal(gotSource.MessageBody(), []byte{'E'}) {
+			t.Errorf("Source() = %v, want %v", gotSource, raw)
 		}
 	})
 }
@@ -326,17 +257,15 @@ func TestFromClient(t *testing.T) {
 		raw := RawBody{Type: 'Q', Body: append([]byte("SELECT 1"), 0)}
 		lazy := FromClient[*pgproto3.Query]{source: raw}
 
-		if lazy.IsParsed() {
-			t.Error("IsParsed() should be false before Parse()")
-		}
-
 		msg := lazy.Parse()
 		if msg.String != "SELECT 1" {
 			t.Errorf("String = %q, want %q", msg.String, "SELECT 1")
 		}
 
-		if !lazy.IsParsed() {
-			t.Error("IsParsed() should be true after Parse()")
+		// Second parse should return cached value
+		msg2 := lazy.Parse()
+		if msg != msg2 {
+			t.Error("Parse() should return cached value")
 		}
 	})
 
@@ -344,68 +273,11 @@ func TestFromClient(t *testing.T) {
 		parsed := &pgproto3.Query{String: "SELECT 2"}
 		lazy := ClientParsed(parsed)
 
-		if !lazy.IsParsed() {
-			t.Error("IsParsed() should be true for pre-parsed")
-		}
-
 		msg := lazy.Parse()
 		if msg != parsed {
 			t.Error("Parse() should return original parsed message")
 		}
 	})
-}
-
-// TestRoundTrip ensures that encoding a message with WriteTo produces bytes
-// that can be decoded back to the same message.
-func TestRoundTrip(t *testing.T) {
-	// Create a ReadyForQuery message using pgproto3
-	rfq := &pgproto3.ReadyForQuery{TxStatus: 'I'}
-	// Encode returns ([]byte, error)
-	encoded, err := rfq.Encode(nil)
-	if err != nil {
-		t.Fatalf("Encode error: %v", err)
-	}
-
-	// Parse header
-	if len(encoded) < 5 {
-		t.Fatalf("encoded message too short: %d bytes", len(encoded))
-	}
-	typ := encoded[0]
-	bodyLen := binary.BigEndian.Uint32(encoded[1:5]) - 4
-	body := encoded[5:]
-
-	if int(bodyLen) != len(body) {
-		t.Fatalf("body length mismatch: header says %d, actual %d", bodyLen, len(body))
-	}
-
-	// Create RawBody
-	raw := RawBody{Type: MsgType(typ), Body: body}
-
-	// Encode with WriteTo
-	var buf bytes.Buffer
-	_, err = raw.WriteTo(&buf)
-	if err != nil {
-		t.Fatalf("WriteTo error: %v", err)
-	}
-
-	// Should match original encoding
-	if !bytes.Equal(buf.Bytes(), encoded) {
-		t.Errorf("round-trip mismatch:\n  original: %v\n  roundtrip: %v", encoded, buf.Bytes())
-	}
-
-	// Decode and verify
-	decoded, err := decodeBackendMessage(raw)
-	if err != nil {
-		t.Fatalf("decodeBackendMessage error: %v", err)
-	}
-
-	decodedRFQ, ok := decoded.(*pgproto3.ReadyForQuery)
-	if !ok {
-		t.Fatalf("expected *ReadyForQuery, got %T", decoded)
-	}
-	if decodedRFQ.TxStatus != 'I' {
-		t.Errorf("TxStatus = %c, want I", decodedRFQ.TxStatus)
-	}
 }
 
 func TestEncodeBackendMessage(t *testing.T) {
@@ -477,64 +349,3 @@ func TestEncodeFrontendMessage(t *testing.T) {
 	}
 }
 
-func TestFromServer_EnsureRaw(t *testing.T) {
-	t.Run("from parsed", func(t *testing.T) {
-		// Create FromServer from parsed message (no source initially)
-		parsed := &pgproto3.ReadyForQuery{TxStatus: 'T'}
-		lazy := ServerParsed(parsed)
-
-		// Source should be nil for parsed-only message
-		if lazy.Source() != nil {
-			t.Error("Source() should be nil for parsed-only message")
-		}
-
-		// EnsureRaw should encode from parsed
-		raw := lazy.EnsureRaw()
-		if raw.IsZero() {
-			t.Fatal("EnsureRaw returned zero RawBody")
-		}
-		if raw.Type != 'Z' {
-			t.Errorf("Type = %c, want Z", raw.Type)
-		}
-
-		// Second call should return equivalent value
-		raw2 := lazy.EnsureRaw()
-		if !bytes.Equal(raw.Body, raw2.Body) {
-			t.Error("EnsureRaw should return consistent value")
-		}
-	})
-
-	t.Run("from raw", func(t *testing.T) {
-		// Create FromServer from raw bytes
-		rawBody := RawBody{Type: 'Z', Body: []byte{'I'}}
-		lazy := FromServer[*pgproto3.ReadyForQuery]{source: rawBody}
-
-		// EnsureRaw should return existing source
-		raw := lazy.EnsureRaw()
-		if !bytes.Equal(raw.Body, rawBody.Body) {
-			t.Error("EnsureRaw should return source RawBody")
-		}
-	})
-}
-
-func TestFromClient_EnsureRaw(t *testing.T) {
-	t.Run("from parsed", func(t *testing.T) {
-		// Create FromClient from parsed message (no source initially)
-		parsed := &pgproto3.Query{String: "SELECT 1"}
-		lazy := ClientParsed(parsed)
-
-		// Source should be nil for parsed-only message
-		if lazy.Source() != nil {
-			t.Error("Source() should be nil for parsed-only message")
-		}
-
-		// EnsureRaw should encode from parsed
-		raw := lazy.EnsureRaw()
-		if raw.IsZero() {
-			t.Fatal("EnsureRaw returned zero RawBody")
-		}
-		if raw.Type != 'Q' {
-			t.Errorf("Type = %c, want Q", raw.Type)
-		}
-	})
-}

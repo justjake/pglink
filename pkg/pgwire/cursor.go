@@ -170,6 +170,11 @@ func (c *Cursor) MessageBody() []byte {
 	return c.ring.MessageBody(c.msgIdx)
 }
 
+// BodyLen returns the body length without copying.
+func (c *Cursor) BodyLen() int {
+	return int(c.ring.MessageLen(c.msgIdx) - 5)
+}
+
 // WriteTo writes the current message to dst.
 // The ring buffer stores full wire bytes, so this is a direct write.
 func (c *Cursor) WriteTo(w io.Writer) (int64, error) {
@@ -307,6 +312,7 @@ func (c *Cursor) SkipThrough() {
 
 // AsClient returns the current message as a ClientMessage using flyweights.
 // The returned message is only valid until the next call to AsClient or NextMsg.
+// Returns a pointer to a flyweight slot - zero allocation.
 func (c *Cursor) AsClient() (ClientMessage, error) {
 	if c.clientFlyweights == nil {
 		panic("AsClient called on server cursor")
@@ -319,54 +325,54 @@ func (c *Cursor) AsClient() (ClientMessage, error) {
 	// Simple query
 	case MsgClientQuery:
 		fw.query = ClientSimpleQueryQuery{source: c}
-		return fw.query, nil
+		return &fw.query, nil
 	case MsgClientFunc:
 		fw.functionCall = ClientSimpleQueryFunctionCall{source: c}
-		return fw.functionCall, nil
+		return &fw.functionCall, nil
 
 	// Extended query
 	case MsgClientParse:
 		fw.parse = ClientExtendedQueryParse{source: c}
-		return fw.parse, nil
+		return &fw.parse, nil
 	case MsgClientBind:
 		fw.bind = ClientExtendedQueryBind{source: c}
-		return fw.bind, nil
+		return &fw.bind, nil
 	case MsgClientExecute:
 		fw.execute = ClientExtendedQueryExecute{source: c}
-		return fw.execute, nil
+		return &fw.execute, nil
 	case MsgClientDescribe:
 		fw.describe = ClientExtendedQueryDescribe{source: c}
-		return fw.describe, nil
+		return &fw.describe, nil
 	case MsgClientClose:
 		fw.close = ClientExtendedQueryClose{source: c}
-		return fw.close, nil
+		return &fw.close, nil
 	case MsgClientSync:
 		fw.sync = ClientExtendedQuerySync{source: c}
-		return fw.sync, nil
+		return &fw.sync, nil
 	case MsgClientFlush:
 		fw.flush = ClientExtendedQueryFlush{source: c}
-		return fw.flush, nil
+		return &fw.flush, nil
 
 	// Copy
 	case MsgClientCopyData:
 		fw.copyData = ClientCopyCopyData{source: c}
-		return fw.copyData, nil
+		return &fw.copyData, nil
 	case MsgClientCopyDone:
 		fw.copyDone = ClientCopyCopyDone{source: c}
-		return fw.copyDone, nil
+		return &fw.copyDone, nil
 	case MsgClientCopyFail:
 		fw.copyFail = ClientCopyCopyFail{source: c}
-		return fw.copyFail, nil
+		return &fw.copyFail, nil
 
 	// Terminate
 	case MsgClientTerminate:
 		fw.terminate = ClientTerminateConnTerminate{source: c}
-		return fw.terminate, nil
+		return &fw.terminate, nil
 
 	// Startup/Auth (p = password)
 	case MsgClientPassword:
 		fw.passwordMessage = ClientStartupPasswordMessage{source: c}
-		return fw.passwordMessage, nil
+		return &fw.passwordMessage, nil
 
 	default:
 		return nil, fmt.Errorf("unknown client message type: %c (0x%02x)", msgType, msgType)
@@ -375,6 +381,7 @@ func (c *Cursor) AsClient() (ClientMessage, error) {
 
 // AsServer returns the current message as a ServerMessage using flyweights.
 // The returned message is only valid until the next call to AsServer or NextMsg.
+// Returns a pointer to a flyweight slot - zero allocation.
 func (c *Cursor) AsServer() (ServerMessage, error) {
 	if c.serverFlyweights == nil {
 		panic("AsServer called on client cursor")
@@ -387,80 +394,80 @@ func (c *Cursor) AsServer() (ServerMessage, error) {
 	// Response
 	case MsgServerReadyForQuery:
 		fw.readyForQuery = ServerResponseReadyForQuery{source: c}
-		return fw.readyForQuery, nil
+		return &fw.readyForQuery, nil
 	case MsgServerCommandComplete:
 		fw.commandComplete = ServerResponseCommandComplete{source: c}
-		return fw.commandComplete, nil
+		return &fw.commandComplete, nil
 	case MsgServerDataRow:
 		fw.dataRow = ServerResponseDataRow{source: c}
-		return fw.dataRow, nil
+		return &fw.dataRow, nil
 	case MsgServerEmptyQueryResponse:
 		fw.emptyQueryResponse = ServerResponseEmptyQueryResponse{source: c}
-		return fw.emptyQueryResponse, nil
+		return &fw.emptyQueryResponse, nil
 	case MsgServerErrorResponse:
 		fw.errorResponse = ServerResponseErrorResponse{source: c}
-		return fw.errorResponse, nil
+		return &fw.errorResponse, nil
 	case MsgServerFuncCallResponse:
 		fw.functionCallResponse = ServerResponseFunctionCallResponse{source: c}
-		return fw.functionCallResponse, nil
+		return &fw.functionCallResponse, nil
 
 	// Extended query
 	case MsgServerParseComplete:
 		fw.parseComplete = ServerExtendedQueryParseComplete{source: c}
-		return fw.parseComplete, nil
+		return &fw.parseComplete, nil
 	case MsgServerBindComplete:
 		fw.bindComplete = ServerExtendedQueryBindComplete{source: c}
-		return fw.bindComplete, nil
+		return &fw.bindComplete, nil
 	case MsgServerParameterDescription:
 		fw.parameterDescription = ServerExtendedQueryParameterDescription{source: c}
-		return fw.parameterDescription, nil
+		return &fw.parameterDescription, nil
 	case MsgServerRowDescription:
 		fw.rowDescription = ServerExtendedQueryRowDescription{source: c}
-		return fw.rowDescription, nil
+		return &fw.rowDescription, nil
 	case MsgServerNoData:
 		fw.noData = ServerExtendedQueryNoData{source: c}
-		return fw.noData, nil
+		return &fw.noData, nil
 	case MsgServerPortalSuspended:
 		fw.portalSuspended = ServerExtendedQueryPortalSuspended{source: c}
-		return fw.portalSuspended, nil
+		return &fw.portalSuspended, nil
 	case MsgServerCloseComplete:
 		fw.closeComplete = ServerExtendedQueryCloseComplete{source: c}
-		return fw.closeComplete, nil
+		return &fw.closeComplete, nil
 
 	// Copy
 	case MsgServerCopyInResponse:
 		fw.copyInResponse = ServerCopyCopyInResponse{source: c}
-		return fw.copyInResponse, nil
+		return &fw.copyInResponse, nil
 	case MsgServerCopyOutResponse:
 		fw.copyOutResponse = ServerCopyCopyOutResponse{source: c}
-		return fw.copyOutResponse, nil
+		return &fw.copyOutResponse, nil
 	case MsgServerCopyBothResponse:
 		fw.copyBothResponse = ServerCopyCopyBothResponse{source: c}
-		return fw.copyBothResponse, nil
+		return &fw.copyBothResponse, nil
 	case MsgServerCopyData:
 		fw.copyData = ServerCopyCopyData{source: c}
-		return fw.copyData, nil
+		return &fw.copyData, nil
 	case MsgServerCopyDone:
 		fw.copyDone = ServerCopyCopyDone{source: c}
-		return fw.copyDone, nil
+		return &fw.copyDone, nil
 
 	// Async
 	case MsgServerNoticeResponse:
 		fw.noticeResponse = ServerAsyncNoticeResponse{source: c}
-		return fw.noticeResponse, nil
+		return &fw.noticeResponse, nil
 	case MsgServerNotificationResponse:
 		fw.notificationResponse = ServerAsyncNotificationResponse{source: c}
-		return fw.notificationResponse, nil
+		return &fw.notificationResponse, nil
 	case MsgServerParameterStatus:
 		fw.parameterStatus = ServerAsyncParameterStatus{source: c}
-		return fw.parameterStatus, nil
+		return &fw.parameterStatus, nil
 
 	// Startup/Auth
 	case MsgServerAuth:
 		return c.asServerAuth()
 	case MsgServerBackendKeyData:
 		fw.backendKeyData = ServerStartupBackendKeyData{source: c}
-		return fw.backendKeyData, nil
+		return &fw.backendKeyData, nil
 
 	default:
 		return nil, fmt.Errorf("unknown server message type: %c (0x%02x)", msgType, msgType)
@@ -481,28 +488,28 @@ func (c *Cursor) asServerAuth() (ServerMessage, error) {
 	switch authType {
 	case 0:
 		fw.authenticationOk = ServerStartupAuthenticationOk{source: c}
-		return fw.authenticationOk, nil
+		return &fw.authenticationOk, nil
 	case 3:
 		fw.authenticationCleartextPassword = ServerStartupAuthenticationCleartextPassword{source: c}
-		return fw.authenticationCleartextPassword, nil
+		return &fw.authenticationCleartextPassword, nil
 	case 5:
 		fw.authenticationMD5Password = ServerStartupAuthenticationMD5Password{source: c}
-		return fw.authenticationMD5Password, nil
+		return &fw.authenticationMD5Password, nil
 	case 7:
 		fw.authenticationGSS = ServerStartupAuthenticationGSS{source: c}
-		return fw.authenticationGSS, nil
+		return &fw.authenticationGSS, nil
 	case 8:
 		fw.authenticationGSSContinue = ServerStartupAuthenticationGSSContinue{source: c}
-		return fw.authenticationGSSContinue, nil
+		return &fw.authenticationGSSContinue, nil
 	case 10:
 		fw.authenticationSASL = ServerStartupAuthenticationSASL{source: c}
-		return fw.authenticationSASL, nil
+		return &fw.authenticationSASL, nil
 	case 11:
 		fw.authenticationSASLContinue = ServerStartupAuthenticationSASLContinue{source: c}
-		return fw.authenticationSASLContinue, nil
+		return &fw.authenticationSASLContinue, nil
 	case 12:
 		fw.authenticationSASLFinal = ServerStartupAuthenticationSASLFinal{source: c}
-		return fw.authenticationSASLFinal, nil
+		return &fw.authenticationSASLFinal, nil
 	default:
 		return nil, fmt.Errorf("unknown authentication type: %d", authType)
 	}

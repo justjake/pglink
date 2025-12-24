@@ -17,20 +17,20 @@ type ServerAsync interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ServerAsync = ServerAsyncNoticeResponse{}
-	_ ServerAsync = ServerAsyncNotificationResponse{}
-	_ ServerAsync = ServerAsyncParameterStatus{}
+	_ ServerAsync = (*ServerAsyncNoticeResponse)(nil)
+	_ ServerAsync = (*ServerAsyncNotificationResponse)(nil)
+	_ ServerAsync = (*ServerAsyncParameterStatus)(nil)
 )
 
 // Warning message.
 type ServerAsyncNoticeResponse FromServer[*pgproto3.NoticeResponse]
 
-func (ServerAsyncNoticeResponse) Async() {}
-func (t ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.NoticeResponse])(&t).Parse()
+func (*ServerAsyncNoticeResponse) Async() {}
+func (t *ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.NoticeResponse])(t).Parse()
 }
-func (t ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.NoticeResponse])(&t).Parse()
+func (t *ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.NoticeResponse])(t).Parse()
 }
 func (m *ServerAsyncNoticeResponse) Parse() *pgproto3.NoticeResponse {
 	return (*FromServer[*pgproto3.NoticeResponse])(m).Parse()
@@ -46,12 +46,12 @@ func (m ServerAsyncNoticeResponse) Retain() ServerAsyncNoticeResponse {
 // LISTEN/NOTIFY notification.
 type ServerAsyncNotificationResponse FromServer[*pgproto3.NotificationResponse]
 
-func (ServerAsyncNotificationResponse) Async() {}
-func (t ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.NotificationResponse])(&t).Parse()
+func (*ServerAsyncNotificationResponse) Async() {}
+func (t *ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.NotificationResponse])(t).Parse()
 }
-func (t ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.NotificationResponse])(&t).Parse()
+func (t *ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.NotificationResponse])(t).Parse()
 }
 func (m *ServerAsyncNotificationResponse) Parse() *pgproto3.NotificationResponse {
 	return (*FromServer[*pgproto3.NotificationResponse])(m).Parse()
@@ -67,12 +67,12 @@ func (m ServerAsyncNotificationResponse) Retain() ServerAsyncNotificationRespons
 // Informs client that runtime parameter value changed.
 type ServerAsyncParameterStatus FromServer[*pgproto3.ParameterStatus]
 
-func (ServerAsyncParameterStatus) Async() {}
-func (t ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ParameterStatus])(&t).Parse()
+func (*ServerAsyncParameterStatus) Async() {}
+func (t *ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message {
+	return (*FromServer[*pgproto3.ParameterStatus])(t).Parse()
 }
-func (t ServerAsyncParameterStatus) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ParameterStatus])(&t).Parse()
+func (t *ServerAsyncParameterStatus) Server() pgproto3.BackendMessage {
+	return (*FromServer[*pgproto3.ParameterStatus])(t).Parse()
 }
 func (m *ServerAsyncParameterStatus) Parse() *pgproto3.ParameterStatus {
 	return (*FromServer[*pgproto3.ParameterStatus])(m).Parse()
@@ -86,41 +86,42 @@ func (m ServerAsyncParameterStatus) Retain() ServerAsyncParameterStatus {
 }
 
 // ToServerAsync converts a pgproto3.BackendMessage to a ServerAsync if it matches one of the known types.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsServer().
 func ToServerAsync(msg pgproto3.BackendMessage) (ServerAsync, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.NoticeResponse:
-		return ServerAsyncNoticeResponse(ServerParsed(m)), true
+		return (*ServerAsyncNoticeResponse)(ServerParsed(m)), true
 	case *pgproto3.NotificationResponse:
-		return ServerAsyncNotificationResponse(ServerParsed(m)), true
+		return (*ServerAsyncNotificationResponse)(ServerParsed(m)), true
 	case *pgproto3.ParameterStatus:
-		return ServerAsyncParameterStatus(ServerParsed(m)), true
+		return (*ServerAsyncParameterStatus)(ServerParsed(m)), true
 	}
 	return nil, false
 }
 
 // ServerAsyncHandlers provides type-safe handlers for each ServerAsync variant.
 type ServerAsyncHandlers[T any] struct {
-	NoticeResponse       func(msg ServerAsyncNoticeResponse) (T, error)
-	NotificationResponse func(msg ServerAsyncNotificationResponse) (T, error)
-	ParameterStatus      func(msg ServerAsyncParameterStatus) (T, error)
+	NoticeResponse       func(msg *ServerAsyncNoticeResponse) (T, error)
+	NotificationResponse func(msg *ServerAsyncNotificationResponse) (T, error)
+	ParameterStatus      func(msg *ServerAsyncParameterStatus) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
 func (h ServerAsyncHandlers[T]) HandleDefault(msg ServerAsync, defaultHandler func(msg ServerAsync) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
-	case ServerAsyncNoticeResponse:
+	case *ServerAsyncNoticeResponse:
 		if h.NoticeResponse != nil {
 			return h.NoticeResponse(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerAsyncNotificationResponse:
+	case *ServerAsyncNotificationResponse:
 		if h.NotificationResponse != nil {
 			return h.NotificationResponse(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ServerAsyncParameterStatus:
+	case *ServerAsyncParameterStatus:
 		if h.ParameterStatus != nil {
 			return h.ParameterStatus(msg)
 		} else {

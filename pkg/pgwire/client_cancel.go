@@ -17,18 +17,18 @@ type ClientCancel interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientCancel = ClientCancelCancelRequest{}
+	_ ClientCancel = (*ClientCancelCancelRequest)(nil)
 )
 
 // ClientCancelCancelRequest wraps *pgproto3.CancelRequest from the client.
 type ClientCancelCancelRequest FromClient[*pgproto3.CancelRequest]
 
-func (ClientCancelCancelRequest) Cancel() {}
-func (t ClientCancelCancelRequest) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.CancelRequest])(&t).Parse()
+func (*ClientCancelCancelRequest) Cancel() {}
+func (t *ClientCancelCancelRequest) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.CancelRequest])(t).Parse()
 }
-func (t ClientCancelCancelRequest) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.CancelRequest])(&t).Parse()
+func (t *ClientCancelCancelRequest) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.CancelRequest])(t).Parse()
 }
 func (m *ClientCancelCancelRequest) Parse() *pgproto3.CancelRequest {
 	return (*FromClient[*pgproto3.CancelRequest])(m).Parse()
@@ -42,23 +42,24 @@ func (m ClientCancelCancelRequest) Retain() ClientCancelCancelRequest {
 }
 
 // ToClientCancel converts a pgproto3.FrontendMessage to a ClientCancel if it matches one of the known types.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsClient().
 func ToClientCancel(msg pgproto3.FrontendMessage) (ClientCancel, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CancelRequest:
-		return ClientCancelCancelRequest(ClientParsed(m)), true
+		return (*ClientCancelCancelRequest)(ClientParsed(m)), true
 	}
 	return nil, false
 }
 
 // ClientCancelHandlers provides type-safe handlers for each ClientCancel variant.
 type ClientCancelHandlers[T any] struct {
-	CancelRequest func(msg ClientCancelCancelRequest) (T, error)
+	CancelRequest func(msg *ClientCancelCancelRequest) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
 func (h ClientCancelHandlers[T]) HandleDefault(msg ClientCancel, defaultHandler func(msg ClientCancel) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
-	case ClientCancelCancelRequest:
+	case *ClientCancelCancelRequest:
 		if h.CancelRequest != nil {
 			return h.CancelRequest(msg)
 		} else {

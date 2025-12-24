@@ -17,18 +17,18 @@ type ClientTerminateConn interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientTerminateConn = ClientTerminateConnTerminate{}
+	_ ClientTerminateConn = (*ClientTerminateConnTerminate)(nil)
 )
 
 // ClientTerminateConnTerminate wraps *pgproto3.Terminate from the client.
 type ClientTerminateConnTerminate FromClient[*pgproto3.Terminate]
 
-func (ClientTerminateConnTerminate) TerminateConn() {}
-func (t ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Terminate])(&t).Parse()
+func (*ClientTerminateConnTerminate) TerminateConn() {}
+func (t *ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.Terminate])(t).Parse()
 }
-func (t ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Terminate])(&t).Parse()
+func (t *ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.Terminate])(t).Parse()
 }
 func (m *ClientTerminateConnTerminate) Parse() *pgproto3.Terminate {
 	return (*FromClient[*pgproto3.Terminate])(m).Parse()
@@ -42,23 +42,24 @@ func (m ClientTerminateConnTerminate) Retain() ClientTerminateConnTerminate {
 }
 
 // ToClientTerminateConn converts a pgproto3.FrontendMessage to a ClientTerminateConn if it matches one of the known types.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsClient().
 func ToClientTerminateConn(msg pgproto3.FrontendMessage) (ClientTerminateConn, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Terminate:
-		return ClientTerminateConnTerminate(ClientParsed(m)), true
+		return (*ClientTerminateConnTerminate)(ClientParsed(m)), true
 	}
 	return nil, false
 }
 
 // ClientTerminateConnHandlers provides type-safe handlers for each ClientTerminateConn variant.
 type ClientTerminateConnHandlers[T any] struct {
-	Terminate func(msg ClientTerminateConnTerminate) (T, error)
+	Terminate func(msg *ClientTerminateConnTerminate) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
 func (h ClientTerminateConnHandlers[T]) HandleDefault(msg ClientTerminateConn, defaultHandler func(msg ClientTerminateConn) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
-	case ClientTerminateConnTerminate:
+	case *ClientTerminateConnTerminate:
 		if h.Terminate != nil {
 			return h.Terminate(msg)
 		} else {

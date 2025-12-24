@@ -312,12 +312,12 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	}
 	buf.WriteString("}\n\n")
 
-	// Compile-time interface checks
+	// Compile-time interface checks (using pointer receivers for flyweight pattern)
 	buf.WriteString("// Compile-time checks that all wrapper types implement the interface.\n")
 	buf.WriteString("var (\n")
 	for _, ti := range types {
 		newTypeName := from + prefix + ti.shortName
-		fmt.Fprintf(&buf, "\t_ %s = %s{}\n", interfaceName, newTypeName)
+		fmt.Fprintf(&buf, "\t_ %s = (*%s)(nil)\n", interfaceName, newTypeName)
 	}
 	buf.WriteString(")\n\n")
 
@@ -338,23 +338,23 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 		// Type definition using type alias for FromServer/FromClient
 		fmt.Fprintf(&buf, "type %s %s[%s]\n\n", newTypeName, lazyType, ti.qualified)
 
-		// Marker methods for interface satisfaction (skip if overridden by return method)
+		// Marker methods for interface satisfaction (pointer receivers for flyweight pattern)
 		if !returnMethodNames[from] {
-			fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, from)
+			fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, from)
 		}
 		if !returnMethodNames[prefix] {
-			fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, prefix)
+			fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, prefix)
 		}
 		for _, method := range extraMethods {
 			if !returnMethodNames[method] {
-				fmt.Fprintf(&buf, "func (%s) %s() {}\n", newTypeName, method)
+				fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, method)
 			}
 		}
-		// Methods with return values - now call Parse() to get the underlying message
+		// Methods with return values - pointer receivers for flyweight pattern
 		for _, rm := range returnMethods {
-			// Replace t.T with (*LazyType)(&t).Parse() to call through to the underlying type
-			expr := strings.ReplaceAll(rm.expr, "t.T", fmt.Sprintf("(*%s[%s])(&t).Parse()", lazyType, ti.qualified))
-			fmt.Fprintf(&buf, "func (t %s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, expr)
+			// Replace t.T with (*LazyType)(t).Parse() to call through to the underlying type
+			expr := strings.ReplaceAll(rm.expr, "t.T", fmt.Sprintf("(*%s[%s])(t).Parse()", lazyType, ti.qualified))
+			fmt.Fprintf(&buf, "func (t *%s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, expr)
 		}
 
 		// Parse() method wrapper - delegates to underlying type (needs pointer receiver for caching)
@@ -373,16 +373,19 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	}
 
 	// Conversion function: To<From><Prefix>(inputType) -> (interface, bool)
-	// This uses *Parsed helper functions for backward compatibility
+	// This uses *Parsed helper functions for backward compatibility.
+	// Returns a pointer to satisfy the interface (pointer receivers for flyweight pattern).
+	// Note: This allocates - for zero-alloc, use Cursor.AsClient/AsServer with flyweights.
 	funcName := "To" + from + prefix
 	newLazyFunc := from + "Parsed"
 	fmt.Fprintf(&buf, "// %s converts a %s to a %s if it matches one of the known types.\n", funcName, inputType, interfaceName)
+	fmt.Fprintf(&buf, "// Note: This allocates. For zero-allocation iteration, use Cursor.As%s().\n", from)
 	fmt.Fprintf(&buf, "func %s(msg %s) (%s, bool) {\n", funcName, inputType, interfaceName)
 	buf.WriteString("\tswitch m := msg.(type) {\n")
 	for _, ti := range types {
 		newTypeName := from + prefix + ti.shortName
 		fmt.Fprintf(&buf, "\tcase %s:\n", ti.qualified)
-		fmt.Fprintf(&buf, "\t\treturn %s(%s(m)), true\n", newTypeName, newLazyFunc)
+		fmt.Fprintf(&buf, "\t\treturn (*%s)(%s(m)), true\n", newTypeName, newLazyFunc)
 	}
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn nil, false\n")
@@ -394,7 +397,7 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	fmt.Fprintf(&buf, "type %s[T any] struct {\n", handlersName)
 	for _, ti := range types {
 		newTypeName := from + prefix + ti.shortName
-		fmt.Fprintf(&buf, "\t%s func(msg %s) (T, error)\n", ti.shortName, newTypeName)
+		fmt.Fprintf(&buf, "\t%s func(msg *%s) (T, error)\n", ti.shortName, newTypeName)
 	}
 	buf.WriteString("}\n\n")
 
@@ -404,7 +407,7 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 	buf.WriteString("\tswitch msg := msg.(type) {\n")
 	for _, ti := range types {
 		newTypeName := from + prefix + ti.shortName
-		fmt.Fprintf(&buf, "\tcase %s:\n", newTypeName)
+		fmt.Fprintf(&buf, "\tcase *%s:\n", newTypeName)
 		fmt.Fprintf(&buf, "\t\tif h.%s != nil {\n", ti.shortName)
 		fmt.Fprintf(&buf, "\t\t\treturn h.%s(msg)\n", ti.shortName)
 		buf.WriteString("\t\t} else {\n")

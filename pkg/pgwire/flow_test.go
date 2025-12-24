@@ -13,7 +13,7 @@ func TestSimpleQueryFlow_BasicFlow(t *testing.T) {
 	var closedFlow *SimpleQueryFlow
 
 	flow := NewSimpleQueryFlow(
-		ClientSimpleQueryQuery(ClientParsed(&pgproto3.Query{String: "SELECT 1"})),
+		(*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"})),
 		func(f *SimpleQueryFlow) {
 			closeCalled = true
 			closedFlow = f
@@ -33,7 +33,7 @@ func TestSimpleQueryFlow_BasicFlow(t *testing.T) {
 	handlers := flow.UpdateHandlers(&state)
 
 	// DataRow - should continue
-	if !handlers.Update(ServerResponseDataRow(ServerParsed(&pgproto3.DataRow{Values: [][]byte{[]byte("1")}}))) {
+	if !handlers.Update((*ServerResponseDataRow)(ServerParsed(&pgproto3.DataRow{Values: [][]byte{[]byte("1")}}))) {
 		t.Error("DataRow should continue flow")
 	}
 	if flow.RowCount != 1 {
@@ -41,13 +41,13 @@ func TestSimpleQueryFlow_BasicFlow(t *testing.T) {
 	}
 
 	// More data rows
-	handlers.Update(ServerResponseDataRow(ServerParsed(&pgproto3.DataRow{Values: [][]byte{[]byte("2")}})))
+	handlers.Update((*ServerResponseDataRow)(ServerParsed(&pgproto3.DataRow{Values: [][]byte{[]byte("2")}})))
 	if flow.RowCount != 2 {
 		t.Errorf("RowCount = %d, want 2", flow.RowCount)
 	}
 
 	// CommandComplete
-	if !handlers.Update(ServerResponseCommandComplete(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 2")}))) {
+	if !handlers.Update((*ServerResponseCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 2")}))) {
 		t.Error("CommandComplete should continue flow")
 	}
 	if flow.CommandTag.String() != "SELECT 2" {
@@ -55,7 +55,7 @@ func TestSimpleQueryFlow_BasicFlow(t *testing.T) {
 	}
 
 	// ReadyForQuery - should complete flow
-	if handlers.Update(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
+	if handlers.Update((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
 		t.Error("ReadyForQuery should complete flow (return false)")
 	}
 	if flow.EndTime.IsZero() {
@@ -76,7 +76,7 @@ func TestSimpleQueryFlow_BasicFlow(t *testing.T) {
 // TestSimpleQueryFlow_WithError tests a simple query that returns an error.
 func TestSimpleQueryFlow_WithError(t *testing.T) {
 	flow := NewSimpleQueryFlow(
-		ClientSimpleQueryQuery(ClientParsed(&pgproto3.Query{String: "INVALID SQL"})),
+		(*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "INVALID SQL"})),
 		nil,
 	)
 
@@ -84,7 +84,7 @@ func TestSimpleQueryFlow_WithError(t *testing.T) {
 	handlers := flow.UpdateHandlers(&state)
 
 	// ErrorResponse
-	if !handlers.Update(ServerResponseErrorResponse(ServerParsed(&pgproto3.ErrorResponse{
+	if !handlers.Update((*ServerResponseErrorResponse)(ServerParsed(&pgproto3.ErrorResponse{
 		Severity: "ERROR",
 		Code:     "42601",
 		Message:  "syntax error",
@@ -100,7 +100,7 @@ func TestSimpleQueryFlow_WithError(t *testing.T) {
 	}
 
 	// ReadyForQuery completes flow
-	if handlers.Update(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
+	if handlers.Update((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
 		t.Error("ReadyForQuery should complete flow")
 	}
 }
@@ -108,7 +108,7 @@ func TestSimpleQueryFlow_WithError(t *testing.T) {
 // TestSimpleQueryFlow_NoCallback tests that flow works without a callback.
 func TestSimpleQueryFlow_NoCallback(t *testing.T) {
 	flow := NewSimpleQueryFlow(
-		ClientSimpleQueryQuery(ClientParsed(&pgproto3.Query{String: "SELECT 1"})),
+		(*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"})),
 		nil, // No callback
 	)
 
@@ -121,7 +121,7 @@ func TestExtendedQueryFlow_ParseDescribeSync(t *testing.T) {
 	var closedFlow *ExtendedQueryFlow
 
 	flow := NewExtendedQueryFlow(
-		ClientExtendedQueryParse(ClientParsed(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})),
+		(*ClientExtendedQueryParse)(ClientParsed(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})),
 		func(f *ExtendedQueryFlow) {
 			closedFlow = f
 		},
@@ -141,16 +141,16 @@ func TestExtendedQueryFlow_ParseDescribeSync(t *testing.T) {
 	handlers := flow.UpdateHandlers(&state)
 
 	// ParseComplete
-	handlers.Update(ServerExtendedQueryParseComplete(ServerParsed(&pgproto3.ParseComplete{})))
+	handlers.Update((*ServerExtendedQueryParseComplete)(ServerParsed(&pgproto3.ParseComplete{})))
 
 	// ParameterDescription
-	handlers.Update(ServerExtendedQueryParameterDescription(ServerParsed(&pgproto3.ParameterDescription{})))
+	handlers.Update((*ServerExtendedQueryParameterDescription)(ServerParsed(&pgproto3.ParameterDescription{})))
 
 	// RowDescription
-	handlers.Update(ServerExtendedQueryRowDescription(ServerParsed(&pgproto3.RowDescription{})))
+	handlers.Update((*ServerExtendedQueryRowDescription)(ServerParsed(&pgproto3.RowDescription{})))
 
 	// ReadyForQuery completes flow
-	if handlers.Update(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
+	if handlers.Update((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
 		t.Error("ReadyForQuery should complete flow")
 	}
 
@@ -167,7 +167,7 @@ func TestExtendedQueryFlow_ParseDescribeSync(t *testing.T) {
 // TestExtendedQueryFlow_ParseBindExecuteSync tests a full execute flow.
 func TestExtendedQueryFlow_ParseBindExecuteSync(t *testing.T) {
 	flow := NewExtendedQueryFlow(
-		ClientExtendedQueryParse(ClientParsed(&pgproto3.Parse{Name: "", Query: "SELECT $1"})),
+		(*ClientExtendedQueryParse)(ClientParsed(&pgproto3.Parse{Name: "", Query: "SELECT $1"})),
 		nil,
 	)
 
@@ -175,7 +175,7 @@ func TestExtendedQueryFlow_ParseBindExecuteSync(t *testing.T) {
 	handlers := flow.UpdateHandlers(&state)
 
 	// Client: Bind
-	handlers.Update(ClientExtendedQueryBind(ClientParsed(&pgproto3.Bind{
+	handlers.Update((*ClientExtendedQueryBind)(ClientParsed(&pgproto3.Bind{
 		DestinationPortal:    "p1",
 		PreparedStatement:    "",
 		ParameterFormatCodes: nil,
@@ -190,7 +190,7 @@ func TestExtendedQueryFlow_ParseBindExecuteSync(t *testing.T) {
 	}
 
 	// Client: Execute
-	handlers.Update(ClientExtendedQueryExecute(ClientParsed(&pgproto3.Execute{Portal: "p1"})))
+	handlers.Update((*ClientExtendedQueryExecute)(ClientParsed(&pgproto3.Execute{Portal: "p1"})))
 
 	if !flow.seenExecute {
 		t.Error("seenExecute should be true after Execute")
@@ -200,16 +200,16 @@ func TestExtendedQueryFlow_ParseBindExecuteSync(t *testing.T) {
 	}
 
 	// Server: ParseComplete, BindComplete, DataRow, CommandComplete, ReadyForQuery
-	handlers.Update(ServerExtendedQueryParseComplete(ServerParsed(&pgproto3.ParseComplete{})))
-	handlers.Update(ServerExtendedQueryBindComplete(ServerParsed(&pgproto3.BindComplete{})))
-	handlers.Update(ServerResponseDataRow(ServerParsed(&pgproto3.DataRow{Values: [][]byte{[]byte("42")}})))
+	handlers.Update((*ServerExtendedQueryParseComplete)(ServerParsed(&pgproto3.ParseComplete{})))
+	handlers.Update((*ServerExtendedQueryBindComplete)(ServerParsed(&pgproto3.BindComplete{})))
+	handlers.Update((*ServerResponseDataRow)(ServerParsed(&pgproto3.DataRow{Values: [][]byte{[]byte("42")}})))
 	if flow.RowCount != 1 {
 		t.Errorf("RowCount = %d, want 1", flow.RowCount)
 	}
-	handlers.Update(ServerResponseCommandComplete(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})))
+	handlers.Update((*ServerResponseCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})))
 
 	// ReadyForQuery
-	if handlers.Update(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
+	if handlers.Update((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
 		t.Error("ReadyForQuery should complete flow")
 	}
 
@@ -221,7 +221,7 @@ func TestExtendedQueryFlow_ParseBindExecuteSync(t *testing.T) {
 // TestExtendedQueryFlow_WithError tests an extended query that returns an error.
 func TestExtendedQueryFlow_WithError(t *testing.T) {
 	flow := NewExtendedQueryFlow(
-		ClientExtendedQueryParse(ClientParsed(&pgproto3.Parse{Name: "", Query: "INVALID"})),
+		(*ClientExtendedQueryParse)(ClientParsed(&pgproto3.Parse{Name: "", Query: "INVALID"})),
 		nil,
 	)
 
@@ -229,7 +229,7 @@ func TestExtendedQueryFlow_WithError(t *testing.T) {
 	handlers := flow.UpdateHandlers(&state)
 
 	// Server: ErrorResponse
-	handlers.Update(ServerResponseErrorResponse(ServerParsed(&pgproto3.ErrorResponse{
+	handlers.Update((*ServerResponseErrorResponse)(ServerParsed(&pgproto3.ErrorResponse{
 		Severity: "ERROR",
 		Code:     "42601",
 		Message:  "syntax error",
@@ -240,7 +240,7 @@ func TestExtendedQueryFlow_WithError(t *testing.T) {
 	}
 
 	// ReadyForQuery
-	if handlers.Update(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
+	if handlers.Update((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
 		t.Error("ReadyForQuery should complete flow")
 	}
 }
@@ -264,24 +264,24 @@ func TestCopyFlow_CopyIn(t *testing.T) {
 	handlers := flow.UpdateHandlers(&state)
 
 	// Client sends CopyData
-	handlers.Update(ClientCopyCopyData(ClientParsed(&pgproto3.CopyData{Data: []byte("line1\n")})))
+	handlers.Update((*ClientCopyCopyData)(ClientParsed(&pgproto3.CopyData{Data: []byte("line1\n")})))
 	if flow.ByteCount != 6 {
 		t.Errorf("ByteCount = %d, want 6", flow.ByteCount)
 	}
 
-	handlers.Update(ClientCopyCopyData(ClientParsed(&pgproto3.CopyData{Data: []byte("line2\n")})))
+	handlers.Update((*ClientCopyCopyData)(ClientParsed(&pgproto3.CopyData{Data: []byte("line2\n")})))
 	if flow.ByteCount != 12 {
 		t.Errorf("ByteCount = %d, want 12", flow.ByteCount)
 	}
 
 	// Server: CommandComplete
-	handlers.Update(ServerResponseCommandComplete(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("COPY 2")})))
+	handlers.Update((*ServerResponseCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("COPY 2")})))
 	if flow.CommandTag.String() != "COPY 2" {
 		t.Errorf("CommandTag = %q, want %q", flow.CommandTag.String(), "COPY 2")
 	}
 
 	// Server: ReadyForQuery
-	if handlers.Update(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
+	if handlers.Update((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
 		t.Error("ReadyForQuery should complete flow")
 	}
 
@@ -304,21 +304,21 @@ func TestCopyFlow_CopyOut(t *testing.T) {
 	handlers := flow.UpdateHandlers(&state)
 
 	// Server sends CopyData
-	handlers.Update(ServerCopyCopyData(ServerParsed(&pgproto3.CopyData{Data: []byte("row1\n")})))
+	handlers.Update((*ServerCopyCopyData)(ServerParsed(&pgproto3.CopyData{Data: []byte("row1\n")})))
 	if flow.ByteCount != 5 {
 		t.Errorf("ByteCount = %d, want 5", flow.ByteCount)
 	}
 
-	handlers.Update(ServerCopyCopyData(ServerParsed(&pgproto3.CopyData{Data: []byte("row2\n")})))
+	handlers.Update((*ServerCopyCopyData)(ServerParsed(&pgproto3.CopyData{Data: []byte("row2\n")})))
 	if flow.ByteCount != 10 {
 		t.Errorf("ByteCount = %d, want 10", flow.ByteCount)
 	}
 
 	// Server: CommandComplete
-	handlers.Update(ServerResponseCommandComplete(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("COPY 2")})))
+	handlers.Update((*ServerResponseCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("COPY 2")})))
 
 	// Server: ReadyForQuery
-	if handlers.Update(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
+	if handlers.Update((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
 		t.Error("ReadyForQuery should complete flow")
 	}
 }
@@ -331,7 +331,7 @@ func TestCopyFlow_WithError(t *testing.T) {
 	handlers := flow.UpdateHandlers(&state)
 
 	// Server: ErrorResponse
-	handlers.Update(ServerResponseErrorResponse(ServerParsed(&pgproto3.ErrorResponse{
+	handlers.Update((*ServerResponseErrorResponse)(ServerParsed(&pgproto3.ErrorResponse{
 		Severity: "ERROR",
 		Code:     "42P01",
 		Message:  "relation does not exist",
@@ -342,7 +342,7 @@ func TestCopyFlow_WithError(t *testing.T) {
 	}
 
 	// Server: ReadyForQuery
-	if handlers.Update(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
+	if handlers.Update((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))) {
 		t.Error("ReadyForQuery should complete flow")
 	}
 }
@@ -351,7 +351,7 @@ func TestCopyFlow_WithError(t *testing.T) {
 func TestSimpleQueryRecognizer(t *testing.T) {
 	var startedWith string
 	recognizer := &SimpleQueryRecognizer{
-		OnStart: func(msg ClientSimpleQueryQuery) func(*SimpleQueryFlow) {
+		OnStart: func(msg *ClientSimpleQueryQuery) func(*SimpleQueryFlow) {
 			startedWith = msg.Parse().String
 			return nil
 		},
@@ -361,7 +361,7 @@ func TestSimpleQueryRecognizer(t *testing.T) {
 	handlers := recognizer.StartHandlers(&state)
 
 	// Query message should start a flow
-	flow := handlers.Start(ClientSimpleQueryQuery(ClientParsed(&pgproto3.Query{String: "SELECT 1"})))
+	flow := handlers.Start((*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"})))
 	if flow == nil {
 		t.Error("Query should start a flow")
 	}
@@ -370,7 +370,7 @@ func TestSimpleQueryRecognizer(t *testing.T) {
 	}
 
 	// Non-Query messages should not start a flow
-	flow = handlers.Start(ClientExtendedQueryParse(ClientParsed(&pgproto3.Parse{Query: "SELECT $1"})))
+	flow = handlers.Start((*ClientExtendedQueryParse)(ClientParsed(&pgproto3.Parse{Query: "SELECT $1"})))
 	if flow != nil {
 		t.Error("Parse should not start a simple query flow")
 	}
@@ -380,7 +380,7 @@ func TestSimpleQueryRecognizer(t *testing.T) {
 func TestExtendedQueryRecognizer(t *testing.T) {
 	var startedSQL string
 	recognizer := &ExtendedQueryRecognizer{
-		OnStart: func(msg ClientExtendedQueryParse) func(*ExtendedQueryFlow) {
+		OnStart: func(msg *ClientExtendedQueryParse) func(*ExtendedQueryFlow) {
 			startedSQL = msg.Parse().Query
 			return nil
 		},
@@ -390,7 +390,7 @@ func TestExtendedQueryRecognizer(t *testing.T) {
 	handlers := recognizer.StartHandlers(&state)
 
 	// Parse message should start a flow
-	flow := handlers.Start(ClientExtendedQueryParse(ClientParsed(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})))
+	flow := handlers.Start((*ClientExtendedQueryParse)(ClientParsed(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})))
 	if flow == nil {
 		t.Error("Parse should start a flow")
 	}
@@ -399,7 +399,7 @@ func TestExtendedQueryRecognizer(t *testing.T) {
 	}
 
 	// Other extended query messages should not start a new flow
-	flow = handlers.Start(ClientExtendedQueryBind(ClientParsed(&pgproto3.Bind{})))
+	flow = handlers.Start((*ClientExtendedQueryBind)(ClientParsed(&pgproto3.Bind{})))
 	if flow != nil {
 		t.Error("Bind should not start a new extended query flow")
 	}
@@ -426,7 +426,7 @@ func TestCopyRecognizer(t *testing.T) {
 	handlers := recognizer.StartHandlers(&state)
 
 	// CopyInResponse should start a CopyIn flow
-	flow := handlers.Start(ServerCopyCopyInResponse(ServerParsed(&pgproto3.CopyInResponse{})))
+	flow := handlers.Start((*ServerCopyCopyInResponse)(ServerParsed(&pgproto3.CopyInResponse{})))
 	if flow == nil {
 		t.Error("CopyInResponse should start a flow")
 	}
@@ -439,7 +439,7 @@ func TestCopyRecognizer(t *testing.T) {
 
 	// CopyOutResponse should start a CopyOut flow
 	lastSQL = "COPY test TO STDOUT"
-	flow = handlers.Start(ServerCopyCopyOutResponse(ServerParsed(&pgproto3.CopyOutResponse{})))
+	flow = handlers.Start((*ServerCopyCopyOutResponse)(ServerParsed(&pgproto3.CopyOutResponse{})))
 	if flow == nil {
 		t.Error("CopyOutResponse should start a flow")
 	}
@@ -448,7 +448,7 @@ func TestCopyRecognizer(t *testing.T) {
 	}
 
 	// CopyData should not start a new flow
-	flow = handlers.Start(ServerCopyCopyData(ServerParsed(&pgproto3.CopyData{})))
+	flow = handlers.Start((*ServerCopyCopyData)(ServerParsed(&pgproto3.CopyData{})))
 	if flow != nil {
 		t.Error("CopyData should not start a new flow")
 	}
@@ -460,7 +460,7 @@ func TestProtocolState_FlowTracking(t *testing.T) {
 
 	var flowsClosed int
 	state.AddRecognizer(&SimpleQueryRecognizer{
-		OnStart: func(msg ClientSimpleQueryQuery) func(*SimpleQueryFlow) {
+		OnStart: func(msg *ClientSimpleQueryQuery) func(*SimpleQueryFlow) {
 			return func(f *SimpleQueryFlow) {
 				flowsClosed++
 			}
@@ -473,7 +473,7 @@ func TestProtocolState_FlowTracking(t *testing.T) {
 	}
 
 	// Process a Query message
-	queryMsg := ClientSimpleQueryQuery(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
+	queryMsg := (*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
 	state.ProcessFlows(queryMsg)
 
 	if state.ActiveFlowCount() != 1 {
@@ -481,15 +481,15 @@ func TestProtocolState_FlowTracking(t *testing.T) {
 	}
 
 	// Process server responses
-	state.ProcessFlows(ServerResponseDataRow(ServerParsed(&pgproto3.DataRow{})))
-	state.ProcessFlows(ServerResponseCommandComplete(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})))
+	state.ProcessFlows((*ServerResponseDataRow)(ServerParsed(&pgproto3.DataRow{})))
+	state.ProcessFlows((*ServerResponseCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})))
 
 	if state.ActiveFlowCount() != 1 {
 		t.Error("Flow should still be active before ReadyForQuery")
 	}
 
 	// ReadyForQuery completes the flow
-	state.ProcessFlows(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})))
+	state.ProcessFlows((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})))
 
 	if state.ActiveFlowCount() != 0 {
 		t.Errorf("ActiveFlowCount = %d, want 0 after ReadyForQuery", state.ActiveFlowCount())
@@ -506,7 +506,7 @@ func TestProtocolState_MultipleFlows(t *testing.T) {
 	var simpleQueryClosed, extendedQueryClosed int
 
 	state.AddRecognizer(&SimpleQueryRecognizer{
-		OnStart: func(msg ClientSimpleQueryQuery) func(*SimpleQueryFlow) {
+		OnStart: func(msg *ClientSimpleQueryQuery) func(*SimpleQueryFlow) {
 			return func(f *SimpleQueryFlow) {
 				simpleQueryClosed++
 			}
@@ -514,7 +514,7 @@ func TestProtocolState_MultipleFlows(t *testing.T) {
 	})
 
 	state.AddRecognizer(&ExtendedQueryRecognizer{
-		OnStart: func(msg ClientExtendedQueryParse) func(*ExtendedQueryFlow) {
+		OnStart: func(msg *ClientExtendedQueryParse) func(*ExtendedQueryFlow) {
 			return func(f *ExtendedQueryFlow) {
 				extendedQueryClosed++
 			}
@@ -522,30 +522,30 @@ func TestProtocolState_MultipleFlows(t *testing.T) {
 	})
 
 	// Start a simple query flow
-	state.ProcessFlows(ClientSimpleQueryQuery(ClientParsed(&pgproto3.Query{String: "SELECT 1"})))
+	state.ProcessFlows((*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"})))
 
 	if state.ActiveFlowCount() != 1 {
 		t.Errorf("ActiveFlowCount = %d, want 1", state.ActiveFlowCount())
 	}
 
 	// Complete the simple query
-	state.ProcessFlows(ServerResponseCommandComplete(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})))
-	state.ProcessFlows(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})))
+	state.ProcessFlows((*ServerResponseCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")})))
+	state.ProcessFlows((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})))
 
 	if simpleQueryClosed != 1 {
 		t.Errorf("simpleQueryClosed = %d, want 1", simpleQueryClosed)
 	}
 
 	// Start an extended query flow
-	state.ProcessFlows(ClientExtendedQueryParse(ClientParsed(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})))
+	state.ProcessFlows((*ClientExtendedQueryParse)(ClientParsed(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})))
 
 	if state.ActiveFlowCount() != 1 {
 		t.Errorf("ActiveFlowCount = %d, want 1", state.ActiveFlowCount())
 	}
 
 	// Complete the extended query
-	state.ProcessFlows(ServerExtendedQueryParseComplete(ServerParsed(&pgproto3.ParseComplete{})))
-	state.ProcessFlows(ServerResponseReadyForQuery(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})))
+	state.ProcessFlows((*ServerExtendedQueryParseComplete)(ServerParsed(&pgproto3.ParseComplete{})))
+	state.ProcessFlows((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})))
 
 	if extendedQueryClosed != 1 {
 		t.Errorf("extendedQueryClosed = %d, want 1", extendedQueryClosed)
@@ -562,7 +562,7 @@ func TestProtocolState_CloseAllFlows(t *testing.T) {
 
 	var flowsClosed int
 	state.AddRecognizer(&SimpleQueryRecognizer{
-		OnStart: func(msg ClientSimpleQueryQuery) func(*SimpleQueryFlow) {
+		OnStart: func(msg *ClientSimpleQueryQuery) func(*SimpleQueryFlow) {
 			return func(f *SimpleQueryFlow) {
 				flowsClosed++
 			}
@@ -570,7 +570,7 @@ func TestProtocolState_CloseAllFlows(t *testing.T) {
 	})
 
 	// Start a flow
-	state.ProcessFlows(ClientSimpleQueryQuery(ClientParsed(&pgproto3.Query{String: "SELECT 1"})))
+	state.ProcessFlows((*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"})))
 
 	if state.ActiveFlowCount() != 1 {
 		t.Fatalf("ActiveFlowCount = %d, want 1", state.ActiveFlowCount())

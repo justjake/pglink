@@ -17,20 +17,20 @@ type ClientSimpleQuery interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientSimpleQuery = ClientSimpleQueryQuery{}
-	_ ClientSimpleQuery = ClientSimpleQueryFunctionCall{}
+	_ ClientSimpleQuery = (*ClientSimpleQueryQuery)(nil)
+	_ ClientSimpleQuery = (*ClientSimpleQueryFunctionCall)(nil)
 )
 
 // Simple query.
 // Destroys unnamed prepared statement & portal.
 type ClientSimpleQueryQuery FromClient[*pgproto3.Query]
 
-func (ClientSimpleQueryQuery) SimpleQuery() {}
-func (t ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Query])(&t).Parse()
+func (*ClientSimpleQueryQuery) SimpleQuery() {}
+func (t *ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.Query])(t).Parse()
 }
-func (t ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Query])(&t).Parse()
+func (t *ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.Query])(t).Parse()
 }
 func (m *ClientSimpleQueryQuery) Parse() *pgproto3.Query {
 	return (*FromClient[*pgproto3.Query])(m).Parse()
@@ -46,12 +46,12 @@ func (m ClientSimpleQueryQuery) Retain() ClientSimpleQueryQuery {
 // Call a function; seems to work like a simple query? Or maybe it works with both modes?
 type ClientSimpleQueryFunctionCall FromClient[*pgproto3.FunctionCall]
 
-func (ClientSimpleQueryFunctionCall) SimpleQuery() {}
-func (t ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.FunctionCall])(&t).Parse()
+func (*ClientSimpleQueryFunctionCall) SimpleQuery() {}
+func (t *ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.FunctionCall])(t).Parse()
 }
-func (t ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.FunctionCall])(&t).Parse()
+func (t *ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.FunctionCall])(t).Parse()
 }
 func (m *ClientSimpleQueryFunctionCall) Parse() *pgproto3.FunctionCall {
 	return (*FromClient[*pgproto3.FunctionCall])(m).Parse()
@@ -65,32 +65,33 @@ func (m ClientSimpleQueryFunctionCall) Retain() ClientSimpleQueryFunctionCall {
 }
 
 // ToClientSimpleQuery converts a pgproto3.FrontendMessage to a ClientSimpleQuery if it matches one of the known types.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsClient().
 func ToClientSimpleQuery(msg pgproto3.FrontendMessage) (ClientSimpleQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Query:
-		return ClientSimpleQueryQuery(ClientParsed(m)), true
+		return (*ClientSimpleQueryQuery)(ClientParsed(m)), true
 	case *pgproto3.FunctionCall:
-		return ClientSimpleQueryFunctionCall(ClientParsed(m)), true
+		return (*ClientSimpleQueryFunctionCall)(ClientParsed(m)), true
 	}
 	return nil, false
 }
 
 // ClientSimpleQueryHandlers provides type-safe handlers for each ClientSimpleQuery variant.
 type ClientSimpleQueryHandlers[T any] struct {
-	Query        func(msg ClientSimpleQueryQuery) (T, error)
-	FunctionCall func(msg ClientSimpleQueryFunctionCall) (T, error)
+	Query        func(msg *ClientSimpleQueryQuery) (T, error)
+	FunctionCall func(msg *ClientSimpleQueryFunctionCall) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
 func (h ClientSimpleQueryHandlers[T]) HandleDefault(msg ClientSimpleQuery, defaultHandler func(msg ClientSimpleQuery) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
-	case ClientSimpleQueryQuery:
+	case *ClientSimpleQueryQuery:
 		if h.Query != nil {
 			return h.Query(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientSimpleQueryFunctionCall:
+	case *ClientSimpleQueryFunctionCall:
 		if h.FunctionCall != nil {
 			return h.FunctionCall(msg)
 		} else {

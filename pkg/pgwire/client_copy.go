@@ -17,20 +17,20 @@ type ClientCopy interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientCopy = ClientCopyCopyData{}
-	_ ClientCopy = ClientCopyCopyDone{}
-	_ ClientCopy = ClientCopyCopyFail{}
+	_ ClientCopy = (*ClientCopyCopyData)(nil)
+	_ ClientCopy = (*ClientCopyCopyDone)(nil)
+	_ ClientCopy = (*ClientCopyCopyFail)(nil)
 )
 
 // ClientCopyCopyData wraps *pgproto3.CopyData from the client.
 type ClientCopyCopyData FromClient[*pgproto3.CopyData]
 
-func (ClientCopyCopyData) Copy() {}
-func (t ClientCopyCopyData) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.CopyData])(&t).Parse()
+func (*ClientCopyCopyData) Copy() {}
+func (t *ClientCopyCopyData) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.CopyData])(t).Parse()
 }
-func (t ClientCopyCopyData) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.CopyData])(&t).Parse()
+func (t *ClientCopyCopyData) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.CopyData])(t).Parse()
 }
 func (m *ClientCopyCopyData) Parse() *pgproto3.CopyData {
 	return (*FromClient[*pgproto3.CopyData])(m).Parse()
@@ -46,12 +46,12 @@ func (m ClientCopyCopyData) Retain() ClientCopyCopyData {
 // ClientCopyCopyDone wraps *pgproto3.CopyDone from the client.
 type ClientCopyCopyDone FromClient[*pgproto3.CopyDone]
 
-func (ClientCopyCopyDone) Copy() {}
-func (t ClientCopyCopyDone) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.CopyDone])(&t).Parse()
+func (*ClientCopyCopyDone) Copy() {}
+func (t *ClientCopyCopyDone) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.CopyDone])(t).Parse()
 }
-func (t ClientCopyCopyDone) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.CopyDone])(&t).Parse()
+func (t *ClientCopyCopyDone) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.CopyDone])(t).Parse()
 }
 func (m *ClientCopyCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromClient[*pgproto3.CopyDone])(m).Parse()
@@ -67,12 +67,12 @@ func (m ClientCopyCopyDone) Retain() ClientCopyCopyDone {
 // ClientCopyCopyFail wraps *pgproto3.CopyFail from the client.
 type ClientCopyCopyFail FromClient[*pgproto3.CopyFail]
 
-func (ClientCopyCopyFail) Copy() {}
-func (t ClientCopyCopyFail) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.CopyFail])(&t).Parse()
+func (*ClientCopyCopyFail) Copy() {}
+func (t *ClientCopyCopyFail) PgwireMessage() pgproto3.Message {
+	return (*FromClient[*pgproto3.CopyFail])(t).Parse()
 }
-func (t ClientCopyCopyFail) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.CopyFail])(&t).Parse()
+func (t *ClientCopyCopyFail) Client() pgproto3.FrontendMessage {
+	return (*FromClient[*pgproto3.CopyFail])(t).Parse()
 }
 func (m *ClientCopyCopyFail) Parse() *pgproto3.CopyFail {
 	return (*FromClient[*pgproto3.CopyFail])(m).Parse()
@@ -86,41 +86,42 @@ func (m ClientCopyCopyFail) Retain() ClientCopyCopyFail {
 }
 
 // ToClientCopy converts a pgproto3.FrontendMessage to a ClientCopy if it matches one of the known types.
+// Note: This allocates. For zero-allocation iteration, use Cursor.AsClient().
 func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyData:
-		return ClientCopyCopyData(ClientParsed(m)), true
+		return (*ClientCopyCopyData)(ClientParsed(m)), true
 	case *pgproto3.CopyDone:
-		return ClientCopyCopyDone(ClientParsed(m)), true
+		return (*ClientCopyCopyDone)(ClientParsed(m)), true
 	case *pgproto3.CopyFail:
-		return ClientCopyCopyFail(ClientParsed(m)), true
+		return (*ClientCopyCopyFail)(ClientParsed(m)), true
 	}
 	return nil, false
 }
 
 // ClientCopyHandlers provides type-safe handlers for each ClientCopy variant.
 type ClientCopyHandlers[T any] struct {
-	CopyData func(msg ClientCopyCopyData) (T, error)
-	CopyDone func(msg ClientCopyCopyDone) (T, error)
-	CopyFail func(msg ClientCopyCopyFail) (T, error)
+	CopyData func(msg *ClientCopyCopyData) (T, error)
+	CopyDone func(msg *ClientCopyCopyDone) (T, error)
+	CopyFail func(msg *ClientCopyCopyFail) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
 func (h ClientCopyHandlers[T]) HandleDefault(msg ClientCopy, defaultHandler func(msg ClientCopy) (T, error)) (r T, err error) {
 	switch msg := msg.(type) {
-	case ClientCopyCopyData:
+	case *ClientCopyCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientCopyCopyDone:
+	case *ClientCopyCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(msg)
 		} else {
 			return defaultHandler(msg)
 		}
-	case ClientCopyCopyFail:
+	case *ClientCopyCopyFail:
 		if h.CopyFail != nil {
 			return h.CopyFail(msg)
 		} else {
