@@ -41,14 +41,26 @@ func (c *PooledBackend) Cursor() *pgwire.Cursor {
 	return c.cursor
 }
 
-func (c *PooledBackend) Send(msg pgproto3.FrontendMessage) error {
+func (c *PooledBackend) WriteRange(r *pgwire.RingRange) error {
 	c.panicIfReleased()
-	return c.session.Send(msg)
+	return c.session.WriteRange(r)
+}
+
+func (c *PooledBackend) WriteMsg(msg pgproto3.FrontendMessage) error {
+	c.panicIfReleased()
+	return c.session.WriteMsg(msg)
 }
 
 func (c *PooledBackend) ParameterStatusChanges(keys []string, since pgwire.ParameterStatuses) pgwire.ParameterStatusDiff {
 	c.panicIfReleased()
 	return c.session.ParameterStatusChanges(keys, since)
+}
+
+// UpdateState should be called for each server message received from the backend.
+// TODO: handle this internally in Session somehow for cursor batches.
+func (c *PooledBackend) UpdateState(msg pgwire.Message) {
+	c.panicIfReleased()
+	c.session.State.Update(msg)
 }
 
 // Release returns the connection to the pool.

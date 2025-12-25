@@ -2,8 +2,6 @@ package pgwire
 
 import (
 	"fmt"
-
-	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 // NewProtocolState creates a new ProtocolState with all maps initialized.
@@ -91,18 +89,23 @@ func (s *ProtocolState) InTxOrQuery() bool {
 		s.Portals.Executing != nil
 }
 
-func (s *ProtocolState) UpdateForFrontentMessage(msg pgproto3.FrontendMessage) {
-	pgwireMsg, ok := ToClientMessage(msg)
-	if !ok {
-		panic(fmt.Sprintf("unexpected frontend message: %T", msg))
+func (s *ProtocolState) Update(msg Message) {
+	if m, ok := msg.(ClientMessage); ok {
+		s.UpdateForFrontentMessage(m)
+	} else if m, ok := msg.(ServerMessage); ok {
+		s.UpdateForServerMessage(m)
+	} else {
+		panic(fmt.Sprintf("unexpected message: %T", msg))
 	}
+}
 
+func (s *ProtocolState) UpdateForFrontentMessage(msg ClientMessage) {
 	handlers := ClientMessageHandlers[struct{}]{
 		SimpleQuery:   wrapVoid(s.UpdateForSimpleQueryMessage),
 		ExtendedQuery: wrapVoid(s.UpdateForExtendedQueryMessage),
 	}
 
-	_, _ = handlers.HandleDefault(pgwireMsg, func(msg ClientMessage) (struct{}, error) { return struct{}{}, nil })
+	_, _ = handlers.HandleDefault(msg, func(msg ClientMessage) (struct{}, error) { return struct{}{}, nil })
 }
 
 func (s *ProtocolState) UpdateForServerMessage(msg ServerMessage) {

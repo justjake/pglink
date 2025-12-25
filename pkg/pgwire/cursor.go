@@ -1,6 +1,7 @@
 package pgwire
 
 import (
+	"fmt"
 	"io"
 	"slices"
 )
@@ -57,12 +58,8 @@ type Cursor struct {
 	ring *RingBuffer
 
 	// Batch state
-	batchStart int64
-	batchEnd   int64
-
-	// Iteration state
-	msgIdx   int64 // Current message index
-	writePos int64 // Messages written so far in this batch
+	RingRange
+	RingMsg
 
 	// Flyweights - only one set allocated based on direction
 	clientFlyweights *ClientFlyweights // nil for server cursor
@@ -71,53 +68,25 @@ type Cursor struct {
 
 // NewClientCursor creates a cursor for iterating client messages.
 func NewClientCursor(ring *RingBuffer) *Cursor {
-	return &Cursor{
+	c := &Cursor{
 		ring:             ring,
 		clientFlyweights: &ClientFlyweights{},
 	}
+	c.capacity = &c.RingRange
+	c.in = &c.RingRange
+	return c
 }
 
 // NewServerCursor creates a cursor for iterating server messages.
 func NewServerCursor(ring *RingBuffer) *Cursor {
-	return &Cursor{
+	c := &Cursor{
 		ring:             ring,
 		serverFlyweights: &ServerFlyweights{},
 	}
+	c.capacity = &c.RingRange
+	c.in = &c.RingRange
+	return c
 }
-
-// === RawMessageSource implementation ===
-
-// MessageType returns the message type of the current message.
-func (c *Cursor) MessageType() MsgType {
-	return c.ring.MessageType(c.msgIdx)
-}
-
-// MessageBody returns the body bytes of the current message.
-// This may allocate if the message wraps around the ring buffer.
-func (c *Cursor) MessageBody() []byte {
-	return c.ring.MessageBody(c.msgIdx)
-}
-
-// BodyLen returns the body length without copying.
-func (c *Cursor) BodyLen() int {
-	return int(c.ring.MessageLen(c.msgIdx) - 5)
-}
-
-// WriteTo writes the current message to dst.
-// The ring buffer stores full wire bytes, so this is a direct write.
-func (c *Cursor) WriteTo(w io.Writer) (int64, error) {
-	return c.ring.WriteMessage(c.msgIdx, w)
-}
-
-// Retain returns an owned RawBody copy of the current message.
-func (c *Cursor) Retain() RawMessageSource {
-	return RawBody{
-		Type: c.MessageType(),
-		Body: slices.Clone(c.MessageBody()),
-	}
-}
-
-// === Batch iteration ===
 
 // TryNextBatch checks for new messages without blocking.
 // Returns (true, nil) if messages are available for processing.
@@ -125,8 +94,8 @@ func (c *Cursor) Retain() RawMessageSource {
 // Returns (false, err) on EOF or error.
 func (c *Cursor) TryNextBatch() (bool, error) {
 	// Release previous batch (if any)
-	if c.batchEnd > 0 {
-		c.ring.ReleaseThrough(c.batchEnd)
+	if c.endIdx > 0 {
+		c.ring.ReleaseThrough(c.endIdx)
 	}
 
 	// Check for error first
@@ -136,14 +105,13 @@ func (c *Cursor) TryNextBatch() (bool, error) {
 
 	// Non-blocking check for new messages
 	newEnd := c.ring.PublishedMsgCount()
-	if newEnd <= c.batchEnd {
+	if newEnd <= c.endIdx {
 		return false, nil
 	}
 
-	c.batchStart = c.batchEnd
-	c.batchEnd = newEnd
-	c.msgIdx = c.batchStart - 1 // NextMsg will increment
-	c.writePos = c.batchStart
+	c.startIdx = c.endIdx
+	c.endIdx = newEnd
+	c.msgIdx = c.startIdx - 1 // NextMsg will increment
 	return true, nil
 }
 
@@ -162,59 +130,6 @@ func (c *Cursor) Done() <-chan struct{} {
 func (c *Cursor) Err() error {
 	return c.ring.Error()
 }
-
-// NextMsg advances to the next message in the batch.
-// Returns false when the batch is exhausted.
-func (c *Cursor) NextMsg() bool {
-	c.msgIdx++
-	return c.msgIdx < c.batchEnd
-}
-
-// MsgIdx returns the current message index.
-func (c *Cursor) MsgIdx() int64 {
-	return c.msgIdx
-}
-
-// FirstMsgIdx returns the index of the first unwritten message in this batch.
-func (c *Cursor) FirstMsgIdx() int64 {
-	return c.writePos
-}
-
-// === Writing ===
-
-// Write writes messages [fromMsg, toMsg) to dst.
-// The ring buffer stores full wire bytes, so this writes directly without
-// reconstructing headers.
-func (c *Cursor) Write(fromMsg, toMsg int64, dst io.Writer) error {
-	if fromMsg >= toMsg {
-		return nil
-	}
-
-	_, err := c.ring.WriteBatch(fromMsg, toMsg, dst)
-	if err != nil {
-		return err
-	}
-
-	c.writePos = toMsg
-	return nil
-}
-
-// WriteThrough writes all messages up to and including the current message.
-func (c *Cursor) WriteThrough(dst io.Writer) error {
-	return c.Write(c.writePos, c.msgIdx+1, dst)
-}
-
-// WriteAll writes all remaining messages in the batch.
-func (c *Cursor) WriteAll(dst io.Writer) error {
-	return c.Write(c.writePos, c.batchEnd, dst)
-}
-
-// SkipThrough marks messages up to and including current as written (without writing).
-func (c *Cursor) SkipThrough() {
-	c.writePos = c.msgIdx + 1
-}
-
-// === Typed message access (flyweight pattern) ===
 
 // AsClient returns the current message as a ClientMessage using flyweights.
 // The returned message is only valid until the next call to AsClient or NextMsg.
@@ -236,5 +151,161 @@ func (c *Cursor) AsServer() (ServerMessage, error) {
 	return c.serverFlyweights.Parse(c)
 }
 
+func (c *Cursor) String() string {
+	return fmt.Sprintf("Cursor{%s %s}", &c.RingRange, &c.RingMsg)
+}
+
 // Compile-time check that Cursor implements RawMessageSource
 var _ RawMessageSource = (*Cursor)(nil)
+
+// RingRange represents a range of messages in a RingBuffer.
+// Range contains [start, end) (end is exclusive, and not in the range).
+type RingRange struct {
+	startIdx int64
+	endIdx   int64
+	capacity *RingRange
+	ring     *RingBuffer
+}
+
+func (r *RingRange) Start() int64 {
+	return r.startIdx
+}
+
+func (r *RingRange) SetStart(start int64) {
+	if r.capacity.startIdx > start {
+		panic(fmt.Sprintf("start out of bounds %s: %d", r.capacity, start))
+	}
+	if start > r.endIdx {
+		panic(fmt.Sprintf("start after end %s: %d", r, start))
+	}
+	r.startIdx = start
+}
+
+func (r *RingRange) End() int64 {
+	return r.endIdx
+}
+
+func (r *RingRange) SetEnd(end int64) {
+	if r.capacity.endIdx < end {
+		panic(fmt.Sprintf("end out of bounds %s: %d", r.capacity, end))
+	}
+	if end < r.startIdx {
+		panic(fmt.Sprintf("end before start %s: %d", r, end))
+	}
+	r.endIdx = end
+}
+
+func (r *RingRange) SetEndInclusive(end int64) {
+	r.SetEnd(end + 1)
+}
+
+// Range returns the start and end indices of the range.
+// The range is [start, end) (end is exclusive, and not in the range).
+func (r *RingRange) Range() (int64, int64) {
+	return r.startIdx, r.endIdx
+}
+
+func (r *RingRange) Slice(start, end int64) *RingRange {
+	if start < r.startIdx || end > r.endIdx {
+		panic(fmt.Sprintf("slice out of bounds %s: [%d-%d)", r, start, end))
+	}
+	return &RingRange{
+		startIdx: start,
+		endIdx:   end,
+		capacity: r.capacity,
+		ring:     r.ring,
+	}
+}
+
+func (r *RingRange) Ring() *RingBuffer {
+	return r.ring
+}
+
+func (r *RingRange) Contains(start, end int64) bool {
+	return start >= r.startIdx && end <= r.endIdx && start <= end
+}
+
+func (r *RingRange) Empty() bool {
+	return r.startIdx >= r.endIdx
+}
+
+func (r *RingRange) Len() int64 {
+	return r.endIdx - r.startIdx
+}
+
+func (r *RingRange) Bytes() int64 {
+	return r.ring.MessageEnd(r.endIdx-1) - r.ring.MessageOffset(r.startIdx)
+}
+
+func (r *RingRange) String() string {
+	return fmt.Sprintf("RingRange{[%d-%d) %d bytes ring=%p}", r.startIdx, r.endIdx, r.Bytes(), r.ring)
+}
+
+func (r *RingRange) WriteTo(w io.Writer) error {
+	return r.ring.WriteBatch(r.startIdx, r.endIdx, w)
+}
+
+// RingMsg represents a single message in a RingBuffer.
+type RingMsg struct {
+	msgIdx int64
+	in     *RingRange
+}
+
+func (r *RingMsg) MsgIdx() int64 {
+	return r.msgIdx
+}
+
+func (r *RingMsg) Range() *RingRange {
+	return r.in
+}
+
+func (r *RingMsg) NextMsg() bool {
+	r.msgIdx++
+	return r.msgIdx < r.in.endIdx
+}
+
+func (r *RingMsg) PrevMsg() bool {
+	r.msgIdx = max(r.msgIdx-1, r.in.startIdx-1)
+	return r.msgIdx >= r.in.startIdx
+}
+
+func (r *RingMsg) MessageType() MsgType {
+	r.panicUnlessValid()
+	return r.in.ring.MessageType(r.msgIdx)
+}
+
+func (r *RingMsg) MessageBody() []byte {
+	r.panicUnlessValid()
+	return r.in.ring.MessageBody(r.msgIdx)
+}
+
+func (r *RingMsg) MessageLen() int64 {
+	r.panicUnlessValid()
+	return r.in.ring.MessageLen(r.msgIdx)
+}
+
+func (r *RingMsg) BodyLen() int {
+	r.panicUnlessValid()
+	return int(r.in.ring.MessageLen(r.msgIdx) - 5)
+}
+
+func (r *RingMsg) Retain() RawMessageSource {
+	return RawBody{
+		Type: r.MessageType(),
+		Body: slices.Clone(r.MessageBody()),
+	}
+}
+
+func (r *RingMsg) String() string {
+	return fmt.Sprintf("RingMsg{idx=%d type=%s bytes=%d ring=%p}", r.msgIdx, r.MessageType(), r.MessageLen(), r.ring)
+}
+
+func (r *RingMsg) panicUnlessValid() {
+	start, end := r.in.capacity.Range()
+	if r.msgIdx < start || r.msgIdx >= end {
+		panic(fmt.Sprintf("out of bounds %s: %s", r.in.capacity, r))
+	}
+}
+
+// Compile-time check that RingMsgSource implements RawMessageSource
+var _ RawMessageSource = (*RingMsg)(nil)

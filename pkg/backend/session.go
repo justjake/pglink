@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -31,8 +30,6 @@ type Session struct {
 	// Ring buffer for zero-copy message proxying
 	ringBuffer *pgwire.RingBuffer
 	readerDone chan struct{}
-
-	stateMu sync.RWMutex
 }
 
 func GetSession(conn *pgconn.PgConn) *Session {
@@ -96,13 +93,7 @@ func (s *Session) Name() string {
 }
 
 func (s *Session) ParameterStatusChanges(keys []string, since pgwire.ParameterStatuses) pgwire.ParameterStatusDiff {
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
 	return since.DiffToTip(s.updateParameterStatuses(keys))
-}
-
-func (s *Session) Flush() error {
-	return s.Conn.Frontend().Flush()
 }
 
 func (s *Session) Acquire() error {
@@ -149,13 +140,13 @@ func (s *Session) RingBuffer() *pgwire.RingBuffer {
 	return s.ringBuffer
 }
 
-// We have error signature because it's likely we'll want one in the future.
-func (s *Session) Send(msg pgproto3.FrontendMessage) error {
+func (s *Session) WriteRange(r *pgwire.RingRange) error {
+	return r.WriteTo(s.Conn.Conn())
+}
+
+func (s *Session) WriteMsg(msg pgproto3.FrontendMessage) error {
 	s.Conn.Frontend().Send(msg)
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	s.State.UpdateForFrontentMessage(msg)
-	return nil
+	return s.Conn.Frontend().Flush()
 }
 
 func (s *Session) updateParameterStatuses(keys []string) pgwire.ParameterStatuses {

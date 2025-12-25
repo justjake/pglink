@@ -46,7 +46,7 @@ type Session struct {
 	config    *config.Config
 
 	// The client.
-	frontend Frontend
+	frontend *Frontend
 
 	// Client's configuration.
 	// Populated during startup.
@@ -95,30 +95,6 @@ type Session struct {
 	lastSQL string
 }
 
-// Select over reading from frontend, reading from backend, or receiving a context cancellation.
-func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
-	select {
-	case <-s.ctx.Done():
-		return nil, s.ctx.Err()
-	case <-s.frontend.Cursor().Ready():
-		// TODO: implement ring buffer message reading using s.frontend.Cursor()
-		panic("RecvFrontend: frontend ring buffer reading not yet implemented")
-	}
-}
-
-func (s *Session) RecvAny() (pgwire.Message, error) {
-	select {
-	case <-s.ctx.Done():
-		return nil, s.ctx.Err()
-	case <-s.frontend.Cursor().Ready():
-		// TODO: implement ring buffer message reading using s.frontend.Cursor()
-		panic("RecvAny: frontend ring buffer reading not yet implemented")
-	case <-s.backend.Cursor().Ready():
-		// TODO: implement ring buffer message reading using s.backend.Cursor()
-		panic("RecvAny: backend ring buffer reading not yet implemented")
-	}
-}
-
 // Close cancels the session's context and releases associated resources.
 func (s *Session) Close() {
 	// Unregister from cancel registry if we were registered.
@@ -131,7 +107,6 @@ func (s *Session) Close() {
 		s.logger.Error("session close: error flushing to client", "error", flushError)
 	}
 
-	// Stop the frontend ring buffer reader
 	s.frontend.StopRingBuffer()
 
 	s.cancel()
@@ -172,7 +147,7 @@ func (s *Session) Run() {
 	defer s.Close()
 
 	// Create pgproto3 backend for protocol handling
-	s.frontend = Frontend{conn: s.conn, Backend: pgproto3.NewBackend(s.conn, s.conn)}
+	s.frontend = NewFrontend(s.ctx, s.conn)
 	s.enableTracing()
 
 	// Handle TLS and startup
@@ -304,28 +279,60 @@ func (s *Session) Run() {
 		},
 	}
 
+	frontendCursor := s.frontend.Cursor()
 	for {
-		// Initial state: no backend connection, so only receive from frontend.
-		msg, err := s.RecvFrontend()
+		select {
+		case <-s.ctx.Done():
+			s.sendError(pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.ConnectionException, "context canceled", s.ctx.Err()))
+			return
+		case <-frontendCursor.Done():
+			s.sendError(pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.ConnectionException, "frontend cursor done", s.frontend.Cursor().Err()))
+			return
+		case <-frontendCursor.Ready():
+			// Time to loop.
+		}
+
+		got, err := s.frontend.Cursor().TryNextBatch()
 		if err != nil {
 			s.sendError(pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.ConnectionException, "error receiving client message", err))
 			return
+		} else if !got {
+			// WHAT
+			s.logger.Warn("frontend cursor ready but no messages available")
+			continue
 		}
 
-		if transitionToBackend, err := idleClientState.Handle(msg); err != nil || !transitionToBackend {
+		for frontendCursor.NextMsg() {
+			msg, err := frontendCursor.AsClient()
 			if err != nil {
-				s.sendError(err)
+				s.sendError(pgwire.NewProtocolViolation(err, msg))
+				return
 			}
-			return
-		}
 
-		if err := s.runWithBackend(msg); err != nil {
-			s.sendError(err)
-			return
-		}
+			s.state.Update(msg)
 
-		// We have returned from having a backend to being idle.
-		// Wait for next client message that needs a backend.
+			transitionToBackend, err := idleClientState.Handle(msg)
+			if err != nil {
+				s.sendError(pgwire.NewProtocolViolation(err, msg))
+				return
+			} else if !transitionToBackend {
+				continue
+			}
+
+			// Rewind so that runWithbackend starts at the "current" message
+			// when it calls cursor.NextMsg()
+			frontendCursor.PrevMsg()
+			// Drop any client-pgwire-only messages we have handled so far
+			frontendCursor.SkipThrough()
+			// Enter the backend-acquired state loop.
+			if err := s.runWithBackend(msg); err != nil {
+				s.sendError(err)
+				return
+			}
+
+			// We have returned from having a backend to being idle.
+			// Wait for next client message that needs a backend.
+		}
 	}
 }
 
@@ -435,18 +442,18 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	s.logger = logger
 	defer func() { s.logger = oldLogger }()
 
+	frontendCursor := s.frontend.Cursor()
+	backendCursor := s.backend.Cursor()
+	var toServer *pgwire.RingRange
+	var toClient *pgwire.RingRange
+
 	backendAcquiredState := pgwire.MessageHandlers[bool]{
 		Client: pgwire.ClientMessageHandlers[bool]{
-			SimpleQuery:   s.runSimpleQueryWithBackend,
-			ExtendedQuery: s.runExtendedQueryWithBackend,
-			Copy: func(msg pgwire.ClientCopy) (bool, error) {
-				// Forward copy data to backend regardless of our CopyMode state.
-				// The client may have pipelined CopyData before we received
-				// CopyInResponse from backend. Let the backend validate the protocol.
-				if err := s.backend.Send(msg.Client()); err != nil {
-					return false, err
-				}
-				return true, nil
+			SimpleQuery: nil,
+			Copy:        nil,
+
+			ExtendedQuery: func(msg pgwire.ClientExtendedQuery) (bool, error) {
+				return s.rewriteAndFlushExtendedQueryToBackend(msg, frontendCursor.MsgIdx(), &toServer)
 			},
 
 			TerminateConn: func(msg pgwire.ClientTerminateConn) (bool, error) {
@@ -462,10 +469,12 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			},
 		},
 		Server: pgwire.ServerMessageHandlers[bool]{
-			Async:         s.handleServerAsync,
-			Copy:          s.handleServerCopy,
-			ExtendedQuery: s.handleServerExtendedQuery,
-			Response:      s.handleServerResponse,
+			Async:         nil,
+			Copy:          nil,
+			ExtendedQuery: nil,
+			Response: func(msg pgwire.ServerResponse) (bool, error) {
+				return s.handleServerResponse(msg, &toClient)
+			},
 			Startup: func(msg pgwire.ServerStartup) (bool, error) {
 				err := pgwire.NewProtocolViolation(fmt.Errorf("backend sent startup message to active client session"), msg)
 				s.backend.MarkForDestroy(err)
@@ -474,39 +483,114 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		},
 	}
 
-	var msg pgwire.Message = firstMsg
-	for {
-		continueWithBackend, err := backendAcquiredState.Handle(msg)
+	handleClientBatch := func() (continueWithBackend bool, err error) {
+		toServer = frontendCursor.Slice(frontendCursor.Start(), frontendCursor.Start())
 
-		// Ensure we've sent any pending messages
-		if flushErr := s.flush(); flushErr != nil {
-			return errors.Join(err, flushErr)
+		defer func() {
+			if toServer.Len() > 0 {
+				flushErr := s.backend.WriteRange(toServer)
+				err = errors.Join(err, flushErr)
+				toServer = toServer.Slice(toServer.End(), toServer.End())
+			}
+		}()
+
+		for frontendCursor.NextMsg() {
+			var msg pgwire.ClientMessage
+			msg, err = frontendCursor.AsClient()
+			if err != nil {
+				return false, err
+			}
+
+			s.state.Update(msg)
+
+			continueWithBackend, err = backendAcquiredState.Client.HandleDefault(msg, func(msg pgwire.ClientMessage) (bool, error) {
+				return s.proxyClientToServer(msg, frontendCursor.MsgIdx(), &toServer)
+			})
+
+			if !continueWithBackend || err != nil {
+				return
+			}
 		}
 
-		if !continueWithBackend || err != nil {
+		return
+	}
+
+	handleBackendBatch := func() (continueWithBackend bool, err error) {
+		toClient = backendCursor.Slice(backendCursor.Start(), backendCursor.Start())
+
+		defer func() {
+			if toClient.Len() > 0 {
+				flushErr := s.frontend.WriteRange(toClient)
+				err = errors.Join(err, flushErr)
+				toClient = toClient.Slice(toClient.End(), toClient.End())
+			}
+		}()
+
+		for backendCursor.NextMsg() {
+			var msg pgwire.ServerMessage
+			msg, err = backendCursor.AsServer()
 			if err != nil {
+				return false, err
+			}
+
+			// TODO: this should be automatic (?)
+			s.backend.UpdateState(msg)
+
+			continueWithBackend, err = backendAcquiredState.Server.HandleDefault(msg, func(msg pgwire.ServerMessage) (bool, error) {
+				return s.proxyServerToClient(msg, backendCursor.MsgIdx(), &toClient)
+			})
+
+			if !continueWithBackend || err != nil {
+				return
+			}
+		}
+
+		return
+	}
+
+	// Handle initial frontend batch.
+	if continueWithBackend, err := handleClientBatch(); err != nil || !continueWithBackend {
+		return err
+	}
+
+	for {
+		// Check both sides without blocking
+		gotFrontend, errF := frontendCursor.TryNextBatch()
+		gotBackend, errB := backendCursor.TryNextBatch()
+		if errF != nil {
+			return errors.Join(errF, errB)
+		}
+		if errB != nil {
+			return errB
+		}
+
+		// Process server responses first, then client requests
+		if gotBackend {
+			if continueWithBackend, err := handleBackendBatch(); !continueWithBackend || err != nil {
 				return err
 			}
-			return nil
+		}
+		if gotFrontend {
+			if continueWithBackend, err := handleClientBatch(); !continueWithBackend || err != nil {
+				return err
+			}
 		}
 
-		// Read next message from client or backend,
-		// and continue the loop to handle it.
-		msg, err = s.RecvAny()
-		if err != nil {
-			return err
+		// If nothing available, wait for either side
+		if !gotFrontend && !gotBackend {
+			select {
+			case <-backendCursor.Ready():
+			case <-frontendCursor.Ready():
+			case <-backendCursor.Done():
+				return backendCursor.Err()
+			case <-frontendCursor.Done():
+				return frontendCursor.Err()
+			}
 		}
 	}
 }
 
-func (s *Session) runSimpleQueryWithBackend(msg pgwire.ClientSimpleQuery) (bool, error) {
-	if err := s.backend.Send(msg.Client()); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (bool, error) {
+func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtendedQuery, msgIdx int64, toServer **pgwire.RingRange) (bool, error) {
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
 		Bind: func(msg *pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
@@ -547,61 +631,73 @@ func (s *Session) runExtendedQueryWithBackend(msg pgwire.ClientExtendedQuery) (b
 				Name:       s.clientToServerObjectName(parsed.ObjectType, parsed.Name),
 			}, nil
 		},
-		Sync: func(msg *pgwire.ClientExtendedQuerySync) (pgproto3.FrontendMessage, error) {
-			return msg.Parse(), nil
-		},
-		Flush: func(msg *pgwire.ClientExtendedQueryFlush) (pgproto3.FrontendMessage, error) {
-			return msg.Parse(), nil
-		},
 	}
 
-	rewritten, err := extendedQueryRewriter.Handle(msg)
+	rewritten, err := extendedQueryRewriter.HandleDefault(msg, func(msg pgwire.ClientExtendedQuery) (pgproto3.FrontendMessage, error) {
+		continueWithBackend, err := s.proxyClientToServer(msg, msgIdx, toServer)
+		if err != nil {
+			return nil, err
+		} else if !continueWithBackend {
+			return nil, fmt.Errorf("proxyClientToServer: decided not to continue with backend")
+		}
+		return nil, nil
+	})
+
 	if err != nil {
 		return false, err
 	}
 
-	if err := s.backend.Send(rewritten); err != nil {
-		return false, err
+	if rewritten != nil {
+		rewrittenMsg, ok := pgwire.ToClientMessage(rewritten)
+		if !ok {
+			return false, fmt.Errorf("unexpected message type: %T", rewritten)
+		}
+		s.backend.UpdateState(rewrittenMsg)
+
+		// Flush pending toServer messages.
+		if (*toServer).Len() > 0 {
+			flushErr := s.backend.WriteRange(*toServer)
+			if flushErr != nil {
+				return false, flushErr
+			}
+			(*toServer) = (*toServer).Slice((*toServer).End(), (*toServer).End())
+		}
+
+		// Send the rewritten message.
+		err := s.backend.WriteMsg(rewritten)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	return true, nil
 }
 
-func (s *Session) handleServerResponse(msg pgwire.ServerResponse) (bool, error) {
+func (s *Session) handleServerResponse(msg pgwire.ServerResponse, toClient **pgwire.RingRange) (bool, error) {
+	s.state.Update(msg)
 	continueWithBackend := true
+
 	if _, ok := msg.(*pgwire.ServerResponseReadyForQuery); ok {
-		// We may have missed a status update message, double check.
-		s.sendBackendParameterStatusChanges()
+
 		if !s.state.InTxOrQuery() {
 			s.logger.Info("transaction ended, releasing backend")
 			continueWithBackend = false
 		}
 	}
 
-	// Use fast path for DataRow, CommandComplete, etc.
-	// ReadyForQuery and ErrorResponse will use slow path (not fast-forwardable)
-	s.forwardServerMessage(msg)
 	return continueWithBackend, nil
 }
 
-func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery) (bool, error) {
-	s.forwardServerMessage(msg)
+func (s *Session) proxyClientToServer(msg pgwire.ClientMessage, idx int64, toServer **pgwire.RingRange) (bool, error) {
+	s.backend.UpdateState(msg)
+	(*toServer).SetEndInclusive(idx)
 	return true, nil
 }
 
-func (s *Session) handleServerAsync(msg pgwire.ServerAsync) (bool, error) {
-	s.forwardServerMessage(msg)
+func (s *Session) proxyServerToClient(msg pgwire.ServerMessage, idx int64, toClient **pgwire.RingRange) (bool, error) {
+	s.state.Update(msg)
+	(*toClient).SetEndInclusive(idx)
 	return true, nil
-}
-
-func (s *Session) handleServerCopy(msg pgwire.ServerCopy) (bool, error) {
-	s.forwardServerMessage(msg)
-	return true, nil
-}
-
-// forwardServerMessage sends a server message to the client.
-func (s *Session) forwardServerMessage(msg pgwire.ServerMessage) {
-	s.frontend.Send(msg.Server())
 }
 
 func (s *Session) clientToServerObjectName(objectType byte, name string) string {
@@ -773,7 +869,7 @@ func (s *Session) handleSSLRequest() error {
 	s.tlsState = &state
 
 	// Recreate the pgproto3 backend with the TLS connection
-	s.frontend = Frontend{conn: s.conn, Backend: pgproto3.NewBackend(s.conn, s.conn)}
+	s.frontend = NewFrontend(s.ctx, s.conn)
 	s.enableTracing()
 
 	return nil
@@ -810,7 +906,7 @@ func (s *Session) authenticate() error {
 	creds := NewUserSecretData(username, password)
 
 	// Create and run auth session
-	authSession, err := NewAuthSession(&s.frontend, creds, s.config.GetAuthMethod(), s.tlsState, s.config.GetSCRAMIterations())
+	authSession, err := NewAuthSession(s.frontend, creds, s.config.GetAuthMethod(), s.tlsState, s.config.GetSCRAMIterations())
 	if err != nil {
 		return fmt.Errorf("failed to create auth session: %w", err)
 	}
@@ -844,29 +940,30 @@ func (s *Session) initSessionProcessState() {
 	s.service.registerForCancel(s)
 }
 
-func (s *Session) sendBackendParameterStatusChanges() {
+func (s *Session) parameterStatusDiffMessages() []*pgproto3.ParameterStatus {
 	if s.backend == nil {
-		return
+		return nil
 	}
 	diff := s.backend.ParameterStatusChanges(s.backend.TrackedParameters(), s.state.ParameterStatuses)
 	if diff == nil {
-		return
+		return nil
 	}
+
+	msgs := make([]*pgproto3.ParameterStatus, 0, len(diff))
 
 	for key, value := range diff {
-		str := ""
-		if value == nil {
-			delete(s.state.ParameterStatuses, key)
-		} else {
+		var str string
+		if value != nil {
 			str = *value
-			s.state.ParameterStatuses[key] = str
-
-			s.frontend.Send(&pgproto3.ParameterStatus{
-				Name:  key,
-				Value: str,
-			})
 		}
+
+		msgs = append(msgs, &pgproto3.ParameterStatus{
+			Name:  key,
+			Value: str,
+		})
 	}
+
+	return msgs
 }
 
 // sendError sends an error response to the client.
@@ -875,12 +972,14 @@ func (s *Session) sendError(err error) {
 	if !errors.As(err, &pgErr) {
 		pgErr = pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InternalError, "unexpected error", err)
 	}
+	pgErr.InternalPosition = int32(s.frontend.Cursor().MsgIdx())
 	s.logger.Error("session error",
 		"severity", pgErr.Severity,
 		"code", pgErr.Code,
 		"message", pgErr.Message,
 		"file", pgErr.File,
 		"line", pgErr.Line,
+		"seq", s.frontend.Cursor().MsgIdx(),
 	)
 
 	s.frontend.Send(pgErr)

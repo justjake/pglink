@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/pgwire"
@@ -18,11 +17,27 @@ type Frontend struct {
 
 	// Ring buffer for zero-copy message reading (started after startup)
 	ringBuffer *pgwire.RingBuffer
-	readerDone chan struct{}
 	cursor     *pgwire.Cursor
+	ctx        context.Context
+	pgwire.WriteBatch[pgwire.ServerMessage]
+}
+
+func NewFrontend(ctx context.Context, conn net.Conn) *Frontend {
+	ringBuffer := pgwire.NewRingBuffer()
+	return &Frontend{
+		conn:       conn,
+		Backend:    pgproto3.NewBackend(conn, conn),
+		ringBuffer: ringBuffer,
+		cursor:     pgwire.NewClientCursor(ringBuffer),
+		ctx:        ctx,
+	}
 }
 
 func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
+	if f.ringBuffer.Running() {
+		return nil, fmt.Errorf("ring buffer already running, cannot blocking receive")
+	}
+
 	msg, err := f.Backend.Receive()
 	if err != nil {
 		return nil, err
@@ -38,38 +53,44 @@ func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
 // StartRingBuffer starts the ring buffer reader goroutine.
 // Call this after startup is complete to enable zero-copy message reading.
 func (f *Frontend) StartRingBuffer() {
-	if f.readerDone != nil {
-		return // Already started
-	}
-
-	if f.ringBuffer == nil {
-		f.ringBuffer = pgwire.NewRingBuffer()
-	} else {
-		f.ringBuffer = f.ringBuffer.NewWithSameBuffers()
-	}
-	f.readerDone = make(chan struct{})
-	f.cursor = pgwire.NewClientCursor(f.ringBuffer)
-
-	go func() {
-		defer close(f.readerDone)
-		f.ringBuffer.ReadFrom(context.Background(), f.conn)
-	}()
+	f.ringBuffer.StartNetConnReader(f.ctx, f.conn)
 }
 
 // StopRingBuffer stops the ring buffer reader using deadline-based interruption.
 func (f *Frontend) StopRingBuffer() {
-	if f.readerDone == nil {
-		return
+	f.ringBuffer.StopNetConnReader()
+}
+
+func (f *Frontend) Flush() error {
+	backendNeedsFlush := false
+	maybeFlushBackend := func() error {
+		if backendNeedsFlush {
+			if err := f.Backend.Flush(); err != nil {
+				return err
+			}
+			backendNeedsFlush = false
+		}
+		return nil
 	}
 
-	// Set deadline to interrupt any blocking Read()
-	f.conn.SetDeadline(time.Now())
-	// Wait for reader goroutine to exit
-	<-f.readerDone
-	// Clear deadline
-	f.conn.SetDeadline(time.Time{})
+	for batch, msg := range f.IterWriteBatch() {
+		if batch != nil {
+			if err := maybeFlushBackend(); err != nil {
+				return err
+			}
 
-	f.readerDone = nil
+			if err := batch.WriteAll(f.conn); err != nil {
+				return err
+			}
+		}
+
+		if msg != nil {
+			f.Backend.Send(msg.Server())
+			backendNeedsFlush = true
+		}
+	}
+
+	return maybeFlushBackend()
 }
 
 // Cursor returns the cursor for reading client messages from the ring buffer.

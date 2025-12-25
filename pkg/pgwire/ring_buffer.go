@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"net"
 	"sync/atomic"
+	"time"
 )
 
 // Ring buffer constants
@@ -92,6 +94,9 @@ type RingBuffer struct {
 	readerWake chan struct{} // Writer signals reader: data ready
 	done       chan struct{} // Closed when buffer is done (error or EOF)
 	err        atomic.Pointer[error]
+	// Set by StartNetConnReader
+	conn       net.Conn
+	readerDone chan struct{}
 }
 
 // streamRequest is sent from consumer to reader goroutine to stream remaining bytes.
@@ -134,6 +139,33 @@ func (r *RingBuffer) maxBufferableSize() int64 {
 }
 
 // === Writer methods ===
+
+func (r *RingBuffer) StartNetConnReader(ctx context.Context, src net.Conn) {
+	if r.conn != nil {
+		panic("RingBuffer.StartNetConnReader called more than once")
+	}
+	r.conn = src
+	r.readerDone = make(chan struct{})
+	go func() {
+		defer close(r.readerDone)
+		r.ReadFrom(ctx, src)
+	}()
+}
+
+func (r *RingBuffer) StopNetConnReader() {
+	if r.conn == nil {
+		return
+	}
+	r.conn.SetDeadline(time.Now().Add(-time.Second))
+	<-r.readerDone
+	r.conn.SetDeadline(time.Time{})
+	r.conn = nil
+	r.readerDone = nil
+}
+
+func (r *RingBuffer) Running() bool {
+	return r.conn != nil
+}
 
 // ReadFrom reads PostgreSQL wire protocol messages from src until EOF or error.
 // Bytes are read directly into the ring buffer, then parsed to find message
@@ -362,32 +394,6 @@ func (r *RingBuffer) setError(err error) {
 }
 
 // === Reader methods ===
-
-// AvailableMessages waits for messages and returns the count of available messages.
-func (r *RingBuffer) AvailableMessages(afterMsg int64) (toMsg int64, err error) {
-	// Fast path: check if messages already available
-	toMsg = atomic.LoadInt64(&r.publishedMsgs)
-	if toMsg > afterMsg {
-		return toMsg, nil
-	}
-
-	// Slow path: wait on channel
-	for {
-		select {
-		case <-r.readerWake:
-			toMsg = atomic.LoadInt64(&r.publishedMsgs)
-			if toMsg > afterMsg {
-				return toMsg, nil
-			}
-		case <-r.done:
-			toMsg = atomic.LoadInt64(&r.publishedMsgs)
-			if toMsg > afterMsg {
-				return toMsg, nil
-			}
-			return afterMsg, r.Error()
-		}
-	}
-}
 
 // ReleaseThrough marks messages [0, throughMsg) as consumed, freeing space for writer.
 func (r *RingBuffer) ReleaseThrough(throughMsg int64) {
