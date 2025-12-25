@@ -657,3 +657,20 @@ func (r *RingBuffer) writeRange(start, end int64, dst io.Writer) (int64, error) 
 func (r *RingBuffer) Close() {
 	r.setError(io.EOF)
 }
+
+// NewWithSameBuffers creates a fresh RingBuffer reusing the underlying data and
+// offset slices. All position counters start at 0, and channels are fresh.
+// This avoids reallocating the ~260KB data buffer on each acquire.
+func (r *RingBuffer) NewWithSameBuffers() *RingBuffer {
+	return &RingBuffer{
+		data:       r.data,
+		dataMask:   r.dataMask,
+		offsets:    r.offsets,
+		metaMask:   r.metaMask,
+		streamReq:  make(chan streamRequest),
+		streamDone: make(chan error),
+		writerWake: make(chan struct{}, 1),
+		readerWake: make(chan struct{}, 1),
+		done:       make(chan struct{}),
+	}
+}

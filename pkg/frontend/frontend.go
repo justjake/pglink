@@ -4,29 +4,28 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"net"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgproto3"
-	"github.com/justjake/pglink/pkg/backend"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // Low-level frontend connection reader/writer.
 type Frontend struct {
 	*pgproto3.Backend
-	ctx    context.Context
-	reader *backend.ChanReader[pgwire.ClientMessage]
+	conn net.Conn
+
+	// Ring buffer for zero-copy message reading (started after startup)
+	ringBuffer *pgwire.RingBuffer
+	readerDone chan struct{}
+	cursor     *pgwire.Cursor
 }
 
 func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
-	if err := f.ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
-	}
 	msg, err := f.Backend.Receive()
 	if err != nil {
 		return nil, err
-	}
-	if err := f.ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
 	if m, ok := pgwire.ToClientMessage(msg); ok {
@@ -36,20 +35,45 @@ func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
 	return nil, fmt.Errorf("unknown frontend message: %T", msg)
 }
 
-func (f *Frontend) receiveBackgroundThread() (*pgwire.ClientMessage, error) {
-	msg, err := f.Receive()
-	if err != nil {
-		return nil, err
+// StartRingBuffer starts the ring buffer reader goroutine.
+// Call this after startup is complete to enable zero-copy message reading.
+func (f *Frontend) StartRingBuffer() {
+	if f.readerDone != nil {
+		return // Already started
 	}
-	if msg == nil {
-		return nil, nil
+
+	if f.ringBuffer == nil {
+		f.ringBuffer = pgwire.NewRingBuffer()
+	} else {
+		f.ringBuffer = f.ringBuffer.NewWithSameBuffers()
 	}
-	return &msg, nil
+	f.readerDone = make(chan struct{})
+	f.cursor = pgwire.NewClientCursor(f.ringBuffer)
+
+	go func() {
+		defer close(f.readerDone)
+		f.ringBuffer.ReadFrom(context.Background(), f.conn)
+	}()
 }
 
-func (f *Frontend) Reader() *backend.ChanReader[pgwire.ClientMessage] {
-	if f.reader == nil {
-		f.reader = backend.NewChanReader(f.receiveBackgroundThread)
+// StopRingBuffer stops the ring buffer reader using deadline-based interruption.
+func (f *Frontend) StopRingBuffer() {
+	if f.readerDone == nil {
+		return
 	}
-	return f.reader
+
+	// Set deadline to interrupt any blocking Read()
+	f.conn.SetDeadline(time.Now())
+	// Wait for reader goroutine to exit
+	<-f.readerDone
+	// Clear deadline
+	f.conn.SetDeadline(time.Time{})
+
+	f.readerDone = nil
+}
+
+// Cursor returns the cursor for reading client messages from the ring buffer.
+// Only valid after StartRingBuffer() has been called.
+func (f *Frontend) Cursor() *pgwire.Cursor {
+	return f.cursor
 }

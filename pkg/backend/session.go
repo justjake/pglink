@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -16,8 +15,6 @@ import (
 
 const SessionExtraDataKey = "pgwire_session"
 
-var ErrBackendSessionReleased = errors.New("backend session released")
-
 // Session with the backend.
 // Each PgConn in our connection pool gets its own Session once we acquire it
 // the first time.
@@ -29,11 +26,11 @@ type Session struct {
 	State             pgwire.ProtocolState
 	TrackedParameters []string
 
-	reader *ChanReader[pgwire.ServerMessage]
 	logger *slog.Logger
 
-	acquiredContext       context.Context
-	cancelAcquiredContext context.CancelCauseFunc
+	// Ring buffer for zero-copy message proxying
+	ringBuffer *pgwire.RingBuffer
+	readerDone chan struct{}
 
 	stateMu sync.RWMutex
 }
@@ -109,35 +106,47 @@ func (s *Session) Flush() error {
 }
 
 func (s *Session) Acquire() error {
-	if s.acquiredContext != nil {
+	if s.readerDone != nil {
 		return fmt.Errorf("session already acquired")
 	}
-	s.acquiredContext, s.cancelAcquiredContext = context.WithCancelCause(context.Background())
-	s.reader = NewChanReader(s.readBackendMessage)
 	s.updateParameterStatuses(s.TrackedParameters)
 	s.State.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
+
+	// Start ring buffer reader goroutine
+	if s.ringBuffer == nil {
+		s.ringBuffer = pgwire.NewRingBuffer()
+	} else {
+		s.ringBuffer = s.ringBuffer.NewWithSameBuffers()
+	}
+	s.readerDone = make(chan struct{})
+	go func() {
+		defer close(s.readerDone)
+		s.ringBuffer.ReadFrom(context.Background(), s.Conn.Conn())
+	}()
+
 	return nil
 }
 
 func (s *Session) Release() {
 	// TODO: do some things to normalize state?
 	// Run Sync, etc, before releasing? / releasing to the pool?
-	if s.cancelAcquiredContext != nil {
-		s.cancelAcquiredContext(ErrBackendSessionReleased)
+
+	// Stop the ring buffer reader using deadline-based interruption
+	if s.readerDone != nil {
+		// Set deadline to interrupt any blocking Read()
+		s.Conn.Conn().SetDeadline(time.Now())
+		// Wait for reader goroutine to exit
+		<-s.readerDone
+		// Clear deadline so pgxpool can use the connection
+		s.Conn.Conn().SetDeadline(time.Time{})
+		s.readerDone = nil
 	}
-	if s.reader != nil {
-		s.reader.Cancel()
-		s.reader = nil
-	}
-	s.acquiredContext = nil
-	s.cancelAcquiredContext = nil
 }
 
-func (s *Session) ReadingChan() <-chan ReadResult[pgwire.ServerMessage] {
-	if s.reader == nil {
-		panic(fmt.Errorf("session not acquired, reader unavailable: %s", s.Name()))
-	}
-	return s.reader.ReadingChan()
+// RingBuffer returns the ring buffer for zero-copy message proxying.
+// The ring buffer is only available while the session is acquired.
+func (s *Session) RingBuffer() *pgwire.RingBuffer {
+	return s.ringBuffer
 }
 
 // We have error signature because it's likely we'll want one in the future.
@@ -165,21 +174,4 @@ func (s *Session) updateParameterStatuses(keys []string) pgwire.ParameterStatuse
 func (s *Session) updateState() {
 	s.updateParameterStatuses(s.TrackedParameters)
 	s.State.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
-}
-
-func (s *Session) readBackendMessage() (*pgwire.ServerMessage, error) {
-	msg, err := s.Conn.ReceiveMessage(s.acquiredContext)
-	if err != nil {
-		return nil, nil
-	}
-	if m, ok := pgwire.ToServerMessage(msg); ok {
-		s.stateMu.Lock()
-		defer s.stateMu.Unlock()
-
-		// IMPORTANT: THIS IS WHERE WE TRACK THE SERVER'S STATE.
-		s.State.UpdateForServerMessage(m)
-
-		return &m, nil
-	}
-	return nil, fmt.Errorf("unknown backend message: %T", msg)
 }

@@ -97,52 +97,26 @@ type Session struct {
 
 // Select over reading from frontend, reading from backend, or receiving a context cancellation.
 func (s *Session) RecvFrontend() (pgwire.ClientMessage, error) {
-	s.freeLastRecvAndContinueSender()
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
-	case msg := <-s.frontend.Reader().ReadingChan():
-		s.lastRecv = msg.Value
-		s.state.UpdateForFrontentMessage(msg.Value.Client())
-		s.state.ProcessFlows(msg.Value)
-		return msg.Value, msg.Error
+	case <-s.frontend.Cursor().Ready():
+		// TODO: implement ring buffer message reading using s.frontend.Cursor()
+		panic("RecvFrontend: frontend ring buffer reading not yet implemented")
 	}
 }
 
 func (s *Session) RecvAny() (pgwire.Message, error) {
-	s.freeLastRecvAndContinueSender()
 	select {
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
-	case msg := <-s.frontend.Reader().ReadingChan():
-		s.lastRecv = msg.Value
-		s.state.UpdateForFrontentMessage(msg.Value.Client())
-		s.state.ProcessFlows(msg.Value)
-		return msg.Value, msg.Error
-	case msg := <-s.backend.ReadingChan():
-		s.lastRecv = msg.Value
-		// We never want to rewrite a server message, since they never contain
-		// information like portal or statement names.
-		s.state.UpdateForServerMessage(msg.Value)
-		s.state.ProcessFlows(msg.Value)
-		return msg.Value, msg.Error
+	case <-s.frontend.Cursor().Ready():
+		// TODO: implement ring buffer message reading using s.frontend.Cursor()
+		panic("RecvAny: frontend ring buffer reading not yet implemented")
+	case <-s.backend.Cursor().Ready():
+		// TODO: implement ring buffer message reading using s.backend.Cursor()
+		panic("RecvAny: backend ring buffer reading not yet implemented")
 	}
-}
-
-func (s *Session) freeLastRecvAndContinueSender() {
-	if s.lastRecv == nil {
-		return
-	}
-
-	if _, ok := s.lastRecv.(pgwire.ServerMessage); ok {
-		if s.backend != nil {
-			s.backend.Continue()
-		}
-	} else {
-		s.frontend.Reader().Continue()
-	}
-
-	s.lastRecv = nil
 }
 
 // Close cancels the session's context and releases associated resources.
@@ -156,6 +130,9 @@ func (s *Session) Close() {
 	if flushError := s.flush(); flushError != nil {
 		s.logger.Error("session close: error flushing to client", "error", flushError)
 	}
+
+	// Stop the frontend ring buffer reader
+	s.frontend.StopRingBuffer()
 
 	s.cancel()
 
@@ -195,7 +172,7 @@ func (s *Session) Run() {
 	defer s.Close()
 
 	// Create pgproto3 backend for protocol handling
-	s.frontend = Frontend{ctx: s.ctx, Backend: pgproto3.NewBackend(s.conn, s.conn)}
+	s.frontend = Frontend{conn: s.conn, Backend: pgproto3.NewBackend(s.conn, s.conn)}
 	s.enableTracing()
 
 	// Handle TLS and startup
@@ -295,6 +272,9 @@ func (s *Session) Run() {
 		s.sendError(err)
 		return
 	}
+
+	// Start ring buffer reader now that startup is complete
+	s.frontend.StartRingBuffer()
 
 	// Idle client state.
 	// When true, transition to backend connected state to handle the query.
@@ -793,7 +773,7 @@ func (s *Session) handleSSLRequest() error {
 	s.tlsState = &state
 
 	// Recreate the pgproto3 backend with the TLS connection
-	s.frontend = Frontend{ctx: s.ctx, Backend: pgproto3.NewBackend(s.conn, s.conn)}
+	s.frontend = Frontend{conn: s.conn, Backend: pgproto3.NewBackend(s.conn, s.conn)}
 	s.enableTracing()
 
 	return nil

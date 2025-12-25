@@ -13,6 +13,7 @@ type PooledBackend struct {
 	conn     *MultiPoolConn
 	session  *Session
 	released bool
+	cursor   *pgwire.Cursor
 }
 
 func (c *PooledBackend) TrackedParameters() []string {
@@ -27,19 +28,17 @@ func (c *PooledBackend) Name() string {
 	return fmt.Sprintf("%s&pooledBackend=%p", c.session.Name(), c)
 }
 
-func (c *PooledBackend) ReadingChan() <-chan ReadResult[pgwire.ServerMessage] {
-	c.panicIfReleased()
-	return c.session.reader.ReadingChan()
-}
-
 func (c *PooledBackend) Flush() error {
 	c.panicIfReleased()
 	return c.session.Flush()
 }
 
-func (c *PooledBackend) Continue() {
+func (c *PooledBackend) Cursor() *pgwire.Cursor {
 	c.panicIfReleased()
-	c.session.reader.Continue()
+	if c.cursor == nil {
+		c.cursor = pgwire.NewServerCursor(c.session.RingBuffer())
+	}
+	return c.cursor
 }
 
 func (c *PooledBackend) Send(msg pgproto3.FrontendMessage) error {
