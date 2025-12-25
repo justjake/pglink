@@ -30,13 +30,9 @@ var (
 // Extended Query mode: response to Sync; backend no longer ignoring messages, ready for next command.
 type ServerResponseReadyForQuery FromServer[*pgproto3.ReadyForQuery]
 
-func (*ServerResponseReadyForQuery) Response() {}
-func (t *ServerResponseReadyForQuery) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ReadyForQuery])(t).Parse()
-}
-func (t *ServerResponseReadyForQuery) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ReadyForQuery])(t).Parse()
-}
+func (*ServerResponseReadyForQuery) Response()                         {}
+func (t *ServerResponseReadyForQuery) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerResponseReadyForQuery) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerResponseReadyForQuery) Parse() *pgproto3.ReadyForQuery {
 	return (*FromServer[*pgproto3.ReadyForQuery])(m).Parse()
 }
@@ -51,13 +47,9 @@ func (m ServerResponseReadyForQuery) Retain() ServerResponseReadyForQuery {
 // SQL command completed normally.
 type ServerResponseCommandComplete FromServer[*pgproto3.CommandComplete]
 
-func (*ServerResponseCommandComplete) Response() {}
-func (t *ServerResponseCommandComplete) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CommandComplete])(t).Parse()
-}
-func (t *ServerResponseCommandComplete) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CommandComplete])(t).Parse()
-}
+func (*ServerResponseCommandComplete) Response()                         {}
+func (t *ServerResponseCommandComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerResponseCommandComplete) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerResponseCommandComplete) Parse() *pgproto3.CommandComplete {
 	return (*FromServer[*pgproto3.CommandComplete])(m).Parse()
 }
@@ -72,13 +64,9 @@ func (m ServerResponseCommandComplete) Retain() ServerResponseCommandComplete {
 // Query results (both query modes)
 type ServerResponseDataRow FromServer[*pgproto3.DataRow]
 
-func (*ServerResponseDataRow) Response() {}
-func (t *ServerResponseDataRow) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.DataRow])(t).Parse()
-}
-func (t *ServerResponseDataRow) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.DataRow])(t).Parse()
-}
+func (*ServerResponseDataRow) Response()                         {}
+func (t *ServerResponseDataRow) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerResponseDataRow) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerResponseDataRow) Parse() *pgproto3.DataRow {
 	return (*FromServer[*pgproto3.DataRow])(m).Parse()
 }
@@ -93,13 +81,9 @@ func (m ServerResponseDataRow) Retain() ServerResponseDataRow {
 // Response to empty query.
 type ServerResponseEmptyQueryResponse FromServer[*pgproto3.EmptyQueryResponse]
 
-func (*ServerResponseEmptyQueryResponse) Response() {}
-func (t *ServerResponseEmptyQueryResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.EmptyQueryResponse])(t).Parse()
-}
-func (t *ServerResponseEmptyQueryResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.EmptyQueryResponse])(t).Parse()
-}
+func (*ServerResponseEmptyQueryResponse) Response()                         {}
+func (t *ServerResponseEmptyQueryResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerResponseEmptyQueryResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerResponseEmptyQueryResponse) Parse() *pgproto3.EmptyQueryResponse {
 	return (*FromServer[*pgproto3.EmptyQueryResponse])(m).Parse()
 }
@@ -114,13 +98,9 @@ func (m ServerResponseEmptyQueryResponse) Retain() ServerResponseEmptyQueryRespo
 // Error response.
 type ServerResponseErrorResponse FromServer[*pgproto3.ErrorResponse]
 
-func (*ServerResponseErrorResponse) Response() {}
-func (t *ServerResponseErrorResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ErrorResponse])(t).Parse()
-}
-func (t *ServerResponseErrorResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ErrorResponse])(t).Parse()
-}
+func (*ServerResponseErrorResponse) Response()                         {}
+func (t *ServerResponseErrorResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerResponseErrorResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerResponseErrorResponse) Parse() *pgproto3.ErrorResponse {
 	return (*FromServer[*pgproto3.ErrorResponse])(m).Parse()
 }
@@ -135,13 +115,9 @@ func (m ServerResponseErrorResponse) Retain() ServerResponseErrorResponse {
 // Response to function call.
 type ServerResponseFunctionCallResponse FromServer[*pgproto3.FunctionCallResponse]
 
-func (*ServerResponseFunctionCallResponse) Response() {}
-func (t *ServerResponseFunctionCallResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.FunctionCallResponse])(t).Parse()
-}
-func (t *ServerResponseFunctionCallResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.FunctionCallResponse])(t).Parse()
-}
+func (*ServerResponseFunctionCallResponse) Response()                         {}
+func (t *ServerResponseFunctionCallResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerResponseFunctionCallResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerResponseFunctionCallResponse) Parse() *pgproto3.FunctionCallResponse {
 	return (*FromServer[*pgproto3.FunctionCallResponse])(m).Parse()
 }

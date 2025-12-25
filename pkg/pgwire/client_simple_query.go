@@ -25,13 +25,9 @@ var (
 // Destroys unnamed prepared statement & portal.
 type ClientSimpleQueryQuery FromClient[*pgproto3.Query]
 
-func (*ClientSimpleQueryQuery) SimpleQuery() {}
-func (t *ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Query])(t).Parse()
-}
-func (t *ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Query])(t).Parse()
-}
+func (*ClientSimpleQueryQuery) SimpleQuery()                       {}
+func (t *ClientSimpleQueryQuery) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientSimpleQueryQuery) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientSimpleQueryQuery) Parse() *pgproto3.Query {
 	return (*FromClient[*pgproto3.Query])(m).Parse()
 }
@@ -46,13 +42,9 @@ func (m ClientSimpleQueryQuery) Retain() ClientSimpleQueryQuery {
 // Call a function; seems to work like a simple query? Or maybe it works with both modes?
 type ClientSimpleQueryFunctionCall FromClient[*pgproto3.FunctionCall]
 
-func (*ClientSimpleQueryFunctionCall) SimpleQuery() {}
-func (t *ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.FunctionCall])(t).Parse()
-}
-func (t *ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.FunctionCall])(t).Parse()
-}
+func (*ClientSimpleQueryFunctionCall) SimpleQuery()                       {}
+func (t *ClientSimpleQueryFunctionCall) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientSimpleQueryFunctionCall) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientSimpleQueryFunctionCall) Parse() *pgproto3.FunctionCall {
 	return (*FromClient[*pgproto3.FunctionCall])(m).Parse()
 }

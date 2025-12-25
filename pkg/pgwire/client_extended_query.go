@@ -29,13 +29,9 @@ var (
 // Extended Query 1: parse text into a prepared statement.
 type ClientExtendedQueryParse FromClient[*pgproto3.Parse]
 
-func (*ClientExtendedQueryParse) ExtendedQuery() {}
-func (t *ClientExtendedQueryParse) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Parse])(t).Parse()
-}
-func (t *ClientExtendedQueryParse) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Parse])(t).Parse()
-}
+func (*ClientExtendedQueryParse) ExtendedQuery()                     {}
+func (t *ClientExtendedQueryParse) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientExtendedQueryParse) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientExtendedQueryParse) Parse() *pgproto3.Parse {
 	return (*FromClient[*pgproto3.Parse])(m).Parse()
 }
@@ -50,13 +46,9 @@ func (m ClientExtendedQueryParse) Retain() ClientExtendedQueryParse {
 // Extended Query 2: Bind parameters to a prepared statement.
 type ClientExtendedQueryBind FromClient[*pgproto3.Bind]
 
-func (*ClientExtendedQueryBind) ExtendedQuery() {}
-func (t *ClientExtendedQueryBind) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Bind])(t).Parse()
-}
-func (t *ClientExtendedQueryBind) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Bind])(t).Parse()
-}
+func (*ClientExtendedQueryBind) ExtendedQuery()                     {}
+func (t *ClientExtendedQueryBind) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientExtendedQueryBind) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientExtendedQueryBind) Parse() *pgproto3.Bind {
 	return (*FromClient[*pgproto3.Bind])(m).Parse()
 }
@@ -78,13 +70,9 @@ func (m ClientExtendedQueryBind) Retain() ClientExtendedQueryBind {
 // - EmptyQueryResponse: the portal was created from an empty query string
 type ClientExtendedQueryExecute FromClient[*pgproto3.Execute]
 
-func (*ClientExtendedQueryExecute) ExtendedQuery() {}
-func (t *ClientExtendedQueryExecute) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Execute])(t).Parse()
-}
-func (t *ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Execute])(t).Parse()
-}
+func (*ClientExtendedQueryExecute) ExtendedQuery()                     {}
+func (t *ClientExtendedQueryExecute) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientExtendedQueryExecute) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientExtendedQueryExecute) Parse() *pgproto3.Execute {
 	return (*FromClient[*pgproto3.Execute])(m).Parse()
 }
@@ -114,13 +102,9 @@ func (m ClientExtendedQueryExecute) Retain() ClientExtendedQueryExecute {
 // optional operations that can be used with extended-query protocol.
 type ClientExtendedQuerySync FromClient[*pgproto3.Sync]
 
-func (*ClientExtendedQuerySync) ExtendedQuery() {}
-func (t *ClientExtendedQuerySync) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Sync])(t).Parse()
-}
-func (t *ClientExtendedQuerySync) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Sync])(t).Parse()
-}
+func (*ClientExtendedQuerySync) ExtendedQuery()                     {}
+func (t *ClientExtendedQuerySync) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientExtendedQuerySync) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientExtendedQuerySync) Parse() *pgproto3.Sync {
 	return (*FromClient[*pgproto3.Sync])(m).Parse()
 }
@@ -154,13 +138,9 @@ func (m ClientExtendedQuerySync) Retain() ClientExtendedQuerySync {
 // zeroes in this case.
 type ClientExtendedQueryDescribe FromClient[*pgproto3.Describe]
 
-func (*ClientExtendedQueryDescribe) ExtendedQuery() {}
-func (t *ClientExtendedQueryDescribe) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Describe])(t).Parse()
-}
-func (t *ClientExtendedQueryDescribe) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Describe])(t).Parse()
-}
+func (*ClientExtendedQueryDescribe) ExtendedQuery()                     {}
+func (t *ClientExtendedQueryDescribe) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientExtendedQueryDescribe) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientExtendedQueryDescribe) Parse() *pgproto3.Describe {
 	return (*FromClient[*pgproto3.Describe])(m).Parse()
 }
@@ -177,13 +157,9 @@ func (m ClientExtendedQueryDescribe) Retain() ClientExtendedQueryDescribe {
 // portals that were constructed from that statement.
 type ClientExtendedQueryClose FromClient[*pgproto3.Close]
 
-func (*ClientExtendedQueryClose) ExtendedQuery() {}
-func (t *ClientExtendedQueryClose) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Close])(t).Parse()
-}
-func (t *ClientExtendedQueryClose) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Close])(t).Parse()
-}
+func (*ClientExtendedQueryClose) ExtendedQuery()                     {}
+func (t *ClientExtendedQueryClose) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientExtendedQueryClose) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientExtendedQueryClose) Parse() *pgproto3.Close {
 	return (*FromClient[*pgproto3.Close])(m).Parse()
 }
@@ -204,13 +180,9 @@ func (m ClientExtendedQueryClose) Retain() ClientExtendedQueryClose {
 // minimize network overhead.
 type ClientExtendedQueryFlush FromClient[*pgproto3.Flush]
 
-func (*ClientExtendedQueryFlush) ExtendedQuery() {}
-func (t *ClientExtendedQueryFlush) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Flush])(t).Parse()
-}
-func (t *ClientExtendedQueryFlush) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Flush])(t).Parse()
-}
+func (*ClientExtendedQueryFlush) ExtendedQuery()                     {}
+func (t *ClientExtendedQueryFlush) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientExtendedQueryFlush) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientExtendedQueryFlush) Parse() *pgproto3.Flush {
 	return (*FromClient[*pgproto3.Flush])(m).Parse()
 }

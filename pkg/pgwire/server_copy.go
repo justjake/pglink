@@ -29,13 +29,9 @@ var (
 // Starts CopyIn mode.
 type ServerCopyCopyInResponse FromServer[*pgproto3.CopyInResponse]
 
-func (*ServerCopyCopyInResponse) Copy() {}
-func (t *ServerCopyCopyInResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CopyInResponse])(t).Parse()
-}
-func (t *ServerCopyCopyInResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CopyInResponse])(t).Parse()
-}
+func (*ServerCopyCopyInResponse) Copy()                             {}
+func (t *ServerCopyCopyInResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerCopyCopyInResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerCopyCopyInResponse) Parse() *pgproto3.CopyInResponse {
 	return (*FromServer[*pgproto3.CopyInResponse])(m).Parse()
 }
@@ -52,13 +48,9 @@ func (m ServerCopyCopyInResponse) Retain() ServerCopyCopyInResponse {
 // Starts CopyOut mode.
 type ServerCopyCopyOutResponse FromServer[*pgproto3.CopyOutResponse]
 
-func (*ServerCopyCopyOutResponse) Copy() {}
-func (t *ServerCopyCopyOutResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CopyOutResponse])(t).Parse()
-}
-func (t *ServerCopyCopyOutResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CopyOutResponse])(t).Parse()
-}
+func (*ServerCopyCopyOutResponse) Copy()                             {}
+func (t *ServerCopyCopyOutResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerCopyCopyOutResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerCopyCopyOutResponse) Parse() *pgproto3.CopyOutResponse {
 	return (*FromServer[*pgproto3.CopyOutResponse])(m).Parse()
 }
@@ -73,13 +65,9 @@ func (m ServerCopyCopyOutResponse) Retain() ServerCopyCopyOutResponse {
 // Response to Replication.
 type ServerCopyCopyBothResponse FromServer[*pgproto3.CopyBothResponse]
 
-func (*ServerCopyCopyBothResponse) Copy() {}
-func (t *ServerCopyCopyBothResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CopyBothResponse])(t).Parse()
-}
-func (t *ServerCopyCopyBothResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CopyBothResponse])(t).Parse()
-}
+func (*ServerCopyCopyBothResponse) Copy()                             {}
+func (t *ServerCopyCopyBothResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerCopyCopyBothResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerCopyCopyBothResponse) Parse() *pgproto3.CopyBothResponse {
 	return (*FromServer[*pgproto3.CopyBothResponse])(m).Parse()
 }
@@ -94,13 +82,9 @@ func (m ServerCopyCopyBothResponse) Retain() ServerCopyCopyBothResponse {
 // Copy Mode: data row.
 type ServerCopyCopyData FromServer[*pgproto3.CopyData]
 
-func (*ServerCopyCopyData) Copy() {}
-func (t *ServerCopyCopyData) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CopyData])(t).Parse()
-}
-func (t *ServerCopyCopyData) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CopyData])(t).Parse()
-}
+func (*ServerCopyCopyData) Copy()                             {}
+func (t *ServerCopyCopyData) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerCopyCopyData) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerCopyCopyData) Parse() *pgproto3.CopyData {
 	return (*FromServer[*pgproto3.CopyData])(m).Parse()
 }
@@ -115,13 +99,9 @@ func (m ServerCopyCopyData) Retain() ServerCopyCopyData {
 // Copy Mode: copy completed.
 type ServerCopyCopyDone FromServer[*pgproto3.CopyDone]
 
-func (*ServerCopyCopyDone) Copy() {}
-func (t *ServerCopyCopyDone) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CopyDone])(t).Parse()
-}
-func (t *ServerCopyCopyDone) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CopyDone])(t).Parse()
-}
+func (*ServerCopyCopyDone) Copy()                             {}
+func (t *ServerCopyCopyDone) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerCopyCopyDone) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerCopyCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromServer[*pgproto3.CopyDone])(m).Parse()
 }

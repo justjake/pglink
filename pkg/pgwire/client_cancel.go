@@ -23,13 +23,9 @@ var (
 // ClientCancelCancelRequest wraps *pgproto3.CancelRequest from the client.
 type ClientCancelCancelRequest FromClient[*pgproto3.CancelRequest]
 
-func (*ClientCancelCancelRequest) Cancel() {}
-func (t *ClientCancelCancelRequest) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.CancelRequest])(t).Parse()
-}
-func (t *ClientCancelCancelRequest) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.CancelRequest])(t).Parse()
-}
+func (*ClientCancelCancelRequest) Cancel()                            {}
+func (t *ClientCancelCancelRequest) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientCancelCancelRequest) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientCancelCancelRequest) Parse() *pgproto3.CancelRequest {
 	return (*FromClient[*pgproto3.CancelRequest])(m).Parse()
 }

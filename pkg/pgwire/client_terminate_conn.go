@@ -23,13 +23,9 @@ var (
 // ClientTerminateConnTerminate wraps *pgproto3.Terminate from the client.
 type ClientTerminateConnTerminate FromClient[*pgproto3.Terminate]
 
-func (*ClientTerminateConnTerminate) TerminateConn() {}
-func (t *ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.Terminate])(t).Parse()
-}
-func (t *ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.Terminate])(t).Parse()
-}
+func (*ClientTerminateConnTerminate) TerminateConn()                     {}
+func (t *ClientTerminateConnTerminate) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientTerminateConnTerminate) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientTerminateConnTerminate) Parse() *pgproto3.Terminate {
 	return (*FromClient[*pgproto3.Terminate])(m).Parse()
 }

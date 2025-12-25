@@ -25,13 +25,9 @@ var (
 // Warning message.
 type ServerAsyncNoticeResponse FromServer[*pgproto3.NoticeResponse]
 
-func (*ServerAsyncNoticeResponse) Async() {}
-func (t *ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.NoticeResponse])(t).Parse()
-}
-func (t *ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.NoticeResponse])(t).Parse()
-}
+func (*ServerAsyncNoticeResponse) Async()                            {}
+func (t *ServerAsyncNoticeResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerAsyncNoticeResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerAsyncNoticeResponse) Parse() *pgproto3.NoticeResponse {
 	return (*FromServer[*pgproto3.NoticeResponse])(m).Parse()
 }
@@ -46,13 +42,9 @@ func (m ServerAsyncNoticeResponse) Retain() ServerAsyncNoticeResponse {
 // LISTEN/NOTIFY notification.
 type ServerAsyncNotificationResponse FromServer[*pgproto3.NotificationResponse]
 
-func (*ServerAsyncNotificationResponse) Async() {}
-func (t *ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.NotificationResponse])(t).Parse()
-}
-func (t *ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.NotificationResponse])(t).Parse()
-}
+func (*ServerAsyncNotificationResponse) Async()                            {}
+func (t *ServerAsyncNotificationResponse) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerAsyncNotificationResponse) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerAsyncNotificationResponse) Parse() *pgproto3.NotificationResponse {
 	return (*FromServer[*pgproto3.NotificationResponse])(m).Parse()
 }
@@ -67,13 +59,9 @@ func (m ServerAsyncNotificationResponse) Retain() ServerAsyncNotificationRespons
 // Informs client that runtime parameter value changed.
 type ServerAsyncParameterStatus FromServer[*pgproto3.ParameterStatus]
 
-func (*ServerAsyncParameterStatus) Async() {}
-func (t *ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ParameterStatus])(t).Parse()
-}
-func (t *ServerAsyncParameterStatus) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ParameterStatus])(t).Parse()
-}
+func (*ServerAsyncParameterStatus) Async()                            {}
+func (t *ServerAsyncParameterStatus) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerAsyncParameterStatus) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerAsyncParameterStatus) Parse() *pgproto3.ParameterStatus {
 	return (*FromServer[*pgproto3.ParameterStatus])(m).Parse()
 }

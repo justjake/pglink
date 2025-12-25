@@ -352,8 +352,8 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 		}
 		// Methods with return values - pointer receivers for flyweight pattern
 		for _, rm := range returnMethods {
-			// Replace t.T with (*LazyType)(t).Parse() to call through to the underlying type
-			expr := strings.ReplaceAll(rm.expr, "t.T", fmt.Sprintf("(*%s[%s])(t).Parse()", lazyType, ti.qualified))
+			// Replace t.T with t.Parse() since each type has a Parse() method
+			expr := strings.ReplaceAll(rm.expr, "t.T", "t.Parse()")
 			fmt.Fprintf(&buf, "func (t *%s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, expr)
 		}
 

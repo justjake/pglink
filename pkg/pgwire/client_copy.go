@@ -25,13 +25,9 @@ var (
 // ClientCopyCopyData wraps *pgproto3.CopyData from the client.
 type ClientCopyCopyData FromClient[*pgproto3.CopyData]
 
-func (*ClientCopyCopyData) Copy() {}
-func (t *ClientCopyCopyData) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.CopyData])(t).Parse()
-}
-func (t *ClientCopyCopyData) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.CopyData])(t).Parse()
-}
+func (*ClientCopyCopyData) Copy()                              {}
+func (t *ClientCopyCopyData) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientCopyCopyData) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientCopyCopyData) Parse() *pgproto3.CopyData {
 	return (*FromClient[*pgproto3.CopyData])(m).Parse()
 }
@@ -46,13 +42,9 @@ func (m ClientCopyCopyData) Retain() ClientCopyCopyData {
 // ClientCopyCopyDone wraps *pgproto3.CopyDone from the client.
 type ClientCopyCopyDone FromClient[*pgproto3.CopyDone]
 
-func (*ClientCopyCopyDone) Copy() {}
-func (t *ClientCopyCopyDone) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.CopyDone])(t).Parse()
-}
-func (t *ClientCopyCopyDone) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.CopyDone])(t).Parse()
-}
+func (*ClientCopyCopyDone) Copy()                              {}
+func (t *ClientCopyCopyDone) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientCopyCopyDone) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientCopyCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromClient[*pgproto3.CopyDone])(m).Parse()
 }
@@ -67,13 +59,9 @@ func (m ClientCopyCopyDone) Retain() ClientCopyCopyDone {
 // ClientCopyCopyFail wraps *pgproto3.CopyFail from the client.
 type ClientCopyCopyFail FromClient[*pgproto3.CopyFail]
 
-func (*ClientCopyCopyFail) Copy() {}
-func (t *ClientCopyCopyFail) PgwireMessage() pgproto3.Message {
-	return (*FromClient[*pgproto3.CopyFail])(t).Parse()
-}
-func (t *ClientCopyCopyFail) Client() pgproto3.FrontendMessage {
-	return (*FromClient[*pgproto3.CopyFail])(t).Parse()
-}
+func (*ClientCopyCopyFail) Copy()                              {}
+func (t *ClientCopyCopyFail) PgwireMessage() pgproto3.Message  { return t.Parse() }
+func (t *ClientCopyCopyFail) Client() pgproto3.FrontendMessage { return t.Parse() }
 func (m *ClientCopyCopyFail) Parse() *pgproto3.CopyFail {
 	return (*FromClient[*pgproto3.CopyFail])(m).Parse()
 }

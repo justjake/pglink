@@ -29,13 +29,9 @@ var (
 // Response to Parse.
 type ServerExtendedQueryParseComplete FromServer[*pgproto3.ParseComplete]
 
-func (*ServerExtendedQueryParseComplete) ExtendedQuery() {}
-func (t *ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ParseComplete])(t).Parse()
-}
-func (t *ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ParseComplete])(t).Parse()
-}
+func (*ServerExtendedQueryParseComplete) ExtendedQuery()                    {}
+func (t *ServerExtendedQueryParseComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerExtendedQueryParseComplete) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerExtendedQueryParseComplete) Parse() *pgproto3.ParseComplete {
 	return (*FromServer[*pgproto3.ParseComplete])(m).Parse()
 }
@@ -50,13 +46,9 @@ func (m ServerExtendedQueryParseComplete) Retain() ServerExtendedQueryParseCompl
 // Response to Bind.
 type ServerExtendedQueryBindComplete FromServer[*pgproto3.BindComplete]
 
-func (*ServerExtendedQueryBindComplete) ExtendedQuery() {}
-func (t *ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.BindComplete])(t).Parse()
-}
-func (t *ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.BindComplete])(t).Parse()
-}
+func (*ServerExtendedQueryBindComplete) ExtendedQuery()                    {}
+func (t *ServerExtendedQueryBindComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerExtendedQueryBindComplete) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerExtendedQueryBindComplete) Parse() *pgproto3.BindComplete {
 	return (*FromServer[*pgproto3.BindComplete])(m).Parse()
 }
@@ -71,13 +63,9 @@ func (m ServerExtendedQueryBindComplete) Retain() ServerExtendedQueryBindComplet
 // Response to Describe of prepared statement.
 type ServerExtendedQueryParameterDescription FromServer[*pgproto3.ParameterDescription]
 
-func (*ServerExtendedQueryParameterDescription) ExtendedQuery() {}
-func (t *ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.ParameterDescription])(t).Parse()
-}
-func (t *ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.ParameterDescription])(t).Parse()
-}
+func (*ServerExtendedQueryParameterDescription) ExtendedQuery()                    {}
+func (t *ServerExtendedQueryParameterDescription) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerExtendedQueryParameterDescription) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerExtendedQueryParameterDescription) Parse() *pgproto3.ParameterDescription {
 	return (*FromServer[*pgproto3.ParameterDescription])(m).Parse()
 }
@@ -92,13 +80,9 @@ func (m ServerExtendedQueryParameterDescription) Retain() ServerExtendedQueryPar
 // Response to Describe of portal or statement that returns data.
 type ServerExtendedQueryRowDescription FromServer[*pgproto3.RowDescription]
 
-func (*ServerExtendedQueryRowDescription) ExtendedQuery() {}
-func (t *ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.RowDescription])(t).Parse()
-}
-func (t *ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.RowDescription])(t).Parse()
-}
+func (*ServerExtendedQueryRowDescription) ExtendedQuery()                    {}
+func (t *ServerExtendedQueryRowDescription) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerExtendedQueryRowDescription) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerExtendedQueryRowDescription) Parse() *pgproto3.RowDescription {
 	return (*FromServer[*pgproto3.RowDescription])(m).Parse()
 }
@@ -113,13 +97,9 @@ func (m ServerExtendedQueryRowDescription) Retain() ServerExtendedQueryRowDescri
 // Response to Describe of portal or statement that doesn't return data.
 type ServerExtendedQueryNoData FromServer[*pgproto3.NoData]
 
-func (*ServerExtendedQueryNoData) ExtendedQuery() {}
-func (t *ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.NoData])(t).Parse()
-}
-func (t *ServerExtendedQueryNoData) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.NoData])(t).Parse()
-}
+func (*ServerExtendedQueryNoData) ExtendedQuery()                    {}
+func (t *ServerExtendedQueryNoData) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerExtendedQueryNoData) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerExtendedQueryNoData) Parse() *pgproto3.NoData {
 	return (*FromServer[*pgproto3.NoData])(m).Parse()
 }
@@ -135,13 +115,9 @@ func (m ServerExtendedQueryNoData) Retain() ServerExtendedQueryNoData {
 // complete during the Execute call, the client should call Execute again.
 type ServerExtendedQueryPortalSuspended FromServer[*pgproto3.PortalSuspended]
 
-func (*ServerExtendedQueryPortalSuspended) ExtendedQuery() {}
-func (t *ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.PortalSuspended])(t).Parse()
-}
-func (t *ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.PortalSuspended])(t).Parse()
-}
+func (*ServerExtendedQueryPortalSuspended) ExtendedQuery()                    {}
+func (t *ServerExtendedQueryPortalSuspended) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerExtendedQueryPortalSuspended) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerExtendedQueryPortalSuspended) Parse() *pgproto3.PortalSuspended {
 	return (*FromServer[*pgproto3.PortalSuspended])(m).Parse()
 }
@@ -156,13 +132,9 @@ func (m ServerExtendedQueryPortalSuspended) Retain() ServerExtendedQueryPortalSu
 // Response to Close of prepared statement or portal.
 type ServerExtendedQueryCloseComplete FromServer[*pgproto3.CloseComplete]
 
-func (*ServerExtendedQueryCloseComplete) ExtendedQuery() {}
-func (t *ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.CloseComplete])(t).Parse()
-}
-func (t *ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.CloseComplete])(t).Parse()
-}
+func (*ServerExtendedQueryCloseComplete) ExtendedQuery()                    {}
+func (t *ServerExtendedQueryCloseComplete) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerExtendedQueryCloseComplete) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerExtendedQueryCloseComplete) Parse() *pgproto3.CloseComplete {
 	return (*FromServer[*pgproto3.CloseComplete])(m).Parse()
 }

@@ -33,10 +33,10 @@ type ServerStartupAuthenticationCleartextPassword FromServer[*pgproto3.Authentic
 
 func (*ServerStartupAuthenticationCleartextPassword) Startup() {}
 func (t *ServerStartupAuthenticationCleartextPassword) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(t).Parse()
+	return t.Parse()
 }
 func (t *ServerStartupAuthenticationCleartextPassword) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(t).Parse()
+	return t.Parse()
 }
 func (m *ServerStartupAuthenticationCleartextPassword) Parse() *pgproto3.AuthenticationCleartextPassword {
 	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(m).Parse()
@@ -52,13 +52,9 @@ func (m ServerStartupAuthenticationCleartextPassword) Retain() ServerStartupAuth
 // ServerStartupAuthenticationGSS wraps *pgproto3.AuthenticationGSS from the server.
 type ServerStartupAuthenticationGSS FromServer[*pgproto3.AuthenticationGSS]
 
-func (*ServerStartupAuthenticationGSS) Startup() {}
-func (t *ServerStartupAuthenticationGSS) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.AuthenticationGSS])(t).Parse()
-}
-func (t *ServerStartupAuthenticationGSS) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.AuthenticationGSS])(t).Parse()
-}
+func (*ServerStartupAuthenticationGSS) Startup()                          {}
+func (t *ServerStartupAuthenticationGSS) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerStartupAuthenticationGSS) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerStartupAuthenticationGSS) Parse() *pgproto3.AuthenticationGSS {
 	return (*FromServer[*pgproto3.AuthenticationGSS])(m).Parse()
 }
@@ -73,13 +69,9 @@ func (m ServerStartupAuthenticationGSS) Retain() ServerStartupAuthenticationGSS 
 // ServerStartupAuthenticationGSSContinue wraps *pgproto3.AuthenticationGSSContinue from the server.
 type ServerStartupAuthenticationGSSContinue FromServer[*pgproto3.AuthenticationGSSContinue]
 
-func (*ServerStartupAuthenticationGSSContinue) Startup() {}
-func (t *ServerStartupAuthenticationGSSContinue) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(t).Parse()
-}
-func (t *ServerStartupAuthenticationGSSContinue) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(t).Parse()
-}
+func (*ServerStartupAuthenticationGSSContinue) Startup()                          {}
+func (t *ServerStartupAuthenticationGSSContinue) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerStartupAuthenticationGSSContinue) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerStartupAuthenticationGSSContinue) Parse() *pgproto3.AuthenticationGSSContinue {
 	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(m).Parse()
 }
@@ -94,13 +86,9 @@ func (m ServerStartupAuthenticationGSSContinue) Retain() ServerStartupAuthentica
 // ServerStartupAuthenticationMD5Password wraps *pgproto3.AuthenticationMD5Password from the server.
 type ServerStartupAuthenticationMD5Password FromServer[*pgproto3.AuthenticationMD5Password]
 
-func (*ServerStartupAuthenticationMD5Password) Startup() {}
-func (t *ServerStartupAuthenticationMD5Password) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.AuthenticationMD5Password])(t).Parse()
-}
-func (t *ServerStartupAuthenticationMD5Password) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.AuthenticationMD5Password])(t).Parse()
-}
+func (*ServerStartupAuthenticationMD5Password) Startup()                          {}
+func (t *ServerStartupAuthenticationMD5Password) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerStartupAuthenticationMD5Password) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerStartupAuthenticationMD5Password) Parse() *pgproto3.AuthenticationMD5Password {
 	return (*FromServer[*pgproto3.AuthenticationMD5Password])(m).Parse()
 }
@@ -115,13 +103,9 @@ func (m ServerStartupAuthenticationMD5Password) Retain() ServerStartupAuthentica
 // ServerStartupAuthenticationOk wraps *pgproto3.AuthenticationOk from the server.
 type ServerStartupAuthenticationOk FromServer[*pgproto3.AuthenticationOk]
 
-func (*ServerStartupAuthenticationOk) Startup() {}
-func (t *ServerStartupAuthenticationOk) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.AuthenticationOk])(t).Parse()
-}
-func (t *ServerStartupAuthenticationOk) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.AuthenticationOk])(t).Parse()
-}
+func (*ServerStartupAuthenticationOk) Startup()                          {}
+func (t *ServerStartupAuthenticationOk) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerStartupAuthenticationOk) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerStartupAuthenticationOk) Parse() *pgproto3.AuthenticationOk {
 	return (*FromServer[*pgproto3.AuthenticationOk])(m).Parse()
 }
@@ -136,13 +120,9 @@ func (m ServerStartupAuthenticationOk) Retain() ServerStartupAuthenticationOk {
 // ServerStartupAuthenticationSASL wraps *pgproto3.AuthenticationSASL from the server.
 type ServerStartupAuthenticationSASL FromServer[*pgproto3.AuthenticationSASL]
 
-func (*ServerStartupAuthenticationSASL) Startup() {}
-func (t *ServerStartupAuthenticationSASL) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.AuthenticationSASL])(t).Parse()
-}
-func (t *ServerStartupAuthenticationSASL) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.AuthenticationSASL])(t).Parse()
-}
+func (*ServerStartupAuthenticationSASL) Startup()                          {}
+func (t *ServerStartupAuthenticationSASL) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerStartupAuthenticationSASL) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerStartupAuthenticationSASL) Parse() *pgproto3.AuthenticationSASL {
 	return (*FromServer[*pgproto3.AuthenticationSASL])(m).Parse()
 }
@@ -157,13 +137,9 @@ func (m ServerStartupAuthenticationSASL) Retain() ServerStartupAuthenticationSAS
 // ServerStartupAuthenticationSASLContinue wraps *pgproto3.AuthenticationSASLContinue from the server.
 type ServerStartupAuthenticationSASLContinue FromServer[*pgproto3.AuthenticationSASLContinue]
 
-func (*ServerStartupAuthenticationSASLContinue) Startup() {}
-func (t *ServerStartupAuthenticationSASLContinue) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(t).Parse()
-}
-func (t *ServerStartupAuthenticationSASLContinue) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(t).Parse()
-}
+func (*ServerStartupAuthenticationSASLContinue) Startup()                          {}
+func (t *ServerStartupAuthenticationSASLContinue) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerStartupAuthenticationSASLContinue) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerStartupAuthenticationSASLContinue) Parse() *pgproto3.AuthenticationSASLContinue {
 	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(m).Parse()
 }
@@ -178,13 +154,9 @@ func (m ServerStartupAuthenticationSASLContinue) Retain() ServerStartupAuthentic
 // ServerStartupAuthenticationSASLFinal wraps *pgproto3.AuthenticationSASLFinal from the server.
 type ServerStartupAuthenticationSASLFinal FromServer[*pgproto3.AuthenticationSASLFinal]
 
-func (*ServerStartupAuthenticationSASLFinal) Startup() {}
-func (t *ServerStartupAuthenticationSASLFinal) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(t).Parse()
-}
-func (t *ServerStartupAuthenticationSASLFinal) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(t).Parse()
-}
+func (*ServerStartupAuthenticationSASLFinal) Startup()                          {}
+func (t *ServerStartupAuthenticationSASLFinal) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerStartupAuthenticationSASLFinal) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerStartupAuthenticationSASLFinal) Parse() *pgproto3.AuthenticationSASLFinal {
 	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(m).Parse()
 }
@@ -200,13 +172,9 @@ func (m ServerStartupAuthenticationSASLFinal) Retain() ServerStartupAuthenticati
 // This should be already captured when we establish the connection.
 type ServerStartupBackendKeyData FromServer[*pgproto3.BackendKeyData]
 
-func (*ServerStartupBackendKeyData) Startup() {}
-func (t *ServerStartupBackendKeyData) PgwireMessage() pgproto3.Message {
-	return (*FromServer[*pgproto3.BackendKeyData])(t).Parse()
-}
-func (t *ServerStartupBackendKeyData) Server() pgproto3.BackendMessage {
-	return (*FromServer[*pgproto3.BackendKeyData])(t).Parse()
-}
+func (*ServerStartupBackendKeyData) Startup()                          {}
+func (t *ServerStartupBackendKeyData) PgwireMessage() pgproto3.Message { return t.Parse() }
+func (t *ServerStartupBackendKeyData) Server() pgproto3.BackendMessage { return t.Parse() }
 func (m *ServerStartupBackendKeyData) Parse() *pgproto3.BackendKeyData {
 	return (*FromServer[*pgproto3.BackendKeyData])(m).Parse()
 }
