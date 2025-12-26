@@ -73,6 +73,7 @@ func NewClientCursor(ring *RingBuffer) *Cursor {
 		ring:             ring,
 		clientFlyweights: &ClientFlyweights{},
 	}
+	c.RingRange.ring = ring
 	c.capacity = &c.RingRange
 	c.in = &c.RingRange
 	return c
@@ -84,6 +85,7 @@ func NewServerCursor(ring *RingBuffer) *Cursor {
 		ring:             ring,
 		serverFlyweights: &ServerFlyweights{},
 	}
+	c.RingRange.ring = ring
 	c.capacity = &c.RingRange
 	c.in = &c.RingRange
 	return c
