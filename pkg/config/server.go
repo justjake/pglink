@@ -156,6 +156,12 @@ type BackendConfig struct {
 	// Set to 0 to disable caching. Defaults to 512.
 	DescriptionCacheCapacity *int32 `json:"description_cache_capacity,omitempty"`
 
+	// PreparedStatementCacheSize is the maximum number of prepared statements
+	// to cache per database for statement reuse across backend connections.
+	// This is pglink's own cache, separate from pgx's statement cache.
+	// Set to 0 to disable caching. Defaults to 1000.
+	PreparedStatementCacheSize *int32 `json:"prepared_statement_cache_size,omitempty"`
+
 	// PoolMaxConns is the maximum number of connections in the pool.
 	// This is required and must be greater than 0.
 	PoolMaxConns int32 `json:"pool_max_conns"`
@@ -191,6 +197,15 @@ func (c *BackendConfig) Addr() string {
 		port = strconv.Itoa(int(*c.Port))
 	}
 	return net.JoinHostPort(c.Host, port)
+}
+
+// GetPreparedStatementCacheSize returns the prepared statement cache size,
+// or the default of 1000 if not configured. Returns 0 to disable caching.
+func (c *BackendConfig) GetPreparedStatementCacheSize() int {
+	if c.PreparedStatementCacheSize == nil {
+		return 1000 // Default
+	}
+	return int(*c.PreparedStatementCacheSize)
 }
 
 // PoolConfigString builds a libpq-style connection string in key=value format.

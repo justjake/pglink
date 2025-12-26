@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // Database manages connection pools to a backend PostgreSQL server.
@@ -26,6 +27,10 @@ type Database struct {
 	logger         *slog.Logger
 	tracingEnabled bool
 
+	// stmtCache caches prepared statement metadata for reuse across backend connections.
+	// This allows statements to be re-created on backends that don't have them yet.
+	stmtCache *pgwire.PreparedStatementCache
+
 	destroyedConns atomic.Int32
 }
 
@@ -39,6 +44,7 @@ func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *confi
 		config:         cfg,
 		secrets:        secrets,
 		tracingEnabled: tracingEnabled,
+		stmtCache:      pgwire.NewPreparedStatementCache(cfg.Backend.GetPreparedStatementCacheSize()),
 	}
 	db.logger = logger.With("backend", db.Name())
 
@@ -173,4 +179,10 @@ func (d *Database) Close() {
 
 func (d *Database) Name() string {
 	return fmt.Sprintf("%s:%d/%s", d.config.Backend.Host, d.config.Backend.Port, d.config.Backend.Database)
+}
+
+// StatementCache returns the prepared statement cache for this database.
+// The cache stores metadata for re-creating statements on backend connections.
+func (d *Database) StatementCache() *pgwire.PreparedStatementCache {
+	return d.stmtCache
 }
