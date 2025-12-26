@@ -30,7 +30,7 @@ func runPsql(ctx context.Context, database string, user TestUser, command string
 		"postgres://%s:%s@localhost:%d/%s?sslmode=prefer",
 		user.Username,
 		user.Password,
-		DefaultPglinkPort,
+		testHarness.Port(),
 		database,
 	)
 
@@ -62,7 +62,7 @@ func runPsqlFile(ctx context.Context, database string, user TestUser, filePath s
 		"postgres://%s:%s@localhost:%d/%s?sslmode=prefer",
 		user.Username,
 		user.Password,
-		DefaultPglinkPort,
+		testHarness.Port(),
 		database,
 	)
 

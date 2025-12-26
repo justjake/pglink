@@ -35,7 +35,7 @@ func getBenchmarkTargets(t testing.TB) []BenchmarkTarget {
 		},
 		{
 			Name:    "pglink",
-			ConnStr: fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", DefaultPglinkPort),
+			ConnStr: fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", testHarness.Port()),
 		},
 	}
 

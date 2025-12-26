@@ -24,9 +24,6 @@ import (
 )
 
 const (
-	// DefaultPglinkPort is the port pglink listens on during tests
-	DefaultPglinkPort = 16432
-
 	// DockerComposeStartTimeout is how long to wait for docker-compose services
 	DockerComposeStartTimeout = 2 * time.Minute
 
@@ -74,13 +71,17 @@ var PredefinedDatabases = []TestDatabase{
 
 // Harness manages the test infrastructure lifecycle
 type Harness struct {
-	t          *testing.T
-	projectDir string
-	configPath string
+	t           *testing.T
+	projectDir  string // Current working directory (may be a worktree)
+	mainRepoDir string // Main git repo (for shared docker-compose)
+	configPath  string
 
 	// Algo is the session algorithm to use ("default" or "ring").
 	// Set this before calling Start().
 	Algo string
+
+	// pglinkPort is dynamically allocated to avoid conflicts between worktrees
+	pglinkPort int
 
 	service   *frontend.Service
 	serviceWg sync.WaitGroup
@@ -110,6 +111,18 @@ func NewHarnessForMain() *Harness {
 		panic(fmt.Sprintf("failed to find project root: %v", err))
 	}
 
+	// Find main repo for docker-compose (shared across worktrees)
+	mainRepoDir, err := findMainRepoDir()
+	if err != nil {
+		panic(fmt.Sprintf("failed to find main repo: %v", err))
+	}
+
+	// Allocate a free port for pglink to avoid conflicts between worktrees
+	pglinkPort, err := findFreePort()
+	if err != nil {
+		panic(fmt.Sprintf("failed to find free port: %v", err))
+	}
+
 	configPath := filepath.Join(projectDir, "pglink.json")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		panic(fmt.Sprintf("pglink.json not found at %s", configPath))
@@ -134,10 +147,12 @@ func NewHarnessForMain() *Harness {
 	slog.SetDefault(logger)
 
 	return &Harness{
-		t:          nil,
-		projectDir: projectDir,
-		configPath: configPath,
-		logger:     logger,
+		t:           nil,
+		projectDir:  projectDir,
+		mainRepoDir: mainRepoDir,
+		configPath:  configPath,
+		pglinkPort:  pglinkPort,
+		logger:      logger,
 	}
 }
 
@@ -163,6 +178,43 @@ func findProjectRoot() (string, error) {
 	}
 
 	return "", fmt.Errorf("could not find docker-compose.yaml in any parent directory")
+}
+
+// findMainRepoDir finds the main git repository directory.
+// If we're in a worktree, this returns the main repo path, not the worktree.
+// Docker-compose containers are shared across all worktrees.
+func findMainRepoDir() (string, error) {
+	// git rev-parse --git-common-dir gives us the path to the shared .git directory
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to find git common dir: %w", err)
+	}
+
+	gitCommonDir := strings.TrimSpace(string(output))
+
+	// The common dir is either ".git" (main repo) or "/path/to/main/.git" (worktree)
+	// We want the parent of that directory
+	if gitCommonDir == ".git" {
+		// We're in the main repo
+		return os.Getwd()
+	}
+
+	// We're in a worktree - gitCommonDir is an absolute path to main/.git
+	return filepath.Dir(gitCommonDir), nil
+}
+
+// findFreePort finds an available TCP port
+func findFreePort() (int, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		return 0, err
+	}
+	return port, nil
 }
 
 // Start initializes the test infrastructure:
@@ -228,7 +280,9 @@ func (h *Harness) fatalf(format string, args ...any) {
 	}
 }
 
-// ensureDockerCompose starts docker-compose if not already running
+// ensureDockerCompose starts docker-compose if not already running.
+// Docker-compose runs from the main repo directory so containers are shared
+// across all worktrees.
 func (h *Harness) ensureDockerCompose(ctx context.Context) {
 	// Check if containers are already running
 	if h.isDockerComposeRunning(ctx) {
@@ -236,11 +290,11 @@ func (h *Harness) ensureDockerCompose(ctx context.Context) {
 		return
 	}
 
-	h.logger.Info("starting docker-compose")
+	h.logger.Info("starting docker-compose", "dir", h.mainRepoDir)
 	h.startedDockerCompose = true
 
 	cmd := exec.CommandContext(ctx, "docker-compose", "up", "-d", "--wait")
-	cmd.Dir = h.projectDir
+	cmd.Dir = h.mainRepoDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -254,7 +308,7 @@ func (h *Harness) ensureDockerCompose(ctx context.Context) {
 // isDockerComposeRunning checks if all required containers are running
 func (h *Harness) isDockerComposeRunning(ctx context.Context) bool {
 	cmd := exec.CommandContext(ctx, "docker-compose", "ps", "--format", "{{.State}}")
-	cmd.Dir = h.projectDir
+	cmd.Dir = h.mainRepoDir
 	output, err := cmd.Output()
 	if err != nil {
 		return false
@@ -344,6 +398,9 @@ func (h *Harness) startService(ctx context.Context) {
 		h.fatalf("failed to read config: %v", err)
 	}
 
+	// Override listen port to use dynamically allocated port
+	cfg.SetListenAddr(fmt.Sprintf(":%d", h.pglinkPort))
+
 	// Apply algo setting if specified
 	if h.Algo != "" {
 		cfg.SetAlgo(h.Algo)
@@ -382,7 +439,7 @@ func (h *Harness) startService(ctx context.Context) {
 		}
 	}()
 
-	h.logger.Info("pglink service starting", "algo", cfg.GetAlgo())
+	h.logger.Info("pglink service starting", "port", h.pglinkPort, "algo", cfg.GetAlgo())
 }
 
 // waitForService waits for pglink to accept connections
@@ -390,7 +447,7 @@ func (h *Harness) waitForService(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, ServiceStartTimeout)
 	defer cancel()
 
-	addr := fmt.Sprintf("localhost:%d", DefaultPglinkPort)
+	addr := fmt.Sprintf("localhost:%d", h.pglinkPort)
 
 	for {
 		select {
@@ -417,7 +474,7 @@ func (h *Harness) ConnectWithUser(ctx context.Context, database string, user Tes
 		"postgres://%s:%s@localhost:%d/%s?sslmode=prefer",
 		user.Username,
 		user.Password,
-		DefaultPglinkPort,
+		h.pglinkPort,
 		database,
 	)
 
@@ -461,7 +518,7 @@ func (h *Harness) ConnectWithExecMode(ctx context.Context, database string, mode
 		"postgres://%s:%s@localhost:%d/%s?sslmode=prefer",
 		PredefinedUsers.App.Username,
 		PredefinedUsers.App.Password,
-		DefaultPglinkPort,
+		h.pglinkPort,
 		database,
 	)
 
@@ -485,7 +542,7 @@ func (h *Harness) ConnectSingle(ctx context.Context, database string, user TestU
 		"postgres://%s:%s@localhost:%d/%s?sslmode=prefer",
 		user.Username,
 		user.Password,
-		DefaultPglinkPort,
+		h.pglinkPort,
 		database,
 	)
 
@@ -518,7 +575,7 @@ func (h *Harness) ConnectSingleExec(ctx context.Context, database string, user T
 		"postgres://%s:%s@localhost:%d/%s?sslmode=prefer",
 		user.Username,
 		user.Password,
-		DefaultPglinkPort,
+		h.pglinkPort,
 		database,
 	)
 
@@ -609,6 +666,12 @@ func (h *Harness) GetAlgo() string {
 		return config.SessionAlgoDefault
 	}
 	return h.Algo
+}
+
+// Port returns the port pglink is listening on.
+// This is dynamically allocated to avoid conflicts between worktrees.
+func (h *Harness) Port() int {
+	return h.pglinkPort
 }
 
 // AllSessionAlgos returns all valid session algorithm names.
