@@ -369,6 +369,18 @@ func (s *Session) releaseBackend() {
 		return
 	}
 
+	// If there are outstanding requests, we're in the middle of a request/response flow.
+	// The backend connection may have unread response data (e.g., ErrorResponse after
+	// query cancellation). We must destroy the connection instead of returning it to
+	// the pool, otherwise the next session would receive stale response messages.
+	if s.state.OutstandingRequestCount() > 0 {
+		s.logger.Warn("releasing backend with outstanding requests - destroying connection",
+			"outstandingRequests", s.state.OutstandingRequestCount())
+		s.backend.ReleaseAndDestroy(fmt.Errorf("session closed with %d outstanding requests", s.state.OutstandingRequestCount()))
+		s.backend = nil
+		return
+	}
+
 	s.backend.Release()
 	s.backend = nil
 
@@ -734,8 +746,12 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 			// Check if statement exists on this backend connection
 			statementExistsOnBackend := s.backend.HasStatement(serverName)
 
-			if !statementExistsOnBackend && parsed.PreparedStatement != "" {
-				// Statement doesn't exist on backend - try to re-create it using cached query
+			if !statementExistsOnBackend {
+				// Statement doesn't exist on backend - try to re-create it using cached query.
+				// This handles both named and unnamed statements. For unnamed statements,
+				// this can happen with QueryExecModeDescribeExec where Parse+Describe+Sync
+				// happens on one backend (then released), and Bind+Execute+Sync happens on
+				// a different backend that doesn't have the unnamed statement.
 				queryHash, hasHash := s.serverStatementQueryHash[serverName]
 				if hasHash {
 					cachedStmt, inCache := s.database.StatementCache().Get(queryHash)
@@ -822,12 +838,18 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 			s.serverStatementQueryHash[serverName] = queryHash
 
 			// Check if we can skip sending Parse to the backend:
-			// 1. Statement already exists on this backend connection
-			// 2. Query is in the database cache (same query)
+			// 1. Statement is NAMED (unnamed statements can't be skipped - see below)
+			// 2. Statement already exists on this backend connection
+			// 3. Query is in the database cache (same query)
+			//
+			// IMPORTANT: We cannot skip Parse for unnamed statements (serverName == "").
+			// The unnamed statement's query can change with each Parse, so "exists on backend"
+			// doesn't mean "exists with the same query". Only named statements have stable
+			// query->name mappings that allow skip optimization.
 			statementExistsOnBackend := s.backend.HasStatement(serverName)
 			_, queryInCache := s.database.StatementCache().Get(queryHash)
 
-			if statementExistsOnBackend && queryInCache {
+			if serverName != "" && statementExistsOnBackend && queryInCache {
 				// Skip Parse - statement already exists on backend with same query
 				s.logger.Debug("skipping Parse - statement exists on backend",
 					"clientName", parsed.Name,
@@ -1041,18 +1063,19 @@ func (s *Session) handleServerResponse(msg pgwire.ServerResponse, msgIdx int64, 
 		// Pop the pending Sync/Query request
 		s.state.PopForResponse('Z')
 
+		// ReadyForQuery marks the end of a request/response flow.
+		// End the flow to clear any remaining request tracking state.
+		// This ensures we start fresh for the next flow.
+		s.state.EndRequestFlow()
+
 		// TODO: double-check and flush ParameterStatuses?
 		inTxOrQuery := s.state.InTxOrQuery()
-		outstandingReqs := s.state.OutstandingRequestCount()
 		s.logger.Debug("ReadyForQuery",
 			"inTx", inTxOrQuery,
-			"txStatus", s.state.TxStatus,
-			"outstandingRequests", outstandingReqs)
+			"txStatus", s.state.TxStatus)
 
 		if !inTxOrQuery {
 			s.logger.Debug("releasing backend")
-			// End the request flow when releasing the backend
-			s.state.EndRequestFlow()
 			continueWithBackend = false
 		}
 	}
