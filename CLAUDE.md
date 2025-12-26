@@ -152,6 +152,17 @@ This creates:
 2. Use `bin/build`, `bin/test`, etc. normally - they work in worktrees
 3. **Commit work regularly** to the worktree branch
 
+### Rebasing a worktree
+
+When rebasing a worktree branch on main, use the **local** main branch (not `origin/main`):
+
+```bash
+git rebase main        # Correct - uses local main from the root repo
+git rebase origin/main # Wrong - may be stale if you haven't fetched
+```
+
+Worktrees share the same `.git` directory with the main checkout, so the local `main` branch is always up-to-date with the root repo.
+
 ### Listing and removing worktrees
 
 ```bash
