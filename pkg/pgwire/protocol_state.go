@@ -62,6 +62,11 @@ type ProtocolState struct {
 	recognizers []FlowRecognizer
 	activeFlows []Flow
 
+	// Request flow tracking for protocol correctness
+	// ActiveRequestFlow tracks pending requests and their expected response actions.
+	// It is nil when the session is idle (no outstanding requests).
+	ActiveRequestFlow *RequestFlow
+
 	// TODO: do we have to track what portals are suspended?
 }
 
@@ -336,4 +341,50 @@ func (s *ProtocolState) CloseAllFlows() {
 		flow.Close()
 	}
 	s.activeFlows = nil
+}
+
+// StartRequestFlow creates a new RequestFlow for tracking pending requests.
+// Panics if a flow is already active - this indicates a bug.
+func (s *ProtocolState) StartRequestFlow() *RequestFlow {
+	if s.ActiveRequestFlow != nil {
+		panic("starting request flow while one is already active")
+	}
+	s.ActiveRequestFlow = NewRequestFlow()
+	return s.ActiveRequestFlow
+}
+
+// EndRequestFlow closes the active request flow and clears it.
+// Safe to call when no flow is active (no-op).
+func (s *ProtocolState) EndRequestFlow() {
+	if s.ActiveRequestFlow != nil {
+		s.ActiveRequestFlow.Close()
+		s.ActiveRequestFlow = nil
+	}
+}
+
+// PushRequest adds a pending request to the active flow.
+// If no flow is active, starts a new one automatically.
+func (s *ProtocolState) PushRequest(req PendingRequest) {
+	if s.ActiveRequestFlow == nil {
+		s.StartRequestFlow()
+	}
+	s.ActiveRequestFlow.Push(req)
+}
+
+// PopForResponse removes and returns the front request if it matches the response type.
+// Returns (request, true) if matched, (zero, false) if no match or no active flow.
+func (s *ProtocolState) PopForResponse(responseType byte) (PendingRequest, bool) {
+	if s.ActiveRequestFlow == nil {
+		return PendingRequest{}, false
+	}
+	return s.ActiveRequestFlow.PopForResponse(responseType)
+}
+
+// OutstandingRequestCount returns the number of pending requests in the active flow.
+// Returns 0 if no flow is active.
+func (s *ProtocolState) OutstandingRequestCount() int {
+	if s.ActiveRequestFlow == nil {
+		return 0
+	}
+	return s.ActiveRequestFlow.Len()
 }
