@@ -7,7 +7,7 @@ import (
 // BenchmarkFlyweightAllocation tests if the flyweight pattern actually avoids allocations
 func BenchmarkFlyweightAllocation(b *testing.B) {
 	// Create a minimal ring buffer with a Flush message
-	ring := NewRingBuffer()
+	ring := NewRingBuffer(DefaultRingBufferConfig())
 
 	// Manually write a Flush message (type 'H', body len 4, no body data)
 	// Wire format: type(1) + length(4) = 5 bytes total, length includes itself
@@ -41,7 +41,7 @@ func BenchmarkFlyweightAllocation(b *testing.B) {
 
 // BenchmarkFlyweightAllocationNoInterface tests the flyweight without interface conversion
 func BenchmarkFlyweightAllocationNoInterface(b *testing.B) {
-	ring := NewRingBuffer()
+	ring := NewRingBuffer(DefaultRingBufferConfig())
 
 	data := []byte{'H', 0, 0, 0, 4}
 	copy(ring.data, data)

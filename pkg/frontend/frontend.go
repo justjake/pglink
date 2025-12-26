@@ -23,7 +23,7 @@ type Frontend struct {
 }
 
 func NewFrontend(ctx context.Context, conn net.Conn) *Frontend {
-	ringBuffer := pgwire.NewRingBuffer()
+	ringBuffer := pgwire.NewRingBuffer(pgwire.DefaultRingBufferConfig())
 	return &Frontend{
 		conn:       conn,
 		Backend:    pgproto3.NewBackend(conn, conn),

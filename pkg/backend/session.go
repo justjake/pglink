@@ -105,7 +105,7 @@ func (s *Session) Acquire() error {
 
 	// Start ring buffer reader goroutine
 	if s.ringBuffer == nil {
-		s.ringBuffer = pgwire.NewRingBuffer()
+		s.ringBuffer = pgwire.NewRingBuffer(pgwire.DefaultRingBufferConfig())
 	} else {
 		s.ringBuffer = s.ringBuffer.NewWithSameBuffers()
 	}

@@ -15,20 +15,53 @@ import (
 
 // Ring buffer constants
 const (
-	// minDataHeadroom ensures we can always fit a message that has already started
+	// DefaultHeadroomBytes ensures we can always fit a message that has already started
 	// being parsed. Without this, we could deadlock: parser waits for complete message,
 	// writer can't read more because buffer is full.
-	minDataHeadroom = 8192
+	DefaultHeadroomBytes = 8192
 
-	// defaultDataSize is the default ring buffer data capacity
-	defaultDataSize = 256 * 1024 // 256KB
+	// DefaultMessageBytes is the default ring buffer data capacity
+	DefaultMessageBytes = 256 * 1024 // 256KB
 
-	// defaultMetaSize is the default number of message metadata slots
-	defaultMetaSize = 4096
+	// DefaultMessageCount is the default number of message metadata slots
+	DefaultMessageCount = 4096
 
 	// spaceCheckMsgs is how often to refresh cached consumer positions
 	spaceCheckMsgs = 32
 )
+
+// RingBufferConfig configures a ring buffer's capacity.
+type RingBufferConfig struct {
+	// MessageBytes is the total byte capacity for message data.
+	// Must be a power of 2. Defaults to DefaultMessageBytes (256KB).
+	MessageBytes int64
+
+	// MessageCount is the maximum number of messages that can be tracked.
+	// Must be a power of 2. Defaults to DefaultMessageCount (4096).
+	MessageCount int64
+
+	// HeadroomBytes is reserved space to prevent deadlock when a message
+	// header has been read but the body hasn't arrived yet.
+	// Defaults to DefaultHeadroomBytes (8KB).
+	HeadroomBytes int64
+}
+
+// DefaultRingBufferConfig returns a config with default buffer sizes.
+func DefaultRingBufferConfig() RingBufferConfig {
+	return RingBufferConfig{
+		MessageBytes:  DefaultMessageBytes,
+		MessageCount:  DefaultMessageCount,
+		HeadroomBytes: DefaultHeadroomBytes,
+	}
+}
+
+// ringBuffers holds the allocated buffer memory that can be reused.
+type ringBuffers struct {
+	data     []byte
+	dataMask int64
+	offsets  []int64
+	metaMask int64
+}
 
 // RingBuffer is a single-producer single-consumer ring buffer for PostgreSQL
 // wire protocol messages. The producer reads from a network connection directly
@@ -50,10 +83,8 @@ const (
 // prevent false sharing. Variables with the same writer can share a cache line.
 type RingBuffer struct {
 	// === Immutable after construction ===
-	data     []byte
-	dataMask int64
-	offsets  []int64
-	metaMask int64
+	RingBufferConfig
+	ringBuffers
 
 	// === Writer-local state (only writer touches, no synchronization) ===
 	rawEnd      int64 // Where raw bytes from network end
@@ -101,36 +132,52 @@ type RingBuffer struct {
 	readerDone chan struct{}
 }
 
-// NewRingBuffer creates a new ring buffer with default sizes.
-func NewRingBuffer() *RingBuffer {
-	return NewRingBufferWithSize(defaultDataSize, defaultMetaSize)
+func (r *RingBuffer) initChannels() {
+	r.streamDone = make(chan error)
+	r.writerWake = make(chan struct{}, 1)
+	r.readerWake = make(chan struct{}, 1)
+	r.done = make(chan struct{})
 }
 
-// NewRingBufferWithSize creates a new ring buffer with custom sizes.
-// dataSize and metaSize must be powers of 2; panics otherwise.
-func NewRingBufferWithSize(dataSize, metaSize int) *RingBuffer {
-	if dataSize <= 0 || dataSize&(dataSize-1) != 0 {
-		panic("dataSize must be a power of 2")
+// NewRingBuffer creates a new ring buffer with the given configuration.
+// MessageBytes and MessageCount must be powers of 2; panics otherwise.
+// Zero values are replaced with defaults.
+func NewRingBuffer(cfg RingBufferConfig) *RingBuffer {
+	// Apply defaults
+	if cfg.MessageBytes == 0 {
+		cfg.MessageBytes = DefaultMessageBytes
 	}
-	if metaSize <= 0 || metaSize&(metaSize-1) != 0 {
-		panic("metaSize must be a power of 2")
+	if cfg.MessageCount == 0 {
+		cfg.MessageCount = DefaultMessageCount
+	}
+	if cfg.HeadroomBytes == 0 {
+		cfg.HeadroomBytes = DefaultHeadroomBytes
 	}
 
-	return &RingBuffer{
-		data:       make([]byte, dataSize),
-		dataMask:   int64(dataSize - 1),
-		offsets:    make([]int64, metaSize),
-		metaMask:   int64(metaSize - 1),
-		streamDone: make(chan error),
-		writerWake: make(chan struct{}, 1),
-		readerWake: make(chan struct{}, 1),
-		done:       make(chan struct{}),
+	// Validate
+	if cfg.MessageBytes <= 0 || cfg.MessageBytes&(cfg.MessageBytes-1) != 0 {
+		panic("MessageBytes must be a power of 2")
 	}
+	if cfg.MessageCount <= 0 || cfg.MessageCount&(cfg.MessageCount-1) != 0 {
+		panic("MessageCount must be a power of 2")
+	}
+
+	r := &RingBuffer{
+		RingBufferConfig: cfg,
+		ringBuffers: ringBuffers{
+			data:     make([]byte, cfg.MessageBytes),
+			dataMask: cfg.MessageBytes - 1,
+			offsets:  make([]int64, cfg.MessageCount),
+			metaMask: cfg.MessageCount - 1,
+		},
+	}
+	r.initChannels()
+	return r
 }
 
 // maxBufferableSize returns the maximum message size that can be fully buffered.
 func (r *RingBuffer) maxBufferableSize() int64 {
-	return int64(len(r.data)) - minDataHeadroom
+	return int64(len(r.data)) - r.HeadroomBytes
 }
 
 // === Writer methods ===
@@ -198,13 +245,13 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 
 		// Calculate available contiguous space
 		used := r.rawEnd - r.cachedConsumedBytes
-		available := int64(len(r.data)) - used - minDataHeadroom
+		available := int64(len(r.data)) - used - r.HeadroomBytes
 
 		if available <= 0 {
 			// Refresh cached position and retry
 			r.refreshCachedPositions()
 			used = r.rawEnd - r.cachedConsumedBytes
-			available = int64(len(r.data)) - used - minDataHeadroom
+			available = int64(len(r.data)) - used - r.HeadroomBytes
 
 			if available <= 0 {
 				// Actually need to wait for space
@@ -647,14 +694,10 @@ func (r *RingBuffer) Close() {
 // offset slices. All position counters start at 0, and channels are fresh.
 // This avoids reallocating the ~260KB data buffer on each acquire.
 func (r *RingBuffer) NewWithSameBuffers() *RingBuffer {
-	return &RingBuffer{
-		data:       r.data,
-		dataMask:   r.dataMask,
-		offsets:    r.offsets,
-		metaMask:   r.metaMask,
-		streamDone: make(chan error),
-		writerWake: make(chan struct{}, 1),
-		readerWake: make(chan struct{}, 1),
-		done:       make(chan struct{}),
+	r2 := &RingBuffer{
+		RingBufferConfig: r.RingBufferConfig,
+		ringBuffers:      r.ringBuffers,
 	}
+	r2.initChannels()
+	return r2
 }
