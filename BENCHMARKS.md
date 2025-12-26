@@ -1,42 +1,43 @@
 # pglink Benchmarks
 
-Generated: 2025-12-24T15:44:18-05:00
+Generated: 2025-12-26T15:54:34-05:00
 
 ## Configuration
 
-- **Rounds per target:** 1 (shuffled order to mitigate ordering effects)
-- **Duration per round:** 5s measurement + 1s warmup
-- **Pool:** max_conns=10, concurrency=10
-- **Workload seed:** -4421388665655429465 (for reproducibility)
+- **Rounds per target:** 2 (shuffled order to mitigate ordering effects)
+- **Duration per round:** 10s measurement + 3s warmup
+- **Pool:** max_conns=50, concurrency=50
+- **Query mode:** simple protocol
+- **Workload seed:** -4421386466632173043 (for reproducibility)
 
 ## Results
 
-### Mixed Workload
+### SELECT 1 Latency
 
 | Target | QPS | MB/s | Error Rate | P50 (μs) | P99 (μs) |
 |--------|-----|------|------------|----------|----------|
 
-| direct | 11760 | - | 0% | 17.1ms | 25.5ms |
-| pgbouncer | 5232 (2.2x slower) | - | 0% | 36.7ms (2.1x) | 64.8ms (2.5x) |
-| pglink (GOMAXPROCS=16) | 0 ❌ | - | **100.0%** | 1.00s (58.5x) | 1.01s (39.5x) |
+| direct | 35667 | - | 0% | 1.3ms | 3.1ms |
+| pgbouncer | 35077 | - | 0% | 1.3ms | 3.2ms |
+| pglink (GOMAXPROCS=16) | 14366 (2.5x slower) | - | 15.96% | 3.1ms (2.4x) | 12.0ms (3.8x) |
 
 ### COPY OUT (1000 rows × 5 per task)
 
 | Target | QPS | MB/s | Error Rate | P50 (μs) | P99 (μs) |
 |--------|-----|------|------------|----------|----------|
 
-| direct | 9041 | 143.8 | 0% | 5.3ms | 9.0ms |
-| pgbouncer | 8439 (7% slower) | 134.2 (7% slower) | 0% | 5.8ms (+8%) | 8.5ms |
-| pglink (GOMAXPROCS=16) | 53 (170.6x slower) | 0.8 (170.6x slower) | 0% | 853.9ms (160.0x) | 2.41s (268.4x) |
+| direct | 10619 | 168.9 | 0% | 22.9ms | 39.2ms |
+| pgbouncer | 10756 | 171.1 | 0% | 23.0ms | 31.4ms |
+| pglink (GOMAXPROCS=16) | 9787 (8% slower) | 155.7 (8% slower) | 0% | 19.9ms | 31.4ms |
 
 ### COPY IN (1000 rows × 5 per task)
 
 | Target | QPS | MB/s | Error Rate | P50 (μs) | P99 (μs) |
 |--------|-----|------|------------|----------|----------|
 
-| direct | 1937 | 30.8 | 0% | 24.9ms | 45.3ms |
-| pgbouncer | 1856 (4% slower) | 29.5 (4% slower) | 0.27% | 26.0ms (+5%) | 42.3ms |
-| pglink (GOMAXPROCS=16) | 1658 (14% slower) | 26.4 (14% slower) | 0% | 29.8ms (+20%) | 37.8ms |
+| direct | 2822 | 44.9 | 0% | 81.5ms | 285.5ms |
+| pgbouncer | 2964 | 47.1 | 0.64% | 78.5ms | 213.6ms |
+| pglink (GOMAXPROCS=16) | 2815 | 44.8 | 14.82% | 80.6ms | 181.4ms |
 
 ## Analysis
 
@@ -46,9 +47,11 @@ High error rates typically indicate pool exhaustion (concurrency > max_conns) or
 ### Sample Errors
 
 
-- `FATAL: failed to acquire backend (SQLSTATE 57P03)`
+- `ERROR: current transaction is aborted, commands ignored until end of transaction block (SQLSTATE 25P02)`
 
 - `ERROR: relation "bench_copy_temp" does not exist (SQLSTATE 42P01)`
+
+- `ERROR: canceling statement due to user request (SQLSTATE 57014)`
 
 
 
