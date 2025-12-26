@@ -13,10 +13,18 @@ type Metrics struct {
 	BackendAcquireTotal    *prometheus.CounterVec
 	ErrorsTotal            *prometheus.CounterVec
 
+	// Prepared statement cache counters
+	PreparedStatementCacheHitsTotal      *prometheus.CounterVec
+	PreparedStatementCacheMissesTotal    *prometheus.CounterVec
+	PreparedStatementRecreationsTotal    *prometheus.CounterVec
+	PreparedStatementParseSkippedTotal   *prometheus.CounterVec
+	PreparedStatementCacheEvictionsTotal *prometheus.CounterVec
+
 	// Gauges
 	ClientConnectionsActive     *prometheus.GaugeVec
 	BackendPoolConnectionsTotal *prometheus.GaugeVec
 	BackendPoolConnectionsIdle  *prometheus.GaugeVec
+	PreparedStatementCacheSize  *prometheus.GaugeVec
 
 	// Histograms
 	QueryDuration          *prometheus.HistogramVec
@@ -56,6 +64,43 @@ func DefaultMetrics() *Metrics {
 			[]string{"type"},
 		),
 
+		// Prepared statement cache counters
+		PreparedStatementCacheHitsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "pglink_prepared_statement_cache_hits_total",
+				Help: "Total number of prepared statement cache hits (statement found in cache)",
+			},
+			[]string{"database"},
+		),
+		PreparedStatementCacheMissesTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "pglink_prepared_statement_cache_misses_total",
+				Help: "Total number of prepared statement cache misses (statement not found in cache)",
+			},
+			[]string{"database"},
+		),
+		PreparedStatementRecreationsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "pglink_prepared_statement_recreations_total",
+				Help: "Total number of prepared statements re-created on backend (using cached query)",
+			},
+			[]string{"database"},
+		),
+		PreparedStatementParseSkippedTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "pglink_prepared_statement_parse_skipped_total",
+				Help: "Total number of Parse messages skipped (statement already exists on backend)",
+			},
+			[]string{"database"},
+		),
+		PreparedStatementCacheEvictionsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "pglink_prepared_statement_cache_evictions_total",
+				Help: "Total number of prepared statements evicted from cache due to LRU",
+			},
+			[]string{"database"},
+		),
+
 		// Gauges
 		ClientConnectionsActive: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -75,6 +120,13 @@ func DefaultMetrics() *Metrics {
 			prometheus.GaugeOpts{
 				Name: "pglink_backend_pool_connections_idle",
 				Help: "Idle connections in the backend pool",
+			},
+			[]string{"database"},
+		),
+		PreparedStatementCacheSize: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "pglink_prepared_statement_cache_size",
+				Help: "Current number of prepared statements in the cache",
 			},
 			[]string{"database"},
 		),
@@ -157,4 +209,53 @@ func (m *Metrics) UpdatePoolStats(database string, total, idle int) {
 	}
 	m.BackendPoolConnectionsTotal.WithLabelValues(database).Set(float64(total))
 	m.BackendPoolConnectionsIdle.WithLabelValues(database).Set(float64(idle))
+}
+
+// RecordPreparedStatementCacheHit records a cache hit for prepared statement lookup.
+func (m *Metrics) RecordPreparedStatementCacheHit(database string) {
+	if m == nil {
+		return
+	}
+	m.PreparedStatementCacheHitsTotal.WithLabelValues(database).Inc()
+}
+
+// RecordPreparedStatementCacheMiss records a cache miss for prepared statement lookup.
+func (m *Metrics) RecordPreparedStatementCacheMiss(database string) {
+	if m == nil {
+		return
+	}
+	m.PreparedStatementCacheMissesTotal.WithLabelValues(database).Inc()
+}
+
+// RecordPreparedStatementRecreation records when a statement is re-created on a backend.
+func (m *Metrics) RecordPreparedStatementRecreation(database string) {
+	if m == nil {
+		return
+	}
+	m.PreparedStatementRecreationsTotal.WithLabelValues(database).Inc()
+}
+
+// RecordPreparedStatementParseSkipped records when a Parse is skipped because
+// the statement already exists on the backend.
+func (m *Metrics) RecordPreparedStatementParseSkipped(database string) {
+	if m == nil {
+		return
+	}
+	m.PreparedStatementParseSkippedTotal.WithLabelValues(database).Inc()
+}
+
+// RecordPreparedStatementCacheEviction records when a statement is evicted from the cache.
+func (m *Metrics) RecordPreparedStatementCacheEviction(database string) {
+	if m == nil {
+		return
+	}
+	m.PreparedStatementCacheEvictionsTotal.WithLabelValues(database).Inc()
+}
+
+// UpdatePreparedStatementCacheSize updates the cache size gauge.
+func (m *Metrics) UpdatePreparedStatementCacheSize(database string, size int) {
+	if m == nil {
+		return
+	}
+	m.PreparedStatementCacheSize.WithLabelValues(database).Set(float64(size))
 }

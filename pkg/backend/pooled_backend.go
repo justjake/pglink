@@ -11,6 +11,24 @@ import (
 )
 
 // PooledBackend wraps a session connected to a backend database server.
+//
+// This type implements the Facade pattern: it provides a simplified interface
+// to the underlying Session and MultiPoolConn, while preventing direct access
+// to these internal components. This is critical for safety because:
+//
+//  1. Session lifecycle: The Session persists across connection pool checkouts,
+//     but must only be used while the PooledBackend is acquired. Exposing the
+//     Session directly would allow callers to hold references after Release(),
+//     leading to use-after-release bugs.
+//
+//  2. Connection validity: All operations must check if the connection has been
+//     released (panicIfReleased). Direct Session access would bypass these checks.
+//
+//  3. Error handling: Write operations automatically mark the connection for
+//     destruction on error. Direct Session access would bypass this.
+//
+// When adding new functionality, prefer adding methods to PooledBackend that
+// delegate to Session, rather than exposing Session directly.
 type PooledBackend struct {
 	conn     *MultiPoolConn
 	session  *Session

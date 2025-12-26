@@ -745,6 +745,21 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 							"serverName", serverName,
 							"queryHash", queryHash)
 
+						// Record metrics
+						s.metrics.RecordPreparedStatementCacheHit(s.databaseName)
+						s.metrics.RecordPreparedStatementRecreation(s.databaseName)
+
+						// Record span event for observability
+						if s.tracingEnabled {
+							_, span := otel.Tracer("pglink").Start(s.ctx, "pglink.stmt.recreate",
+								trace.WithAttributes(
+									attribute.String(observability.AttrStatementName, parsed.PreparedStatement),
+									attribute.Int64("query_hash", int64(queryHash)),
+								),
+							)
+							span.End()
+						}
+
 						// Inject Parse before Bind - push ActionSkip since client doesn't expect ParseComplete
 						s.state.PushRequest(pgwire.PendingRequest{
 							RequestType:   pgwire.MsgTypeParse,
@@ -767,6 +782,8 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 							return nil, fmt.Errorf("failed to send Parse for statement re-creation: %w", err)
 						}
 					} else {
+						// Cache miss - statement not in cache
+						s.metrics.RecordPreparedStatementCacheMiss(s.databaseName)
 						s.logger.Warn("statement not in cache for re-creation",
 							"clientName", parsed.PreparedStatement,
 							"serverName", serverName,
@@ -816,6 +833,21 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 					"clientName", parsed.Name,
 					"serverName", serverName,
 					"queryHash", queryHash)
+
+				// Record metrics
+				s.metrics.RecordPreparedStatementCacheHit(s.databaseName)
+				s.metrics.RecordPreparedStatementParseSkipped(s.databaseName)
+
+				// Record span event for observability
+				if s.tracingEnabled {
+					_, span := otel.Tracer("pglink").Start(s.ctx, "pglink.stmt.parse_skipped",
+						trace.WithAttributes(
+							attribute.String(observability.AttrStatementName, parsed.Name),
+							attribute.Int64("query_hash", int64(queryHash)),
+						),
+					)
+					span.End()
+				}
 
 				// Queue fake ParseComplete to send to client
 				// Don't track in request queue since we're not sending to backend
@@ -943,14 +975,32 @@ func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery, msgI
 			action = req.Action
 			// Populate cache on ParseComplete (for ActionForward and ActionSkip)
 			if req.Query != "" {
-				s.database.StatementCache().Put(&pgwire.PreparedStatement{
+				cache := s.database.StatementCache()
+				cache.Put(&pgwire.PreparedStatement{
 					Query:     req.Query,
 					QueryHash: req.QueryHash,
 					// ParameterOIDs and RowDescription filled in from Describe responses
 				})
+				// Update cache size metric
+				cacheSize := cache.Len()
+				s.metrics.UpdatePreparedStatementCacheSize(s.databaseName, cacheSize)
+
+				// Record span event for observability
+				if s.tracingEnabled {
+					_, span := otel.Tracer("pglink").Start(s.ctx, "pglink.stmt.cached",
+						trace.WithAttributes(
+							attribute.String(observability.AttrStatementName, req.StatementName),
+							attribute.Int64("query_hash", int64(req.QueryHash)),
+							attribute.Int("cache_size", cacheSize),
+						),
+					)
+					span.End()
+				}
+
 				s.logger.Debug("cached prepared statement",
 					"statementName", req.StatementName,
-					"queryHash", req.QueryHash)
+					"queryHash", req.QueryHash,
+					"cacheSize", cacheSize)
 			}
 		}
 	case *pgwire.ServerExtendedQueryBindComplete:
