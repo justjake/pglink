@@ -8,6 +8,7 @@ You must take your time and think deeply when working on pglink. Do not be lazy.
 
 When you encounter a bug, take a step back and look at the structure of the project. You should fix the underlying issues to make the code correct by design, rather than adding a bandaid to fix the symptom. If you need to add a goroutine to solve a bug, you are probably making a bandaid fix rather than addressing the underlying issue.
 
+
 ## Test timeouts
 
 This project is highly asynchronous, so it's easy to write tests that hang
@@ -43,6 +44,10 @@ When adding or modifying scripts in `bin/`, update this list.
 | `bin/tidy` | Run `go mod tidy` |
 
 ## Code Style
+
+### Error handling
+
+Never ignore errors. Errors should be handled directly, or annotated with context (eg w/ fmt.Errorf) and returned to the caller. In rare cases it may be acceptable to panic, but you should ask before doing so.
 
 ### Mutex locking
 
