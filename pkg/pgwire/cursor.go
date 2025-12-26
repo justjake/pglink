@@ -241,7 +241,10 @@ func (r *RingRange) Bytes() int64 {
 }
 
 func (r *RingRange) String() string {
-	return fmt.Sprintf("RingRange{[%d-%d) %d bytes ring=%p}", r.startIdx, r.endIdx, r.Bytes(), r.ring)
+	if r.Empty() {
+		return fmt.Sprintf("RingRange{[%d,%d) empty %s}", r.startIdx, r.endIdx, r.ring)
+	}
+	return fmt.Sprintf("RingRange{[%d,%d) %d bytes %s}", r.startIdx, r.endIdx, r.Bytes(), r.ring)
 }
 
 // NewReader returns an io.Reader that reads the raw wire bytes of all messages
@@ -361,16 +364,16 @@ func (r *RingMsg) String() string {
 	start, end := r.in.capacity.Range()
 	if r.msgIdx >= start && r.msgIdx < end {
 		// Valid - safe to call MessageType/MessageLen
-		return fmt.Sprintf("RingMsg{idx=%d type=%c len=%d ring=%p}",
-			r.msgIdx, r.MessageType(), r.MessageLen(), r.in.ring)
+		return fmt.Sprintf("RingMsg{idx=%d type=%c len=%d in=%s}",
+			r.msgIdx, r.MessageType(), r.MessageLen(), r.in)
 	}
 	// Invalid - explain why
 	if r.msgIdx < start {
-		return fmt.Sprintf("RingMsg{idx=%d INVALID: before start %d, ring=%p}",
-			r.msgIdx, start, r.in.ring)
+		return fmt.Sprintf("RingMsg{idx=%d INVALID: before start %d, in=%s}",
+			r.msgIdx, start, r.in)
 	}
-	return fmt.Sprintf("RingMsg{idx=%d INVALID: at/past end %d, ring=%p}",
-		r.msgIdx, end, r.in.ring)
+	return fmt.Sprintf("RingMsg{idx=%d INVALID: at/past end %d, in=%s}",
+		r.msgIdx, end, r.in)
 }
 
 func (r *RingMsg) panicUnlessValid() {
