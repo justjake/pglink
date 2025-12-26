@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# bin/bench-simple - Run simple query protocol benchmarks
+#
+# Tests SELECT 1 latency, COPY IN, and COPY OUT throughput using simple query
+# protocol (no extended query / prepared statements).
+#
+# Usage:
+#   bin/bench-simple              # Quick smoke test
+#   bin/bench-simple full         # Full benchmark with more rounds
+#   bin/bench-simple select1      # Only SELECT 1 latency test
+#   bin/bench-simple copy         # Only COPY IN/OUT tests
+#
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Colors for output
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+log() {
+    echo -e "${GREEN}[bench-simple]${NC} $1"
+}
+
+# Check for required tools
+check_requirements() {
+    # Check for docker-compose
+    if ! command -v docker-compose &> /dev/null; then
+        echo "Error: docker-compose is required but not installed" >&2
+        exit 1
+    fi
+
+    # Check for pgbouncer
+    if ! command -v pgbouncer &> /dev/null; then
+        echo "Error: pgbouncer is required but not installed" >&2
+        echo "Install with: brew install pgbouncer" >&2
+        exit 1
+    fi
+}
+
+# Ensure docker-compose is running
+ensure_docker() {
+    log "Checking PostgreSQL backends..."
+
+    # Check if all required ports are available
+    all_ready=true
+    for port in 15432 15433 15434; do
+        if ! pg_isready -h localhost -p $port -U postgres &> /dev/null; then
+            all_ready=false
+            break
+        fi
+    done
+
+    if [ "$all_ready" = true ]; then
+        log "All PostgreSQL backends are healthy"
+        return
+    fi
+
+    # Try to start docker-compose (may already be running from main repo)
+    log "Starting docker-compose services..."
+    docker-compose up -d --wait 2>/dev/null || true
+
+    # Verify backends are healthy
+    for port in 15432 15433 15434; do
+        if ! pg_isready -h localhost -p $port -U postgres &> /dev/null; then
+            echo "Error: PostgreSQL on port $port is not ready" >&2
+            exit 1
+        fi
+    done
+    log "All PostgreSQL backends are healthy"
+}
+
+# Build the benchmark tool
+build_bench() {
+    log "Building benchmark tool..."
+    ./bin/go build -o out/bench ./cmd/bench
+    ./bin/build
+}
+
+# Run the benchmark with given parameters
+run_bench() {
+    local cases="$1"
+    local duration="$2"
+    local warmup="$3"
+    local rounds="$4"
+    local concurrency="$5"
+    local output="$6"
+    shift 6
+
+    log "Running simple query benchmarks..."
+    log "  Cases: $cases"
+    log "  Duration: $duration, Warmup: $warmup, Rounds: $rounds"
+    log "  Concurrency: $concurrency"
+
+    ./out/bench \
+        -simple-query \
+        -cases "$cases" \
+        -duration "$duration" \
+        -warmup "$warmup" \
+        -rounds "$rounds" \
+        -concurrency "$concurrency" \
+        -max-conns "$concurrency" \
+        -output "$output" \
+        "$@"
+}
+
+# Main
+main() {
+    local mode="${1:-smoke}"
+    shift || true
+
+    log "pglink Simple Query Benchmark"
+    log "=============================="
+
+    check_requirements
+    ensure_docker
+    build_bench
+
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    output_dir="out/benchmark/simple-${timestamp}"
+    mkdir -p "$output_dir"
+
+    case "$mode" in
+        smoke)
+            # Quick smoke test - all simple cases, short duration
+            run_bench "select1,copy_in,copy_out" "5s" "2s" "1" "50" "$output_dir" "$@"
+            ;;
+        full)
+            # Full benchmark - all simple cases, longer duration, more rounds
+            run_bench "select1,copy_in,copy_out" "15s" "5s" "3" "100" "$output_dir" "$@"
+            ;;
+        select1)
+            # SELECT 1 latency only
+            run_bench "select1" "10s" "3s" "2" "100" "$output_dir" "$@"
+            ;;
+        copy)
+            # COPY IN/OUT throughput only
+            run_bench "copy_in,copy_out" "10s" "3s" "2" "50" "$output_dir" "$@"
+            ;;
+        *)
+            # Treat as custom case list
+            run_bench "$mode" "10s" "3s" "2" "50" "$output_dir" "$@"
+            ;;
+    esac
+
+    # Link to latest
+    ln -sfn "simple-${timestamp}" out/benchmark/simple-latest
+
+    log "Results written to $output_dir"
+    log "Latest results linked at out/benchmark/simple-latest"
+    log "Report: BENCHMARKS.md"
+}
+
+main "$@"

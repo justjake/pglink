@@ -79,6 +79,22 @@ func (c *PooledBackend) Release() {
 		return
 	}
 	c.released = true
+
+	// Check if the backend connection is in a clean state.
+	// If the connection is in a transaction or failed transaction state,
+	// it must be destroyed rather than returned to the pool, because
+	// subsequent queries on this connection would fail with
+	// "current transaction is aborted".
+	//
+	// Note: We check session.State.TxStatus (pglink's tracked state) rather than
+	// conn.TxStatus() (pgx's tracked state) because pglink bypasses pgx for
+	// zero-copy message proxying, so pgx doesn't know the actual transaction state.
+	if c.session.State.TxStatus != pgwire.TxIdle {
+		c.session.logger.Warn("releasing backend in non-idle transaction state, marking for destruction",
+			"txStatus", c.session.State.TxStatus)
+		c.conn.MarkForDestroy()
+	}
+
 	// Release session BEFORE releasing connection to avoid race condition:
 	// another goroutine could acquire the same connection before we release
 	// the session, causing "session already acquired" errors.

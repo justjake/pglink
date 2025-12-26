@@ -1443,3 +1443,399 @@ func TestMultiPool_ConnectionReuse(t *testing.T) {
 	// Should still only have 1 connection
 	assert.Equal(t, int32(1), mp.totalConns.Load())
 }
+
+// =============================================================================
+// Performance Comparison Benchmarks: pgxpool.Pool vs MultiPool
+// =============================================================================
+//
+// These benchmarks compare a stock pgxpool.Pool against a MultiPool holding
+// a single pgxpool.Pool with the same configuration. This helps diagnose
+// whether MultiPool introduces overhead under contention.
+//
+// Run with: go test -bench=. -benchtime=5s ./pkg/backend
+
+// BenchmarkPool_Select1_Stock benchmarks a stock pgxpool.Pool doing SELECT 1.
+func BenchmarkPool_Select1_Stock(b *testing.B) {
+	benchmarkStockPool(b, 50, func(ctx context.Context, conn *pgxpool.Conn) error {
+		var n int
+		return conn.QueryRow(ctx, "SELECT 1").Scan(&n)
+	})
+}
+
+// BenchmarkPool_Select1_MultiPool benchmarks MultiPool doing SELECT 1.
+func BenchmarkPool_Select1_MultiPool(b *testing.B) {
+	benchmarkMultiPool(b, 50, func(ctx context.Context, conn *pgxpool.Conn) error {
+		var n int
+		return conn.QueryRow(ctx, "SELECT 1").Scan(&n)
+	})
+}
+
+// BenchmarkPool_Select1_Stock_HighContention benchmarks stock pool with more workers than connections.
+func BenchmarkPool_Select1_Stock_HighContention(b *testing.B) {
+	benchmarkStockPoolConcurrency(b, 50, 100, func(ctx context.Context, conn *pgxpool.Conn) error {
+		var n int
+		return conn.QueryRow(ctx, "SELECT 1").Scan(&n)
+	})
+}
+
+// BenchmarkPool_Select1_MultiPool_HighContention benchmarks MultiPool with more workers than connections.
+func BenchmarkPool_Select1_MultiPool_HighContention(b *testing.B) {
+	benchmarkMultiPoolConcurrency(b, 50, 100, func(ctx context.Context, conn *pgxpool.Conn) error {
+		var n int
+		return conn.QueryRow(ctx, "SELECT 1").Scan(&n)
+	})
+}
+
+// BenchmarkPool_Select1_Stock_ExtremeContention benchmarks stock pool with 4x workers vs connections.
+func BenchmarkPool_Select1_Stock_ExtremeContention(b *testing.B) {
+	benchmarkStockPoolConcurrency(b, 25, 100, func(ctx context.Context, conn *pgxpool.Conn) error {
+		var n int
+		return conn.QueryRow(ctx, "SELECT 1").Scan(&n)
+	})
+}
+
+// BenchmarkPool_Select1_MultiPool_ExtremeContention benchmarks MultiPool with 4x workers vs connections.
+func BenchmarkPool_Select1_MultiPool_ExtremeContention(b *testing.B) {
+	benchmarkMultiPoolConcurrency(b, 25, 100, func(ctx context.Context, conn *pgxpool.Conn) error {
+		var n int
+		return conn.QueryRow(ctx, "SELECT 1").Scan(&n)
+	})
+}
+
+// benchmarkStockPool runs a benchmark using a stock pgxpool.Pool.
+func benchmarkStockPool(b *testing.B, maxConns int32, work func(ctx context.Context, conn *pgxpool.Conn) error) {
+	benchmarkStockPoolConcurrency(b, maxConns, int(maxConns), work)
+}
+
+// benchmarkStockPoolConcurrency runs a benchmark with configurable concurrency.
+func benchmarkStockPoolConcurrency(b *testing.B, maxConns int32, concurrency int, work func(ctx context.Context, conn *pgxpool.Conn) error) {
+	ctx := context.Background()
+
+	cfg, err := pgxpool.ParseConfig(testConnStr())
+	if err != nil {
+		b.Fatalf("parse config: %v", err)
+	}
+	cfg.MinConns = 0
+	cfg.MaxConns = maxConns
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		b.Fatalf("create pool: %v", err)
+	}
+	defer pool.Close()
+
+	// Warm up the pool
+	for i := 0; i < int(maxConns); i++ {
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			b.Fatalf("warmup acquire: %v", err)
+		}
+		conn.Release()
+	}
+
+	b.ResetTimer()
+	b.SetParallelism(concurrency)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			conn, err := pool.Acquire(ctx)
+			if err != nil {
+				b.Errorf("acquire: %v", err)
+				continue
+			}
+			if err := work(ctx, conn); err != nil {
+				conn.Release()
+				b.Errorf("work: %v", err)
+				continue
+			}
+			conn.Release()
+		}
+	})
+}
+
+// benchmarkMultiPool runs a benchmark using MultiPool with a single pool.
+func benchmarkMultiPool(b *testing.B, maxConns int32, work func(ctx context.Context, conn *pgxpool.Conn) error) {
+	benchmarkMultiPoolConcurrency(b, maxConns, int(maxConns), work)
+}
+
+// benchmarkMultiPoolConcurrency runs a benchmark with configurable concurrency.
+func benchmarkMultiPoolConcurrency(b *testing.B, maxConns int32, concurrency int, work func(ctx context.Context, conn *pgxpool.Conn) error) {
+	ctx := context.Background()
+
+	mp := NewMultiPool[string](maxConns, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	cfg, err := pgxpool.ParseConfig(testConnStr())
+	if err != nil {
+		b.Fatalf("parse config: %v", err)
+	}
+	cfg.MinConns = 0
+	cfg.MaxConns = maxConns
+
+	if err := mp.AddPool(ctx, "user", cfg); err != nil {
+		b.Fatalf("add pool: %v", err)
+	}
+	mp.Start()
+	defer mp.Close()
+
+	// Warm up the pool
+	for i := 0; i < int(maxConns); i++ {
+		conn, err := mp.Acquire(ctx, "user")
+		if err != nil {
+			b.Fatalf("warmup acquire: %v", err)
+		}
+		conn.Release()
+	}
+
+	b.ResetTimer()
+	b.SetParallelism(concurrency)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			conn, err := mp.Acquire(ctx, "user")
+			if err != nil {
+				b.Errorf("acquire: %v", err)
+				continue
+			}
+			if err := work(ctx, conn.Value()); err != nil {
+				conn.Release()
+				b.Errorf("work: %v", err)
+				continue
+			}
+			conn.Release()
+		}
+	})
+}
+
+// =============================================================================
+// Detailed Contention Tests with Metrics
+// =============================================================================
+
+// TestMultiPool_ContentionProfile runs a detailed test to profile contention
+// behavior and compare MultiPool vs stock pgxpool.Pool.
+func TestMultiPool_ContentionProfile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping contention profile in short mode")
+	}
+
+	ctx := context.Background()
+	const maxConns = 50
+	const concurrency = 100
+	const duration = 3 * time.Second
+
+	t.Run("StockPool", func(t *testing.T) {
+		cfg, err := pgxpool.ParseConfig(testConnStr())
+		require.NoError(t, err)
+		cfg.MinConns = 0
+		cfg.MaxConns = maxConns
+
+		pool, err := pgxpool.NewWithConfig(ctx, cfg)
+		require.NoError(t, err)
+		defer pool.Close()
+
+		// Warm up
+		for i := 0; i < int(maxConns); i++ {
+			conn, err := pool.Acquire(ctx)
+			require.NoError(t, err)
+			conn.Release()
+		}
+
+		result := runContentionTest(t, duration, concurrency, func(ctx context.Context) error {
+			conn, err := pool.Acquire(ctx)
+			if err != nil {
+				return err
+			}
+			defer conn.Release()
+			var n int
+			return conn.QueryRow(ctx, "SELECT 1").Scan(&n)
+		})
+
+		t.Logf("Stock pgxpool.Pool results:")
+		t.Logf("  Total ops: %d", result.totalOps)
+		t.Logf("  Successes: %d (%.1f%%)", result.successes, float64(result.successes)/float64(result.totalOps)*100)
+		t.Logf("  Errors: %d", result.errors)
+		t.Logf("  Ops/sec: %.0f", float64(result.successes)/duration.Seconds())
+		t.Logf("  Avg latency: %.2fms", float64(result.totalLatency.Nanoseconds())/float64(result.successes)/1e6)
+	})
+
+	t.Run("MultiPool", func(t *testing.T) {
+		mp := NewMultiPool[string](maxConns, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		cfg, err := pgxpool.ParseConfig(testConnStr())
+		require.NoError(t, err)
+		cfg.MinConns = 0
+		cfg.MaxConns = maxConns
+
+		err = mp.AddPool(ctx, "user", cfg)
+		require.NoError(t, err)
+		mp.Start()
+		defer mp.Close()
+
+		// Warm up
+		for i := 0; i < int(maxConns); i++ {
+			conn, err := mp.Acquire(ctx, "user")
+			require.NoError(t, err)
+			conn.Release()
+		}
+
+		result := runContentionTest(t, duration, concurrency, func(ctx context.Context) error {
+			conn, err := mp.Acquire(ctx, "user")
+			if err != nil {
+				return err
+			}
+			defer conn.Release()
+			var n int
+			return conn.Value().QueryRow(ctx, "SELECT 1").Scan(&n)
+		})
+
+		t.Logf("MultiPool results:")
+		t.Logf("  Total ops: %d", result.totalOps)
+		t.Logf("  Successes: %d (%.1f%%)", result.successes, float64(result.successes)/float64(result.totalOps)*100)
+		t.Logf("  Errors: %d", result.errors)
+		t.Logf("  Ops/sec: %.0f", float64(result.successes)/duration.Seconds())
+		t.Logf("  Avg latency: %.2fms", float64(result.totalLatency.Nanoseconds())/float64(result.successes)/1e6)
+	})
+}
+
+type contentionResult struct {
+	totalOps     int64
+	successes    int64
+	errors       int64
+	totalLatency time.Duration
+}
+
+func runContentionTest(t *testing.T, duration time.Duration, concurrency int, work func(ctx context.Context) error) contentionResult {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), duration+5*time.Second)
+	defer cancel()
+
+	var result contentionResult
+	var totalLatency atomic.Int64
+	var ops, successes, errors atomic.Int64
+
+	deadline := time.Now().Add(duration)
+	var wg sync.WaitGroup
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for time.Now().Before(deadline) {
+				start := time.Now()
+				ops.Add(1)
+
+				workCtx, workCancel := context.WithTimeout(ctx, 5*time.Second)
+				err := work(workCtx)
+				workCancel()
+
+				elapsed := time.Since(start)
+				if err != nil {
+					errors.Add(1)
+				} else {
+					successes.Add(1)
+					totalLatency.Add(elapsed.Nanoseconds())
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	result.totalOps = ops.Load()
+	result.successes = successes.Load()
+	result.errors = errors.Load()
+	result.totalLatency = time.Duration(totalLatency.Load())
+	return result
+}
+
+// TestMultiPool_AcquireLatencyHistogram measures acquire latency distribution.
+func TestMultiPool_AcquireLatencyHistogram(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping latency histogram in short mode")
+	}
+
+	ctx := context.Background()
+	const maxConns = 50
+	const samples = 10000
+
+	t.Run("StockPool_NoContention", func(t *testing.T) {
+		cfg, err := pgxpool.ParseConfig(testConnStr())
+		require.NoError(t, err)
+		cfg.MinConns = maxConns
+		cfg.MaxConns = maxConns
+
+		pool, err := pgxpool.NewWithConfig(ctx, cfg)
+		require.NoError(t, err)
+		defer pool.Close()
+
+		// Warm up
+		time.Sleep(100 * time.Millisecond)
+
+		latencies := make([]time.Duration, samples)
+		for i := 0; i < samples; i++ {
+			start := time.Now()
+			conn, err := pool.Acquire(ctx)
+			latencies[i] = time.Since(start)
+			require.NoError(t, err)
+			conn.Release()
+		}
+
+		reportLatencies(t, "Stock pgxpool (no contention)", latencies)
+	})
+
+	t.Run("MultiPool_NoContention", func(t *testing.T) {
+		mp := NewMultiPool[string](maxConns, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		cfg, err := pgxpool.ParseConfig(testConnStr())
+		require.NoError(t, err)
+		cfg.MinConns = maxConns
+		cfg.MaxConns = maxConns
+
+		err = mp.AddPool(ctx, "user", cfg)
+		require.NoError(t, err)
+		mp.Start()
+		defer mp.Close()
+
+		// Warm up
+		time.Sleep(100 * time.Millisecond)
+
+		latencies := make([]time.Duration, samples)
+		for i := 0; i < samples; i++ {
+			start := time.Now()
+			conn, err := mp.Acquire(ctx, "user")
+			latencies[i] = time.Since(start)
+			require.NoError(t, err)
+			conn.Release()
+		}
+
+		reportLatencies(t, "MultiPool (no contention)", latencies)
+	})
+}
+
+func reportLatencies(t *testing.T, name string, latencies []time.Duration) {
+	t.Helper()
+
+	// Sort for percentiles
+	sorted := make([]time.Duration, len(latencies))
+	copy(sorted, latencies)
+	sortDurations(sorted)
+
+	var total time.Duration
+	for _, l := range latencies {
+		total += l
+	}
+
+	n := len(sorted)
+	t.Logf("%s latencies:", name)
+	t.Logf("  Count: %d", n)
+	t.Logf("  Avg: %.2fμs", float64(total.Nanoseconds())/float64(n)/1000)
+	t.Logf("  Min: %.2fμs", float64(sorted[0].Nanoseconds())/1000)
+	t.Logf("  P50: %.2fμs", float64(sorted[n*50/100].Nanoseconds())/1000)
+	t.Logf("  P95: %.2fμs", float64(sorted[n*95/100].Nanoseconds())/1000)
+	t.Logf("  P99: %.2fμs", float64(sorted[n*99/100].Nanoseconds())/1000)
+	t.Logf("  Max: %.2fμs", float64(sorted[n-1].Nanoseconds())/1000)
+}
+
+func sortDurations(d []time.Duration) {
+	for i := 1; i < len(d); i++ {
+		for j := i; j > 0 && d[j] < d[j-1]; j-- {
+			d[j], d[j-1] = d[j-1], d[j]
+		}
+	}
+}

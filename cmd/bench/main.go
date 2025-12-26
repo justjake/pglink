@@ -116,6 +116,16 @@ type RunConfig struct {
 	FullTargets    bool // Include all target variants (TLS, session pooling, multiple GOMAXPROCS)
 	Seed           int64
 
+	// Query execution mode
+	SimpleQueryMode bool // Use simple query protocol instead of extended protocol
+
+	// Case filtering (empty = all cases)
+	Cases []string
+
+	// Port configuration (allows running from worktrees without conflicts)
+	PglinkPort    int
+	PgbouncerPort int
+
 	// A/B comparison config (optional)
 	Compare           *CompareConfig // Comparison target config
 	CompareGomaxprocs int            // GOMAXPROCS for comparison target
@@ -161,14 +171,22 @@ type BenchmarkSuite struct {
 
 // NewBenchmarkSuite creates a new benchmark suite
 func NewBenchmarkSuite(cfg RunConfig, projectDir, outputDir string) *BenchmarkSuite {
+	pglinkPort := cfg.PglinkPort
+	if pglinkPort == 0 {
+		pglinkPort = 16432
+	}
+	pgbouncerPort := cfg.PgbouncerPort
+	if pgbouncerPort == 0 {
+		pgbouncerPort = 16433
+	}
 	return &BenchmarkSuite{
 		runCfg:        cfg,
 		projectDir:    projectDir,
 		outputDir:     outputDir,
 		directPort:    15432,
-		pglinkPort:    16432,
-		pgbouncerPort: 16433,
-		comparePort:   16434,
+		pglinkPort:    pglinkPort,
+		pgbouncerPort: pgbouncerPort,
+		comparePort:   pglinkPort + 2, // Offset from pglink port
 		rng:           rand.New(rand.NewSource(cfg.Seed)),
 	}
 }
@@ -717,7 +735,13 @@ var (
 )
 
 func (s *BenchmarkSuite) buildBenchmarkCases() []*BenchmarkCase {
-	return []*BenchmarkCase{
+	// All available cases
+	allCases := []*BenchmarkCase{
+		{
+			Name:        "select1",
+			Title:       "SELECT 1 Latency",
+			Description: "Minimal query to measure proxy overhead",
+		},
 		{
 			Name:        "mixed",
 			Title:       "Mixed Workload",
@@ -734,11 +758,32 @@ func (s *BenchmarkSuite) buildBenchmarkCases() []*BenchmarkCase {
 			Description: "COPY FROM STDIN benchmark using temp tables",
 		},
 	}
+
+	// If no cases specified, return all
+	if len(s.runCfg.Cases) == 0 {
+		return allCases
+	}
+
+	// Filter to only requested cases
+	caseSet := make(map[string]bool)
+	for _, c := range s.runCfg.Cases {
+		caseSet[c] = true
+	}
+
+	var filtered []*BenchmarkCase
+	for _, bc := range allCases {
+		if caseSet[bc.Name] {
+			filtered = append(filtered, bc)
+		}
+	}
+	return filtered
 }
 
 // getTaskForCase returns the appropriate task function for a benchmark case
 func getTaskForCase(bc *BenchmarkCase) func(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error) {
 	switch bc.Name {
+	case "select1":
+		return taskSelect1
 	case "mixed":
 		return taskMixedWorkload
 	case "copy_out":
@@ -748,6 +793,16 @@ func getTaskForCase(bc *BenchmarkCase) func(ctx context.Context, s *BenchmarkSui
 	default:
 		return taskMixedWorkload
 	}
+}
+
+// taskSelect1 executes a single SELECT 1 query to measure minimal latency
+func taskSelect1(ctx context.Context, s *BenchmarkSuite, pool *pgxpool.Pool, bc *BenchmarkCase) (TaskResult, error) {
+	var result int
+	err := pool.QueryRow(ctx, "SELECT 1").Scan(&result)
+	if err != nil {
+		return TaskResult{}, err
+	}
+	return TaskResult{Queries: 1}, nil
 }
 
 // taskMixedWorkload executes a batch of queries from the pre-generated workload
@@ -925,11 +980,18 @@ func (s *BenchmarkSuite) generateMixedWorkload() {
 }
 
 func (s *BenchmarkSuite) ensureDockerCompose(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker-compose", "up", "-d", "--wait")
-	cmd.Dir = s.projectDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	// Just verify backends are reachable - let the shell script manage docker-compose
+	// This avoids conflicts when running from worktrees
+	for _, port := range []int{15432, 15433, 15434} {
+		connStr := fmt.Sprintf("postgres://app:app_password@localhost:%d/uno?sslmode=disable&connect_timeout=2", port)
+		conn, err := pgx.Connect(ctx, connStr)
+		if err != nil {
+			return fmt.Errorf("PostgreSQL backend on port %d not reachable: %w (run docker-compose up -d from main repo)", port, err)
+		}
+		_ = conn.Close(ctx)
+	}
+	log.Println("All PostgreSQL backends are reachable")
+	return nil
 }
 
 func (s *BenchmarkSuite) generatePglinkConfig() (*config.Config, error) {
@@ -1258,6 +1320,11 @@ func (s *BenchmarkSuite) Run(ctx context.Context) error {
 	log.Printf("Running %d benchmark cases × %d targets × %d rounds", len(cases), len(s.targets), rounds)
 	log.Printf("Each round: %s warmup + %s measurement", s.runCfg.Warmup, s.runCfg.Duration)
 	log.Printf("Pool: max_conns=%d, concurrency=%d", s.runCfg.MaxConns, s.runCfg.Concurrency)
+	if s.runCfg.SimpleQueryMode {
+		log.Printf("Query mode: simple protocol")
+	} else {
+		log.Printf("Query mode: extended protocol")
+	}
 
 	for _, bc := range cases {
 		log.Printf("\n=== %s ===", bc.Title)
@@ -1473,8 +1540,21 @@ func (s *BenchmarkSuite) runTarget(
 		}
 		poolConfig.MaxConns = int32(s.runCfg.Concurrency)
 		poolConfig.MinConns = int32(s.runCfg.Concurrency)
-		// Use default extended protocol (prepare + execute)
-		poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+
+		// Choose query execution mode
+		if s.runCfg.SimpleQueryMode {
+			// Simple query protocol - single round trip, no prepared statements
+			poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+			// pgx requires these settings for simple protocol
+			if poolConfig.ConnConfig.RuntimeParams == nil {
+				poolConfig.ConnConfig.RuntimeParams = make(map[string]string)
+			}
+			poolConfig.ConnConfig.RuntimeParams["standard_conforming_strings"] = "on"
+			poolConfig.ConnConfig.RuntimeParams["client_encoding"] = "UTF8"
+		} else {
+			// Extended protocol (prepare + execute)
+			poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+		}
 
 		pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
 		if err != nil {
@@ -1647,6 +1727,7 @@ Generated: {{.Timestamp}}
 - **Rounds per target:** {{.Rounds}} (shuffled order to mitigate ordering effects)
 - **Duration per round:** {{.Duration}} measurement + {{.Warmup}} warmup
 - **Pool:** max_conns={{.MaxConns}}, concurrency={{.Concurrency}}
+- **Query mode:** {{.QueryMode}}
 - **Workload seed:** {{.Seed}} (for reproducibility)
 
 ## Results
@@ -1796,6 +1877,11 @@ High error rates typically indicate pool exhaustion (concurrency > max_conns) or
 		})
 	}
 
+	queryMode := "extended protocol"
+	if s.runCfg.SimpleQueryMode {
+		queryMode = "simple protocol"
+	}
+
 	data := struct {
 		Timestamp    string
 		Rounds       int
@@ -1803,6 +1889,7 @@ High error rates typically indicate pool exhaustion (concurrency > max_conns) or
 		Warmup       string
 		MaxConns     int
 		Concurrency  int
+		QueryMode    string
 		Seed         int64
 		Cases        []CaseData
 		ErrorSamples []string
@@ -1817,6 +1904,7 @@ High error rates typically indicate pool exhaustion (concurrency > max_conns) or
 		Warmup:       s.runCfg.Warmup.String(),
 		MaxConns:     s.runCfg.MaxConns,
 		Concurrency:  s.runCfg.Concurrency,
+		QueryMode:    queryMode,
 		Seed:         s.runCfg.Seed,
 		Cases:        cases,
 		ErrorSamples: errorSamples,
@@ -1849,6 +1937,16 @@ func main() {
 	fullTargets := flag.Bool("full-targets", false, "Include all target variants (TLS, session pooling, GOMAXPROCS 4/8/16)")
 	flightRecorder := flag.Bool("flight-recorder", false, "Enable flight recorder for pglink targets")
 	seed := flag.Int64("seed", 0, "Random seed for workload generation (0 = use time-based seed)")
+
+	// Query execution mode
+	simpleQuery := flag.Bool("simple-query", false, "Use simple query protocol instead of extended protocol")
+
+	// Case selection (comma-separated list)
+	casesFlag := flag.String("cases", "", "Comma-separated list of cases to run (select1,mixed,copy_in,copy_out). Empty = all cases")
+
+	// Port configuration (allows running from worktrees without conflicts)
+	pglinkPort := flag.Int("pglink-port", 16432, "Port for pglink proxy")
+	pgbouncerPort := flag.Int("pgbouncer-port", 16433, "Port for pgbouncer")
 
 	// A/B comparison flags (mutually exclusive)
 	compareRef := flag.String("compare-ref", "", "Git ref (branch/tag/commit) to compare against. Builds and caches binary.")
@@ -1892,6 +1990,17 @@ func main() {
 		}
 	}
 
+	// Parse cases flag
+	var cases []string
+	if *casesFlag != "" {
+		for _, c := range strings.Split(*casesFlag, ",") {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				cases = append(cases, c)
+			}
+		}
+	}
+
 	cfg := RunConfig{
 		Duration:          *duration,
 		Warmup:            *warmup,
@@ -1901,6 +2010,10 @@ func main() {
 		FullTargets:       *fullTargets,
 		FlightRecorder:    *flightRecorder,
 		Seed:              *seed,
+		SimpleQueryMode:   *simpleQuery,
+		Cases:             cases,
+		PglinkPort:        *pglinkPort,
+		PgbouncerPort:     *pgbouncerPort,
 		Compare:           compareCfg,
 		CompareGomaxprocs: *compareGomaxprocs,
 	}
