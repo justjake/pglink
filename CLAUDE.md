@@ -35,6 +35,20 @@ Supported log levels: `debug`, `info`, `warn`, `error`.
 - `pkg/config`: Config loading and validation.
 - `cmd/pglink`: Main entry point.
 
+## Reference: PgBouncer
+
+The PgBouncer source code is available as a git submodule at `third_party/pgbouncer/` for reference purposes. PgBouncer is a mature, production-grade PostgreSQL connection pooler that implements similar functionality to pglink.
+
+**Important:** The PgBouncer source is read-only reference material. Do not modify it. Use it to:
+- Understand how a production pooler handles edge cases
+- Reference protocol handling details
+- Compare implementation approaches
+
+To initialize the submodule (if not already done):
+```bash
+git submodule update --init third_party/pgbouncer
+```
+
 ## Scripts
 
 **Always check `bin/` for available scripts and prefer using them over direct commands.** The scripts handle environment setup (mise, GOEXPERIMENT, etc.) automatically.
