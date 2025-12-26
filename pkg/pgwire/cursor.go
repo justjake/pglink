@@ -358,13 +358,16 @@ func (r *RingMsg) Retain() RawMessageSource {
 }
 
 func (r *RingMsg) String() string {
-	return fmt.Sprintf("RingMsg{idx=%d type=%c bytes=%d ring=%p}", r.msgIdx, r.MessageType(), r.MessageLen(), r.in.ring)
+	// Note: Don't call MessageType/MessageLen here - they call panicUnlessValid
+	// which could cause infinite recursion when formatting panic messages
+	start, end := r.in.capacity.Range()
+	return fmt.Sprintf("RingMsg{idx=%d valid=[%d,%d) ring=%p}", r.msgIdx, start, end, r.in.ring)
 }
 
 func (r *RingMsg) panicUnlessValid() {
 	start, end := r.in.capacity.Range()
 	if r.msgIdx < start || r.msgIdx >= end {
-		panic(fmt.Sprintf("out of bounds %s: %s", r.in.capacity, r))
+		panic(fmt.Sprintf("RingMsg out of bounds: idx=%d valid=[%d,%d)", r.msgIdx, start, end))
 	}
 }
 
