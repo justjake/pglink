@@ -1,3 +1,6 @@
 out/
 vendor/
 worktrees/
+
+# Worktree-specific Claude files
+.claude-plan

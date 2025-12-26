@@ -48,8 +48,36 @@ elif [[ -f "$dir/.claude-plan" ]]; then
     plan_path="$dir/.claude-plan"
 fi
 
-# Remove worktree
-git worktree remove "$dir" $force
+# Clean up untracked Claude-specific files that shouldn't block removal
+# Only delete files that are NOT tracked by git
+if [[ -e "$dir/.claude-plan" ]]; then
+    # .claude-plan is a symlink created by worktree-new, always safe to delete
+    rm -f "$dir/.claude-plan"
+fi
+# Clean untracked files in .claude/ (but not tracked ones like settings.json)
+if [[ -d "$dir/.claude" ]]; then
+    git -C "$dir" clean -fd "$dir/.claude" 2>/dev/null || true
+fi
+
+# Attempt to remove worktree
+set +e
+git worktree remove "$dir" $force 2>&1
+remove_status=$?
+set -e
+
+if [[ $remove_status -ne 0 ]]; then
+    echo ""
+    echo "Error: Cannot remove worktree. Modified or untracked files:"
+    echo ""
+    git -C "$dir" status --porcelain | head -20
+    count=$(git -C "$dir" status --porcelain | wc -l | tr -d ' ')
+    if [[ "$count" -gt 20 ]]; then
+        echo "... and $((count - 20)) more files"
+    fi
+    echo ""
+    echo "Use --force to remove anyway, or commit/stash your changes first."
+    exit 1
+fi
 
 # Log the removal to out/worktrees.log
 mkdir -p "$MAIN_ROOT/out"
