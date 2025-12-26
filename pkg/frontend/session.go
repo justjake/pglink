@@ -83,6 +83,13 @@ type Session struct {
 	// Used to ensure consistent naming within a backend acquisition.
 	statementNameMap map[string]string
 
+	// Map from server statement name to query hash.
+	// Used for prepared statement caching and re-creation.
+	serverStatementQueryHash map[string]uint64
+
+	// Pending fake responses to send to client (e.g., ParseComplete when Parse was skipped)
+	pendingFakeResponses []pgproto3.BackendMessage
+
 	// Observability
 	tracingEnabled bool                   // Whether OTEL tracing is enabled
 	metrics        *observability.Metrics // May be nil if metrics disabled
@@ -518,9 +525,11 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			},
 		},
 		Server: pgwire.ServerMessageHandlers[bool]{
-			Async:         nil,
-			Copy:          nil,
-			ExtendedQuery: nil,
+			Async: nil,
+			Copy:  nil,
+			ExtendedQuery: func(msg pgwire.ServerExtendedQuery) (bool, error) {
+				return s.handleServerExtendedQuery(msg, backendCursor.MsgIdx(), &toClient)
+			},
 			Response: func(msg pgwire.ServerResponse) (bool, error) {
 				return s.handleServerResponse(msg, backendCursor.MsgIdx(), &toClient)
 			},
@@ -553,6 +562,18 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 
 			if !continueWithBackend || err != nil {
 				return
+			}
+		}
+
+		// Flush any pending fake responses (e.g., ParseComplete for skipped Parse)
+		if len(s.pendingFakeResponses) > 0 {
+			s.logger.Debug("sending fake responses", "count", len(s.pendingFakeResponses))
+			for _, fakeMsg := range s.pendingFakeResponses {
+				s.frontend.Send(fakeMsg)
+			}
+			s.pendingFakeResponses = nil
+			if flushErr := s.frontend.Flush(); flushErr != nil {
+				return false, fmt.Errorf("failed to flush fake responses: %w", flushErr)
 			}
 		}
 
@@ -708,14 +729,64 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
 		Bind: func(msg *pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
-			// Track pending request
+			serverName := s.clientToServerPreparedStatementName(parsed.PreparedStatement)
+
+			// Check if statement exists on this backend connection
+			statementExistsOnBackend := s.backend.HasStatement(serverName)
+
+			if !statementExistsOnBackend && parsed.PreparedStatement != "" {
+				// Statement doesn't exist on backend - try to re-create it using cached query
+				queryHash, hasHash := s.serverStatementQueryHash[serverName]
+				if hasHash {
+					cachedStmt, inCache := s.database.StatementCache().Get(queryHash)
+					if inCache {
+						s.logger.Debug("re-creating statement on backend",
+							"clientName", parsed.PreparedStatement,
+							"serverName", serverName,
+							"queryHash", queryHash)
+
+						// Inject Parse before Bind - push ActionSkip since client doesn't expect ParseComplete
+						s.state.PushRequest(pgwire.PendingRequest{
+							RequestType:   pgwire.MsgTypeParse,
+							Action:        pgwire.ActionSkip, // Don't forward ParseComplete to client
+							StatementName: parsed.PreparedStatement,
+							Query:         cachedStmt.Query,
+							QueryHash:     queryHash,
+						})
+
+						// Send Parse to backend
+						parseMsg := &pgproto3.Parse{
+							Name:          serverName,
+							Query:         cachedStmt.Query,
+							ParameterOIDs: cachedStmt.ParameterOIDs,
+						}
+						if parseClientMsg, ok := pgwire.ToClientMessage(parseMsg); ok {
+							s.backend.UpdateState(parseClientMsg)
+						}
+						if err := s.backend.WriteMsg(parseMsg); err != nil {
+							return nil, fmt.Errorf("failed to send Parse for statement re-creation: %w", err)
+						}
+					} else {
+						s.logger.Warn("statement not in cache for re-creation",
+							"clientName", parsed.PreparedStatement,
+							"serverName", serverName,
+							"queryHash", queryHash)
+					}
+				} else {
+					s.logger.Warn("no query hash for statement re-creation",
+						"clientName", parsed.PreparedStatement,
+						"serverName", serverName)
+				}
+			}
+
+			// Track pending request for Bind
 			s.state.PushRequest(pgwire.PendingRequest{
 				RequestType:   pgwire.MsgTypeBind,
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.PreparedStatement,
 			})
 			return &pgproto3.Bind{
-				PreparedStatement:    s.clientToServerPreparedStatementName(parsed.PreparedStatement),
+				PreparedStatement:    serverName,
 				DestinationPortal:    s.clientToServerPortalName(parsed.DestinationPortal),
 				ParameterFormatCodes: parsed.ParameterFormatCodes,
 				Parameters:           parsed.Parameters,
@@ -724,16 +795,49 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		},
 		Parse: func(msg *pgwire.ClientExtendedQueryParse) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
-			// Track pending request
+			queryHash := pgwire.HashQuery(parsed.Query)
+			serverName := s.clientToServerPreparedStatementName(parsed.Name)
+
+			// Track the query hash for this server statement name
+			if s.serverStatementQueryHash == nil {
+				s.serverStatementQueryHash = make(map[string]uint64)
+			}
+			s.serverStatementQueryHash[serverName] = queryHash
+
+			// Check if we can skip sending Parse to the backend:
+			// 1. Statement already exists on this backend connection
+			// 2. Query is in the database cache (same query)
+			statementExistsOnBackend := s.backend.HasStatement(serverName)
+			_, queryInCache := s.database.StatementCache().Get(queryHash)
+
+			if statementExistsOnBackend && queryInCache {
+				// Skip Parse - statement already exists on backend with same query
+				s.logger.Debug("skipping Parse - statement exists on backend",
+					"clientName", parsed.Name,
+					"serverName", serverName,
+					"queryHash", queryHash)
+
+				// Queue fake ParseComplete to send to client
+				// Don't track in request queue since we're not sending to backend
+				s.pendingFakeResponses = append(s.pendingFakeResponses, &pgproto3.ParseComplete{})
+
+				// Update client's state to reflect the "parsed" statement
+				// (the state update already happened when we processed the client message)
+
+				// Return nil to indicate no message should be sent to backend
+				return nil, nil
+			}
+
+			// Normal path: send Parse to backend
 			s.state.PushRequest(pgwire.PendingRequest{
 				RequestType:   pgwire.MsgTypeParse,
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.Name,
 				Query:         parsed.Query,
-				QueryHash:     pgwire.HashQuery(parsed.Query),
+				QueryHash:     queryHash,
 			})
 			return &pgproto3.Parse{
-				Name:          s.clientToServerPreparedStatementName(parsed.Name),
+				Name:          serverName,
 				Query:         parsed.Query,
 				ParameterOIDs: parsed.ParameterOIDs,
 			}, nil
@@ -826,13 +930,67 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 	return true, nil
 }
 
+func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery, msgIdx int64, toClient **pgwire.RingRange) (bool, error) {
+	s.state.Update(msg)
+
+	// Default to forwarding
+	action := pgwire.ActionForward
+
+	// Handle extended query responses that consume pending requests
+	switch msg.(type) {
+	case *pgwire.ServerExtendedQueryParseComplete:
+		if req, ok := s.state.PopForResponse('1'); ok {
+			action = req.Action
+			// Populate cache on ParseComplete (for ActionForward and ActionSkip)
+			if req.Query != "" {
+				s.database.StatementCache().Put(&pgwire.PreparedStatement{
+					Query:     req.Query,
+					QueryHash: req.QueryHash,
+					// ParameterOIDs and RowDescription filled in from Describe responses
+				})
+				s.logger.Debug("cached prepared statement",
+					"statementName", req.StatementName,
+					"queryHash", req.QueryHash)
+			}
+		}
+	case *pgwire.ServerExtendedQueryBindComplete:
+		if req, ok := s.state.PopForResponse('2'); ok {
+			action = req.Action
+		}
+	case *pgwire.ServerExtendedQueryCloseComplete:
+		if req, ok := s.state.PopForResponse('3'); ok {
+			action = req.Action
+		}
+	}
+
+	// Handle response based on action
+	switch action {
+	case pgwire.ActionForward:
+		// Forward the message to the client (default)
+		(*toClient).SetEndInclusive(msgIdx)
+	case pgwire.ActionSkip:
+		// Don't forward to client - just update state (already done above)
+		s.logger.Debug("skipping extended query response", "msgType", fmt.Sprintf("%T", msg))
+	case pgwire.ActionFake:
+		// Should not happen for server responses - fake responses are generated locally
+		s.logger.Warn("unexpected ActionFake for extended query response", "msgType", fmt.Sprintf("%T", msg))
+		(*toClient).SetEndInclusive(msgIdx) // Forward anyway
+	}
+
+	return true, nil
+}
+
 func (s *Session) handleServerResponse(msg pgwire.ServerResponse, msgIdx int64, toClient **pgwire.RingRange) (bool, error) {
 	s.state.Update(msg)
-	// Forward the message to the client
-	(*toClient).SetEndInclusive(msgIdx)
 	continueWithBackend := true
 
+	// Forward the message to the client
+	(*toClient).SetEndInclusive(msgIdx)
+
 	if _, ok := msg.(*pgwire.ServerResponseReadyForQuery); ok {
+		// Pop the pending Sync/Query request
+		s.state.PopForResponse('Z')
+
 		// TODO: double-check and flush ParameterStatuses?
 		inTxOrQuery := s.state.InTxOrQuery()
 		outstandingReqs := s.state.OutstandingRequestCount()

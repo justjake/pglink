@@ -22,6 +22,12 @@ func (c *PooledBackend) TrackedParameters() []string {
 	return c.session.TrackedParameters
 }
 
+// HasStatement returns true if the named prepared statement exists on this backend connection.
+func (c *PooledBackend) HasStatement(name string) bool {
+	c.panicIfReleased()
+	return c.session.State.Statements.Alive[name]
+}
+
 func (c *PooledBackend) String() string {
 	return fmt.Sprintf("%s&pooledBackend=%p", c.session.String(), c)
 }
