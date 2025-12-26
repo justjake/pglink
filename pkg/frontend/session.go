@@ -83,9 +83,6 @@ type Session struct {
 	// Used to ensure consistent naming within a backend acquisition.
 	statementNameMap map[string]string
 
-	// Message stored until the next call to Recv.
-	lastRecv pgwire.Message
-
 	// Observability
 	tracingEnabled bool                   // Whether OTEL tracing is enabled
 	metrics        *observability.Metrics // May be nil if metrics disabled
@@ -107,7 +104,9 @@ func (s *Session) Close() {
 		s.logger.Error("session close: error flushing to client", "error", flushError)
 	}
 
-	s.frontend.StopRingBuffer()
+	if stopErr := s.frontend.StopRingBuffer(); stopErr != nil {
+		s.logger.Error("session close: error stopping ring buffer", "error", stopErr)
+	}
 
 	s.cancel()
 
@@ -938,32 +937,6 @@ func (s *Session) initSessionProcessState() {
 
 	// Register for cancel requests so this session can be found by PID.
 	s.service.registerForCancel(s)
-}
-
-func (s *Session) parameterStatusDiffMessages() []*pgproto3.ParameterStatus {
-	if s.backend == nil {
-		return nil
-	}
-	diff := s.backend.ParameterStatusChanges(s.backend.TrackedParameters(), s.state.ParameterStatuses)
-	if diff == nil {
-		return nil
-	}
-
-	msgs := make([]*pgproto3.ParameterStatus, 0, len(diff))
-
-	for key, value := range diff {
-		var str string
-		if value != nil {
-			str = *value
-		}
-
-		msgs = append(msgs, &pgproto3.ParameterStatus{
-			Name:  key,
-			Value: str,
-		})
-	}
-
-	return msgs
 }
 
 // sendError sends an error response to the client.

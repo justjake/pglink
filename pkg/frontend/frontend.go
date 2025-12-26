@@ -57,8 +57,9 @@ func (f *Frontend) StartRingBuffer() {
 }
 
 // StopRingBuffer stops the ring buffer reader using deadline-based interruption.
-func (f *Frontend) StopRingBuffer() {
-	f.ringBuffer.StopNetConnReader()
+// Returns an error if the reader couldn't be stopped cleanly.
+func (f *Frontend) StopRingBuffer() error {
+	return f.ringBuffer.StopNetConnReader()
 }
 
 // Flush flushes any messages queued with Send() to the client.

@@ -30,7 +30,6 @@ type Session struct {
 
 	// Ring buffer for zero-copy message proxying
 	ringBuffer *pgwire.RingBuffer
-	readerDone chan struct{}
 }
 
 func GetSession(conn *pgconn.PgConn) *Session {
@@ -98,7 +97,7 @@ func (s *Session) ParameterStatusChanges(keys []string, since pgwire.ParameterSt
 }
 
 func (s *Session) Acquire() error {
-	if s.readerDone != nil {
+	if s.ringBuffer != nil && s.ringBuffer.Running() {
 		return fmt.Errorf("session already acquired")
 	}
 	s.updateParameterStatuses(s.TrackedParameters)
@@ -110,11 +109,7 @@ func (s *Session) Acquire() error {
 	} else {
 		s.ringBuffer = s.ringBuffer.NewWithSameBuffers()
 	}
-	s.readerDone = make(chan struct{})
-	go func() {
-		defer close(s.readerDone)
-		s.ringBuffer.ReadFrom(context.Background(), s.Conn.Conn())
-	}()
+	s.ringBuffer.StartNetConnReader(context.Background(), s.Conn.Conn())
 
 	return nil
 }
@@ -123,15 +118,10 @@ func (s *Session) Release() {
 	// TODO: do some things to normalize state?
 	// Run Sync, etc, before releasing? / releasing to the pool?
 
-	// Stop the ring buffer reader using deadline-based interruption
-	if s.readerDone != nil {
-		// Set deadline to interrupt any blocking Read()
-		s.Conn.Conn().SetDeadline(time.Now())
-		// Wait for reader goroutine to exit
-		<-s.readerDone
-		// Clear deadline so pgxpool can use the connection
-		s.Conn.Conn().SetDeadline(time.Time{})
-		s.readerDone = nil
+	if s.ringBuffer != nil && s.ringBuffer.Running() {
+		if err := s.ringBuffer.StopNetConnReader(); err != nil {
+			slog.Warn("backend session release: failed to stop ring buffer reader", "error", err)
+		}
 	}
 }
 

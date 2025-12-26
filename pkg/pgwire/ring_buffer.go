@@ -143,19 +143,37 @@ func (r *RingBuffer) StartNetConnReader(ctx context.Context, src net.Conn) {
 	r.readerDone = make(chan struct{})
 	go func() {
 		defer close(r.readerDone)
-		r.ReadFrom(ctx, src)
+		// ReadFrom stores any error via setError(), making it available via Error() and Done().
+		// The return value is the same error, so we don't need to handle it here.
+		r.ReadFrom(ctx, src) //nolint:errcheck
 	}()
 }
 
-func (r *RingBuffer) StopNetConnReader() {
+func (r *RingBuffer) StopNetConnReader() error {
 	if r.conn == nil {
-		return
+		return nil
 	}
-	r.conn.SetDeadline(time.Now().Add(-time.Second))
-	<-r.readerDone
-	r.conn.SetDeadline(time.Time{})
+	// Set deadline in the past to interrupt any blocking Read()
+	if err := r.conn.SetDeadline(time.Now().Add(-time.Second)); err != nil {
+		// Connection might already be closed; wait briefly then give up
+		select {
+		case <-r.readerDone:
+		case <-time.After(100 * time.Millisecond):
+			return fmt.Errorf("SetDeadline failed and reader didn't stop: %w", err)
+		}
+	} else {
+		<-r.readerDone
+	}
+	// Clear deadline so connection can be reused
+	if err := r.conn.SetDeadline(time.Time{}); err != nil {
+		// Connection is likely unusable, but we still cleaned up the reader
+		r.conn = nil
+		r.readerDone = nil
+		return fmt.Errorf("failed to clear deadline: %w", err)
+	}
 	r.conn = nil
 	r.readerDone = nil
+	return nil
 }
 
 func (r *RingBuffer) Running() bool {
