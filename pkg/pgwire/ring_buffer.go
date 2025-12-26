@@ -216,6 +216,36 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 			}
 		}
 
+		// Before reading more data, check if we have unparsed data in the buffer
+		// that we couldn't parse before due to metadata slots being full.
+		// This can happen when the reader releases messages faster than we parse.
+		unparsedData := r.rawEnd - r.parsePos
+		if unparsedData >= 5 { // At least a header worth of unparsed data
+			// Refresh metadata space info and try to parse
+			r.refreshCachedPositions()
+			usedMeta := r.localMsgCnt - r.cachedConsumedMsgs
+			if usedMeta < int64(len(r.offsets)) {
+				// We have metadata space, parse without reading more
+				streamingDetected := r.parseCompleteMessages(&msgsUntilSpaceRefresh)
+				if r.localMsgCnt > r.publishedMsgs {
+					r.publish()
+				}
+				if streamingDetected {
+					if err := r.handleStreamingMessage(ctx, src); err != nil {
+						return err
+					}
+				}
+				continue // Loop back to check again
+			}
+			// We have unparsed data but no metadata space.
+			// Wait for metadata space instead of blocking on Read().
+			if err := r.waitForSpace(ctx); err != nil {
+				return err
+			}
+			r.refreshCachedPositions()
+			continue
+		}
+
 		// Get contiguous region (handle wraparound)
 		writeOff := r.rawEnd & r.dataMask
 		contiguous := int64(len(r.data)) - writeOff
@@ -432,8 +462,11 @@ func (r *RingBuffer) ReleaseThrough(throughMsg int64) {
 		return
 	}
 
-	// Get the byte position of the next unconsumed message
-	dataPos := r.offsets[throughMsg&r.metaMask]
+	// Get the byte position after the last consumed message.
+	// We use MessageEnd(throughMsg-1) instead of offsets[throughMsg&metaMask] because
+	// the offset slots wrap around - when throughMsg >= metaSize and slots have been
+	// reused, offsets[throughMsg&metaMask] would give the wrong position.
+	dataPos := r.MessageEnd(throughMsg - 1)
 
 	atomic.StoreInt64(&r.consumedMsgs, throughMsg)
 	atomic.StoreInt64(&r.consumedBytes, dataPos)

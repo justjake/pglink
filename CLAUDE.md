@@ -18,6 +18,16 @@ runs that take longer than 30s to be a bug.
 When you write a new test case, ensure the test case fails after 30s no matter what.
 Add such timeouts to any tests you encounter.
 
+## Debug logging
+
+To run tests with debug logging enabled, set the `PGLINK_LOG_LEVEL` environment variable:
+
+```bash
+PGLINK_LOG_LEVEL=debug bin/test ./e2e -run TestBasicQuery
+```
+
+Supported log levels: `debug`, `info`, `warn`, `error`.
+
 ## Structure
 
 - `pkg/frontend`: Interactions between clients and the proxy. Accepts incoming connections, authenticates clients, proxies client requests to the backend.

@@ -509,7 +509,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			Copy:          nil,
 			ExtendedQuery: nil,
 			Response: func(msg pgwire.ServerResponse) (bool, error) {
-				return s.handleServerResponse(msg, &toClient)
+				return s.handleServerResponse(msg, backendCursor.MsgIdx(), &toClient)
 			},
 			Startup: func(msg pgwire.ServerStartup) (bool, error) {
 				err := pgwire.NewProtocolViolation(fmt.Errorf("backend sent startup message to active client session"), msg)
@@ -520,6 +520,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	}
 
 	handleFrontendBatch := func() (continueWithBackend bool, err error) {
+		s.logger.Debug("frontend batch", "start", frontendCursor.Start(), "end", frontendCursor.End())
 		toServer = frontendCursor.Slice(frontendCursor.Start(), frontendCursor.Start())
 		defer func() { toServer, err = flushRingRange(s.backend, toServer, err) }()
 
@@ -546,8 +547,12 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	}
 
 	handleBackendBatch := func() (continueWithBackend bool, err error) {
+		s.logger.Debug("backend batch", "start", backendCursor.Start(), "end", backendCursor.End())
 		toClient = backendCursor.Slice(backendCursor.Start(), backendCursor.Start())
-		defer func() { toClient, err = flushRingRange(s.frontend, toClient, err) }()
+		defer func() {
+			s.logger.Debug("backend batch flush", "msgs", toClient.Len())
+			toClient, err = flushRingRange(s.frontend, toClient, err)
+		}()
 
 		for backendCursor.NextMsg() {
 			var msg pgwire.ServerMessage
@@ -572,7 +577,9 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	}
 
 	// Handle initial frontend batch.
+	s.logger.Debug("initial frontend batch")
 	if continueWithBackend, err := handleFrontendBatch(); err != nil || !continueWithBackend {
+		s.logger.Debug("frontend batch done", "continue", continueWithBackend, "err", err)
 		return err
 	}
 
@@ -580,6 +587,9 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		// Check both sides without blocking
 		gotFrontend, errF := frontendCursor.TryNextBatch()
 		gotBackend, errB := backendCursor.TryNextBatch()
+		if gotFrontend || gotBackend {
+			s.logger.Debug("poll", "frontend", gotFrontend, "backend", gotBackend)
+		}
 		if errF != nil {
 			return errors.Join(errF, errB)
 		}
@@ -692,14 +702,18 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 	return true, nil
 }
 
-func (s *Session) handleServerResponse(msg pgwire.ServerResponse, toClient **pgwire.RingRange) (bool, error) {
+func (s *Session) handleServerResponse(msg pgwire.ServerResponse, msgIdx int64, toClient **pgwire.RingRange) (bool, error) {
 	s.state.Update(msg)
+	// Forward the message to the client
+	(*toClient).SetEndInclusive(msgIdx)
 	continueWithBackend := true
 
 	if _, ok := msg.(*pgwire.ServerResponseReadyForQuery); ok {
 		// TODO: double-check and flush ParameterStatuses?
-		if !s.state.InTxOrQuery() {
-			s.logger.Info("transaction ended, releasing backend", "msg", fmt.Sprintf("%T", msg))
+		inTxOrQuery := s.state.InTxOrQuery()
+		s.logger.Debug("ReadyForQuery", "inTx", inTxOrQuery, "txStatus", s.state.TxStatus)
+		if !inTxOrQuery {
+			s.logger.Debug("releasing backend")
 			continueWithBackend = false
 		}
 	}

@@ -246,9 +246,9 @@ func (s *ProtocolState) UpdateForServerResponseMessage(msg ServerResponse) {
 		if s.SyncsInFlight > 0 {
 			s.SyncsInFlight--
 		}
-		if s.Portals.Executing != nil {
-			s.clearPendingExecute()
-		}
+		// Always clear pending execute state when ReadyForQuery is received.
+		// This handles flows like Parse+Describe+Sync where no Execute is sent.
+		s.clearPendingExecute()
 	case *ServerResponseCommandComplete:
 	case *ServerResponseDataRow:
 	case *ServerResponseEmptyQueryResponse:

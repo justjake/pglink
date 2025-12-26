@@ -115,8 +115,21 @@ func NewHarnessForMain() *Harness {
 		panic(fmt.Sprintf("pglink.json not found at %s", configPath))
 	}
 
+	logLevel := slog.LevelInfo // Use INFO to avoid pgproto3 tracing overhead
+	if levelStr := os.Getenv("PGLINK_LOG_LEVEL"); levelStr != "" {
+		switch levelStr {
+		case "DEBUG", "debug":
+			logLevel = slog.LevelDebug
+		case "INFO", "info":
+			logLevel = slog.LevelInfo
+		case "WARN", "warn":
+			logLevel = slog.LevelWarn
+		case "ERROR", "error":
+			logLevel = slog.LevelError
+		}
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo, // Use INFO to avoid pgproto3 tracing overhead
+		Level: logLevel,
 	}))
 
 	return &Harness{
