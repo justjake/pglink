@@ -195,38 +195,35 @@ func readAllMessages(t *testing.T, ring *RingBuffer, isClient bool) []RawBody {
 	var results []RawBody
 	timeout := time.After(5 * time.Second)
 
-	// First, try to read any messages that are already published
-	// This handles the case where the buffer is already EOF but has messages
 	for {
-		// Check how many messages are published
-		published := ring.PublishedMsgCount()
-		if published > cursor.End() {
-			// There are messages to read - manually advance the cursor
-			cursor.endIdx = published
-			cursor.msgIdx = cursor.startIdx - 1
+		// Try to get a batch of messages
+		gotBatch, err := cursor.TryNextBatch()
+		if err != nil {
+			// EOF or error - we're done (all messages already delivered)
+			return results
+		}
 
+		if gotBatch {
+			// Read all messages in this batch
 			for cursor.NextMsg() {
 				retained := cursor.Retain().(RawBody)
 				results = append(results, retained)
 			}
-			// Prepare for next batch
-			cursor.startIdx = cursor.endIdx
-			cursor.msgIdx = cursor.startIdx - 1
+			continue
 		}
 
-		// Check if we're done
-		select {
-		case <-ring.Done():
-			// Ring is done - no more messages will arrive
-			return results
-		default:
-			// Not done yet, wait for more
-		}
-
+		// No batch yet, wait for more data
 		select {
 		case <-timeout:
 			t.Fatal("timeout reading messages from ring buffer")
 		case <-cursor.Done():
+			// Try one more time to get remaining messages
+			if gotBatch, _ := cursor.TryNextBatch(); gotBatch {
+				for cursor.NextMsg() {
+					retained := cursor.Retain().(RawBody)
+					results = append(results, retained)
+				}
+			}
 			return results
 		case <-cursor.Ready():
 			// More data available, loop back
@@ -256,16 +253,12 @@ func feedRingBuffer(t *testing.T, ring *RingBuffer, src io.Reader) {
 }
 
 // setupCursorAfterFeed sets up a cursor to read published messages after feedRingBuffer.
-// This is necessary because TryNextBatch returns EOF if the ring is at EOF,
-// even if there are published messages.
+// Now that TryNextBatch delivers all messages before returning EOF, this just calls TryNextBatch.
 func setupCursorAfterFeed(t *testing.T, cursor *Cursor) {
 	t.Helper()
-	published := cursor.ring.PublishedMsgCount()
-	if published == 0 {
-		return // No messages to set up
+	if _, err := cursor.TryNextBatch(); err != nil {
+		t.Fatalf("TryNextBatch failed: %v", err)
 	}
-	cursor.endIdx = published
-	cursor.msgIdx = cursor.startIdx - 1
 }
 
 // encodeClientMessages encodes frontend messages to wire format bytes.

@@ -94,28 +94,31 @@ func NewServerCursor(ring *RingBuffer) *Cursor {
 // TryNextBatch checks for new messages without blocking.
 // Returns (true, nil) if messages are available for processing.
 // Returns (false, nil) if no messages yet - use Ready() channel to wait.
-// Returns (false, err) on EOF or error.
+// Returns (false, err) only when there are no remaining messages AND the ring
+// has terminated (EOF or error). This ensures all messages are delivered before
+// the terminal error is returned.
 func (c *Cursor) TryNextBatch() (bool, error) {
 	// Release previous batch (if any)
 	if c.endIdx > 0 {
 		c.ring.ReleaseThrough(c.endIdx)
 	}
 
-	// Check for error first
+	// Check for new messages first - always deliver messages before errors
+	newEnd := c.ring.PublishedMsgCount()
+	if newEnd > c.endIdx {
+		c.startIdx = c.endIdx
+		c.endIdx = newEnd
+		c.msgIdx = c.startIdx - 1 // NextMsg will increment
+		return true, nil
+	}
+
+	// No new messages - check for terminal error (EOF, read error, etc.)
 	if err := c.ring.Error(); err != nil {
 		return false, err
 	}
 
-	// Non-blocking check for new messages
-	newEnd := c.ring.PublishedMsgCount()
-	if newEnd <= c.endIdx {
-		return false, nil
-	}
-
-	c.startIdx = c.endIdx
-	c.endIdx = newEnd
-	c.msgIdx = c.startIdx - 1 // NextMsg will increment
-	return true, nil
+	// No messages and no error - try again later
+	return false, nil
 }
 
 // Ready returns a channel that signals when new messages may be available.
