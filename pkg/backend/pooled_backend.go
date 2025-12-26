@@ -20,12 +20,13 @@ func (c *PooledBackend) TrackedParameters() []string {
 	return c.session.TrackedParameters
 }
 
-func (c *PooledBackend) PgConn() *pgconn.PgConn {
-	return c.conn.Value().Conn().PgConn()
+func (c *PooledBackend) String() string {
+	return fmt.Sprintf("%s&pooledBackend=%p", c.session.String(), c)
 }
 
-func (c *PooledBackend) Name() string {
-	return fmt.Sprintf("%s&pooledBackend=%p", c.session.Name(), c)
+func (c *PooledBackend) PgConn() *pgconn.PgConn {
+	c.panicIfReleased()
+	return c.conn.Value().Conn().PgConn()
 }
 
 func (c *PooledBackend) Flush() error {
@@ -43,12 +44,20 @@ func (c *PooledBackend) Cursor() *pgwire.Cursor {
 
 func (c *PooledBackend) WriteRange(r *pgwire.RingRange) error {
 	c.panicIfReleased()
-	return c.session.WriteRange(r)
+	err := c.session.WriteRange(r)
+	if err != nil {
+		c.MarkForDestroy(fmt.Errorf("failed to write message batch %s: %w", r.String(), err))
+	}
+	return err
 }
 
 func (c *PooledBackend) WriteMsg(msg pgproto3.FrontendMessage) error {
 	c.panicIfReleased()
-	return c.session.WriteMsg(msg)
+	err := c.session.WriteMsg(msg)
+	if err != nil {
+		c.MarkForDestroy(fmt.Errorf("failed to write message %T: %w", msg, err))
+	}
+	return err
 }
 
 func (c *PooledBackend) ParameterStatusChanges(keys []string, since pgwire.ParameterStatuses) pgwire.ParameterStatusDiff {
@@ -94,6 +103,6 @@ func (c *PooledBackend) ReleaseAndDestroy(err error) {
 
 func (c *PooledBackend) panicIfReleased() {
 	if c.released {
-		panic(fmt.Errorf("PooledConn: already released: %s", c.Name()))
+		panic(fmt.Errorf("PooledConn: already released: %s", c.String()))
 	}
 }

@@ -82,13 +82,13 @@ func GetOrCreateSession(conn *pgconn.PgConn, db *Database, user config.UserConfi
 		TrackedParameters: tracked,
 	}
 	session.updateState()
-	session.logger = db.logger.With("session", session.Name())
+	session.logger = db.logger.With("session", session.String())
 
 	conn.CustomData()[SessionExtraDataKey] = session
 	return session, nil
 }
 
-func (s *Session) Name() string {
+func (s *Session) String() string {
 	return fmt.Sprintf("%s@%s?pid=%d", s.UserName, s.DB.Name(), s.Conn.PID())
 }
 

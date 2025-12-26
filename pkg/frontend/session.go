@@ -345,7 +345,7 @@ func (s *Session) acquireBackend() (*slog.Logger, error) {
 	}
 
 	s.backend = be
-	logger := s.logger.With("backend", be.Name())
+	logger := s.logger.With("backend", be.String())
 	s.TODO_backendAcquisitionID++ // Increment to ensure unique statement names per acquisition
 
 	// Capture the backend's key data for query cancellation.
@@ -441,8 +441,45 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	s.logger = logger
 	defer func() { s.logger = oldLogger }()
 
+	// Welcome to the backend-acquired state.
+	//
+	// We have a ring buffer for each of the client (frontend) and server (backend).
+	// A background goroutine fills the ring and does preliminary parsing on messages.
+	// The cursors are used to read messages from the parsed portion of a ring buffer.
+	//
+	// The cursor advances at two scales:
+	// Outer: c.TryNextBatch() advances to the next batch of messages available from the ring -
+	//        messages in the portion of the ring that has been parsed.
+	//
+	//        IMPORTANT: Data read from the cursor is only valid until the next call to TryNextBatch().
+	//
+	// Inner: c.NextMsg() advances to the next message in the batch. When it
+	//        returns false, the batch is complete and we should advance to the next one.
+	//
+	//        IMPORTANT: Message instances returned by the cursor are only valid
+	//                   until the next call
+	//
+	// During each batch, we record the messages to forward to the other side in
+	// the `toClient` and `toServer` ring ranges. We copy these messages from the
+	// ring buffer to the appropriate net.Conn.
+	//
+	// For each message:
+	// - Update our simulation of the sender's state.
+	//   The state tracks stuff like transaction status, prepared statements, message flows, etc.
+	//
+	// - Decide what messages to send to the receiver:
+	//   - Most messages are just passed through unmodified, which takes the fast batch copy path.
+	//   - Some messages are replaced with a rewritten version
+	//   - Some messages are illegal and cause us to disconnect the client.
+	//
+	//   IMPORTANT: When you decide to send a message to the receiver, you must
+	//              update its state simulation with that message.
+	//
+	// - Decide if we should remain in the backend-acquired state, or release the backend
+	//   and return to the idle state.
 	frontendCursor := s.frontend.Cursor()
 	backendCursor := s.backend.Cursor()
+
 	var toServer *pgwire.RingRange
 	var toClient *pgwire.RingRange
 
@@ -482,24 +519,18 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		},
 	}
 
-	handleClientBatch := func() (continueWithBackend bool, err error) {
+	handleFrontendBatch := func() (continueWithBackend bool, err error) {
 		toServer = frontendCursor.Slice(frontendCursor.Start(), frontendCursor.Start())
-
-		defer func() {
-			if toServer.Len() > 0 {
-				flushErr := s.backend.WriteRange(toServer)
-				err = errors.Join(err, flushErr)
-				toServer = toServer.Slice(toServer.End(), toServer.End())
-			}
-		}()
+		defer func() { toServer, err = flushRingRange(s.backend, toServer, err) }()
 
 		for frontendCursor.NextMsg() {
 			var msg pgwire.ClientMessage
 			msg, err = frontendCursor.AsClient()
 			if err != nil {
-				return false, err
+				return false, pgwire.NewProtocolViolation(err, nil)
 			}
 
+			// TODO: make automatic?
 			s.state.Update(msg)
 
 			continueWithBackend, err = backendAcquiredState.Client.HandleDefault(msg, func(msg pgwire.ClientMessage) (bool, error) {
@@ -516,23 +547,16 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 
 	handleBackendBatch := func() (continueWithBackend bool, err error) {
 		toClient = backendCursor.Slice(backendCursor.Start(), backendCursor.Start())
-
-		defer func() {
-			if toClient.Len() > 0 {
-				flushErr := s.frontend.WriteRange(toClient)
-				err = errors.Join(err, flushErr)
-				toClient = toClient.Slice(toClient.End(), toClient.End())
-			}
-		}()
+		defer func() { toClient, err = flushRingRange(s.frontend, toClient, err) }()
 
 		for backendCursor.NextMsg() {
 			var msg pgwire.ServerMessage
 			msg, err = backendCursor.AsServer()
 			if err != nil {
-				return false, err
+				return false, pgwire.NewProtocolViolation(err, nil)
 			}
 
-			// TODO: this should be automatic (?)
+			// TODO: make automatic?
 			s.backend.UpdateState(msg)
 
 			continueWithBackend, err = backendAcquiredState.Server.HandleDefault(msg, func(msg pgwire.ServerMessage) (bool, error) {
@@ -548,7 +572,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	}
 
 	// Handle initial frontend batch.
-	if continueWithBackend, err := handleClientBatch(); err != nil || !continueWithBackend {
+	if continueWithBackend, err := handleFrontendBatch(); err != nil || !continueWithBackend {
 		return err
 	}
 
@@ -570,7 +594,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			}
 		}
 		if gotFrontend {
-			if continueWithBackend, err := handleClientBatch(); !continueWithBackend || err != nil {
+			if continueWithBackend, err := handleFrontendBatch(); !continueWithBackend || err != nil {
 				return err
 			}
 		}
@@ -654,17 +678,13 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		s.backend.UpdateState(rewrittenMsg)
 
 		// Flush pending toServer messages.
-		if (*toServer).Len() > 0 {
-			flushErr := s.backend.WriteRange(*toServer)
-			if flushErr != nil {
-				return false, flushErr
-			}
-			(*toServer) = (*toServer).Slice((*toServer).End(), (*toServer).End())
+		*toServer, err = flushRingRange(s.backend, *toServer, err)
+		if err != nil {
+			return false, err
 		}
 
 		// Send the rewritten message.
-		err := s.backend.WriteMsg(rewritten)
-		if err != nil {
+		if err := s.backend.WriteMsg(rewritten); err != nil {
 			return false, err
 		}
 	}
@@ -677,9 +697,9 @@ func (s *Session) handleServerResponse(msg pgwire.ServerResponse, toClient **pgw
 	continueWithBackend := true
 
 	if _, ok := msg.(*pgwire.ServerResponseReadyForQuery); ok {
-
+		// TODO: double-check and flush ParameterStatuses?
 		if !s.state.InTxOrQuery() {
-			s.logger.Info("transaction ended, releasing backend")
+			s.logger.Info("transaction ended, releasing backend", "msg", fmt.Sprintf("%T", msg))
 			continueWithBackend = false
 		}
 	}
@@ -1270,4 +1290,14 @@ func (s *Session) startSessionSpan() {
 	)
 	// Update context so child spans use the session span as parent
 	s.ctx = ctx
+}
+
+func flushRingRange(dst interface{ WriteRange(*pgwire.RingRange) error }, src *pgwire.RingRange, joinErr error) (newSrc *pgwire.RingRange, newJoinErr error) {
+	if src.Len() == 0 {
+		return src, joinErr
+	}
+	if flushErr := dst.WriteRange(src); flushErr != nil {
+		return src, errors.Join(joinErr, flushErr)
+	}
+	return src.Slice(src.End(), src.End()), joinErr
 }
