@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Get the root of the main repo (not a worktree)
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+# If we're in a worktree, get the main repo's root
+MAIN_ROOT="$(git -C "$ROOT_DIR" rev-parse --git-common-dir | xargs dirname)"
+if [[ "$MAIN_ROOT" == "." ]]; then
+    MAIN_ROOT="$ROOT_DIR"
+fi
+
+if [[ $# -lt 1 ]]; then
+    cat <<'EOF'
+Usage: bin/worktree-claude <name> [options] [claude-args...]
+
+Starts Claude Code CLI in a worktree directory, with smart session resumption.
+
+The command searches Claude's session history for sessions that mention the
+worktree name, allowing you to easily resume work where you left off.
+
+Arguments:
+  name          Name of the worktree (as created by bin/worktree-new)
+
+Options:
+  --latest      Automatically resume the most recent matching session
+  --list        List matching sessions without starting Claude
+  (none)        Interactive mode: shows matching sessions and prompts for selection
+
+Any additional arguments are passed through to claude.
+
+Examples:
+  bin/worktree-claude my-feature              # Interactive session selection
+  bin/worktree-claude my-feature --latest     # Resume most recent session
+  bin/worktree-claude my-feature --list       # Just list matching sessions
+  bin/worktree-claude my-feature --print      # Start claude with --print flag
+
+How it works:
+  1. Finds the worktree directory at worktrees/<name>/
+  2. Searches ~/.claude/projects/<project>/*.jsonl for sessions mentioning "<name>"
+  3. Offers matching sessions (sorted by modification time) for resumption
+  4. Runs 'claude --resume <session-id>' in the worktree directory
+
+See also:
+  bin/worktree-new    Create a new worktree
+  bin/worktree-list   List all worktrees
+  bin/worktree-rm     Remove a worktree
+EOF
+    exit 1
+fi
+
+name="$1"
+shift
+dir="$MAIN_ROOT/worktrees/$name"
+
+# Check if worktree exists
+if [[ ! -d "$dir" ]]; then
+    echo "Error: Worktree not found at $dir"
+    echo ""
+    echo "Available worktrees:"
+    ls -1 "$MAIN_ROOT/worktrees" 2>/dev/null || echo "  (none)"
+    exit 1
+fi
+
+# Find the Claude project directory for this repo
+# Project dirs are named like: -Users-jitl-src-pglink
+project_path="${MAIN_ROOT//\//-}"
+project_path="${project_path#-}"  # Remove leading dash
+sessions_dir="$HOME/.claude/projects/-$project_path"
+
+if [[ ! -d "$sessions_dir" ]]; then
+    echo "No Claude sessions found for this project."
+    echo "Starting fresh Claude session in worktree..."
+    cd "$dir"
+    exec claude
+fi
+
+# Find sessions that mention the worktree name
+# Grep for the worktree name in session files, get unique session IDs
+echo "Searching for sessions mentioning '$name'..."
+matching_sessions=()
+
+# Get session files sorted by modification time (newest first)
+while IFS= read -r session_file; do
+    # Skip agent files
+    if [[ "$(basename "$session_file")" == agent-* ]]; then
+        continue
+    fi
+
+    # Check if session mentions the worktree name
+    if grep -q "$name" "$session_file" 2>/dev/null; then
+        session_id="$(basename "$session_file" .jsonl)"
+        mod_time="$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$session_file" 2>/dev/null || stat -c "%y" "$session_file" 2>/dev/null | cut -d'.' -f1)"
+        matching_sessions+=("$session_id|$mod_time|$session_file")
+    fi
+done < <(ls -t "$sessions_dir"/*.jsonl 2>/dev/null)
+
+# Handle --list flag
+if [[ "${1:-}" == "--list" ]]; then
+    if [[ ${#matching_sessions[@]} -eq 0 ]]; then
+        echo "No sessions found mentioning '$name'"
+    else
+        echo ""
+        echo "Sessions mentioning '$name':"
+        for i in "${!matching_sessions[@]}"; do
+            IFS='|' read -r session_id mod_time _ <<< "${matching_sessions[$i]}"
+            echo "  $((i+1)). $session_id ($mod_time)"
+        done
+    fi
+    exit 0
+fi
+
+# Handle --latest flag
+if [[ "${1:-}" == "--latest" ]]; then
+    shift
+    if [[ ${#matching_sessions[@]} -eq 0 ]]; then
+        echo "No sessions found mentioning '$name'. Starting fresh..."
+        cd "$dir"
+        exec claude "$@"
+    fi
+
+    IFS='|' read -r session_id _ _ <<< "${matching_sessions[0]}"
+    echo "Resuming most recent session: $session_id"
+    cd "$dir"
+    exec claude --resume "$session_id" "$@"
+fi
+
+# Interactive selection
+if [[ ${#matching_sessions[@]} -eq 0 ]]; then
+    echo "No sessions found mentioning '$name'."
+    echo ""
+    read -p "Start a fresh Claude session? [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        exit 0
+    fi
+    cd "$dir"
+    exec claude "$@"
+fi
+
+echo ""
+echo "Sessions mentioning '$name':"
+for i in "${!matching_sessions[@]}"; do
+    IFS='|' read -r session_id mod_time _ <<< "${matching_sessions[$i]}"
+    echo "  $((i+1)). $session_id ($mod_time)"
+done
+echo "  n. Start new session"
+echo ""
+
+read -p "Select session [1]: " selection
+selection="${selection:-1}"
+
+if [[ "$selection" == "n" || "$selection" == "N" ]]; then
+    cd "$dir"
+    exec claude "$@"
+fi
+
+# Validate selection
+if ! [[ "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt ${#matching_sessions[@]} ]]; then
+    echo "Invalid selection"
+    exit 1
+fi
+
+IFS='|' read -r session_id _ _ <<< "${matching_sessions[$((selection-1))]}"
+echo "Resuming session: $session_id"
+cd "$dir"
+exec claude --resume "$session_id" "$@"

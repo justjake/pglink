@@ -52,6 +52,10 @@ When adding or modifying scripts in `bin/`, update this list.
 | `bin/setup` | Install mise tools and configure git hooks |
 | `bin/test` | Run tests (e.g., `bin/test ./pkg/config`) |
 | `bin/tidy` | Run `go mod tidy` |
+| `bin/worktree-new` | Create a new git worktree for independent development |
+| `bin/worktree-list` | List all worktrees with their branches and Claude plans |
+| `bin/worktree-rm` | Remove a worktree |
+| `bin/worktree-claude` | Start Claude in a worktree, with session resumption |
 
 ## Code Style
 
@@ -111,4 +115,32 @@ for k, v := range cache.All() {
 func (c *Cache) ForEach(fn func(key, value string)) {
     // ...
 }
+```
+
+## Working in Worktrees
+
+When told to "work independently in a worktree", use git worktrees to work on a separate branch without affecting the main checkout.
+
+### Creating a worktree
+
+```bash
+bin/worktree-new <task-name> [path-to-claude-plan]
+```
+
+This creates:
+- A worktree at `worktrees/<task-name>/`
+- A branch named `worktree/<task-name>`
+- A symlink to the Claude plan file (if provided)
+
+### Working in a worktree
+
+1. Change to the worktree directory: `cd worktrees/<task-name>`
+2. Use `bin/build`, `bin/test`, etc. normally - they work in worktrees
+3. **Commit work regularly** to the worktree branch
+
+### Listing and removing worktrees
+
+```bash
+bin/worktree-list              # List all worktrees
+bin/worktree-rm <task-name>    # Remove a worktree
 ```

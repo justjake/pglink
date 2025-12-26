@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Git Worktrees:"
+echo ""
+
+# Parse git worktree list output
+git worktree list --porcelain | while IFS= read -r line; do
+    case "$line" in
+        "worktree "*)
+            path="${line#worktree }"
+            ;;
+        "branch "*)
+            ref="${line#branch }"
+            branch="${ref#refs/heads/}"
+
+            # Get creation time (birth time on macOS, mtime as fallback)
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                created=$(stat -f "%SB" -t "%Y-%m-%d %H:%M" "$path" 2>/dev/null || echo "unknown")
+            else
+                # Linux: use mtime as approximation (birth time not always available)
+                created=$(stat -c "%y" "$path" 2>/dev/null | cut -d'.' -f1 || echo "unknown")
+            fi
+
+            # Check for Claude plan
+            plan=""
+            if [[ -L "$path/.claude-plan" ]]; then
+                plan="$(readlink "$path/.claude-plan")"
+            elif [[ -f "$path/.claude-plan" ]]; then
+                plan="$path/.claude-plan"
+            fi
+
+            # Print worktree info
+            echo "  $path"
+            echo "    branch:  $branch"
+            echo "    created: $created"
+            if [[ -n "$plan" ]]; then
+                echo "    plan:    $plan"
+            fi
+            echo ""
+            ;;
+    esac
+done

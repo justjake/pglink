@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Get the root of the main repo (not a worktree)
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+# If we're in a worktree, get the main repo's root
+MAIN_ROOT="$(git -C "$ROOT_DIR" rev-parse --git-common-dir | xargs dirname)"
+if [[ "$MAIN_ROOT" == "." ]]; then
+    MAIN_ROOT="$ROOT_DIR"
+fi
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: bin/worktree-new <name> [path-to-claude-plan]"
+    echo ""
+    echo "Creates a new git worktree for independent development."
+    echo ""
+    echo "Arguments:"
+    echo "  name                 Name for the worktree (used for directory and branch)"
+    echo "  path-to-claude-plan  Optional path to Claude plan file to link"
+    echo ""
+    echo "Example:"
+    echo "  bin/worktree-new my-feature ~/.claude/plans/my-plan.md"
+    exit 1
+fi
+
+name="$1"
+branch="worktree/$name"
+dir="$MAIN_ROOT/worktrees/$name"
+
+# Create worktrees directory if needed
+mkdir -p "$MAIN_ROOT/worktrees"
+
+# Check if worktree already exists
+if [[ -d "$dir" ]]; then
+    echo "Error: Worktree already exists at $dir"
+    exit 1
+fi
+
+# Create branch if it doesn't exist (ignore error if it does)
+git branch "$branch" 2>/dev/null || true
+
+# Create worktree
+git worktree add "$dir" "$branch"
+
+# Create worktree-specific build directory
+mkdir -p "$dir/out"
+
+# Handle plan file
+plan_path=""
+if [[ -n "${2:-}" ]]; then
+    plan_path="$2"
+    # Convert to absolute path if relative
+    if [[ ! "$plan_path" = /* ]]; then
+        plan_path="$(pwd)/$plan_path"
+    fi
+    ln -sf "$plan_path" "$dir/.claude-plan"
+    echo "Linked plan: $plan_path"
+fi
+
+# Log the creation to out/worktrees.log
+mkdir -p "$MAIN_ROOT/out"
+log_file="$MAIN_ROOT/out/worktrees.log"
+timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+json_entry=$(cat <<EOF
+{"op":"create","name":"$name","branch":"$branch","path":"$dir","plan":"$plan_path","timestamp":"$timestamp","main_root":"$MAIN_ROOT"}
+EOF
+)
+echo "$json_entry" >> "$log_file"
+
+echo ""
+echo "Created worktree at $dir on branch $branch"
+echo ""
+echo "To start working:"
+echo "  cd $dir"
+echo ""
+echo "To resume with Claude:"
+echo "  bin/worktree-claude $name"

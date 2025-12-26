@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Get the root of the main repo (not a worktree)
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+# If we're in a worktree, get the main repo's root
+MAIN_ROOT="$(git -C "$ROOT_DIR" rev-parse --git-common-dir | xargs dirname)"
+if [[ "$MAIN_ROOT" == "." ]]; then
+    MAIN_ROOT="$ROOT_DIR"
+fi
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: bin/worktree-rm <name> [--force]"
+    echo ""
+    echo "Removes a git worktree created by bin/worktree-new."
+    echo ""
+    echo "Arguments:"
+    echo "  name     Name of the worktree to remove"
+    echo "  --force  Force removal even if there are uncommitted changes"
+    echo ""
+    echo "Example:"
+    echo "  bin/worktree-rm my-feature"
+    exit 1
+fi
+
+name="$1"
+dir="$MAIN_ROOT/worktrees/$name"
+force=""
+
+if [[ "${2:-}" == "--force" ]]; then
+    force="--force"
+fi
+
+# Check if worktree exists
+if [[ ! -d "$dir" ]]; then
+    echo "Error: Worktree not found at $dir"
+    exit 1
+fi
+
+# Get branch name before removing
+branch=$(git -C "$dir" branch --show-current 2>/dev/null || echo "")
+
+# Get plan path before removing
+plan_path=""
+if [[ -L "$dir/.claude-plan" ]]; then
+    plan_path="$(readlink "$dir/.claude-plan")"
+elif [[ -f "$dir/.claude-plan" ]]; then
+    plan_path="$dir/.claude-plan"
+fi
+
+# Remove worktree
+git worktree remove "$dir" $force
+
+# Log the removal to out/worktrees.log
+mkdir -p "$MAIN_ROOT/out"
+log_file="$MAIN_ROOT/out/worktrees.log"
+timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+json_entry=$(cat <<EOF
+{"op":"remove","name":"$name","branch":"$branch","path":"$dir","plan":"$plan_path","timestamp":"$timestamp","main_root":"$MAIN_ROOT"}
+EOF
+)
+echo "$json_entry" >> "$log_file"
+
+echo "Removed worktree: $dir"
+
+# Optionally suggest branch deletion
+if [[ -n "$branch" && "$branch" == worktree/* ]]; then
+    echo ""
+    echo "The branch '$branch' still exists."
+    echo "To delete it: git branch -d $branch"
+fi
