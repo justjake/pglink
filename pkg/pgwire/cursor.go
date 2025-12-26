@@ -358,16 +358,28 @@ func (r *RingMsg) Retain() RawMessageSource {
 }
 
 func (r *RingMsg) String() string {
-	// Note: Don't call MessageType/MessageLen here - they call panicUnlessValid
-	// which could cause infinite recursion when formatting panic messages
 	start, end := r.in.capacity.Range()
-	return fmt.Sprintf("RingMsg{idx=%d valid=[%d,%d) ring=%p}", r.msgIdx, start, end, r.in.ring)
+	if r.msgIdx >= start && r.msgIdx < end {
+		// Valid - safe to call MessageType/MessageLen
+		return fmt.Sprintf("RingMsg{idx=%d type=%c len=%d ring=%p}",
+			r.msgIdx, r.MessageType(), r.MessageLen(), r.in.ring)
+	}
+	// Invalid - explain why
+	if r.msgIdx < start {
+		return fmt.Sprintf("RingMsg{idx=%d INVALID: before start %d, ring=%p}",
+			r.msgIdx, start, r.in.ring)
+	}
+	return fmt.Sprintf("RingMsg{idx=%d INVALID: at/past end %d, ring=%p}",
+		r.msgIdx, end, r.in.ring)
 }
 
 func (r *RingMsg) panicUnlessValid() {
 	start, end := r.in.capacity.Range()
-	if r.msgIdx < start || r.msgIdx >= end {
-		panic(fmt.Sprintf("RingMsg out of bounds: idx=%d valid=[%d,%d)", r.msgIdx, start, end))
+	if r.msgIdx < start {
+		panic(fmt.Sprintf("RingMsg out of bounds: idx=%d < start %d", r.msgIdx, start))
+	}
+	if r.msgIdx >= end {
+		panic(fmt.Sprintf("RingMsg out of bounds: idx=%d >= end %d", r.msgIdx, end))
 	}
 }
 
