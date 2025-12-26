@@ -485,8 +485,21 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 
 	backendAcquiredState := pgwire.MessageHandlers[bool]{
 		Client: pgwire.ClientMessageHandlers[bool]{
-			SimpleQuery: nil,
-			Copy:        nil,
+			SimpleQuery: func(msg pgwire.ClientSimpleQuery) (bool, error) {
+				// Track SimpleQuery - expects ReadyForQuery response
+				if q, ok := msg.(*pgwire.ClientSimpleQueryQuery); ok {
+					parsed := q.Parse()
+					s.state.PushRequest(pgwire.PendingRequest{
+						RequestType: pgwire.MsgTypeQuery,
+						Action:      pgwire.ActionForward,
+						Query:       parsed.String,
+						QueryHash:   pgwire.HashQuery(parsed.String),
+					})
+				}
+				// Fall through to default handler (proxy to server)
+				return s.proxyClientToServer(msg, frontendCursor.MsgIdx(), &toServer)
+			},
+			Copy: nil,
 
 			ExtendedQuery: func(msg pgwire.ClientExtendedQuery) (bool, error) {
 				return s.rewriteAndFlushExtendedQueryToBackend(msg, frontendCursor.MsgIdx(), &toServer)
@@ -695,6 +708,12 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
 		Bind: func(msg *pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
+			// Track pending request
+			s.state.PushRequest(pgwire.PendingRequest{
+				RequestType:   pgwire.MsgTypeBind,
+				Action:        pgwire.ActionForward,
+				StatementName: parsed.PreparedStatement,
+			})
 			return &pgproto3.Bind{
 				PreparedStatement:    s.clientToServerPreparedStatementName(parsed.PreparedStatement),
 				DestinationPortal:    s.clientToServerPortalName(parsed.DestinationPortal),
@@ -705,6 +724,14 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		},
 		Parse: func(msg *pgwire.ClientExtendedQueryParse) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
+			// Track pending request
+			s.state.PushRequest(pgwire.PendingRequest{
+				RequestType:   pgwire.MsgTypeParse,
+				Action:        pgwire.ActionForward,
+				StatementName: parsed.Name,
+				Query:         parsed.Query,
+				QueryHash:     pgwire.HashQuery(parsed.Query),
+			})
 			return &pgproto3.Parse{
 				Name:          s.clientToServerPreparedStatementName(parsed.Name),
 				Query:         parsed.Query,
@@ -713,6 +740,11 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		},
 		Execute: func(msg *pgwire.ClientExtendedQueryExecute) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
+			// Track pending request
+			s.state.PushRequest(pgwire.PendingRequest{
+				RequestType: pgwire.MsgTypeExecute,
+				Action:      pgwire.ActionForward,
+			})
 			return &pgproto3.Execute{
 				Portal:  s.clientToServerPortalName(parsed.Portal),
 				MaxRows: parsed.MaxRows,
@@ -720,6 +752,12 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		},
 		Describe: func(msg *pgwire.ClientExtendedQueryDescribe) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
+			// Track pending request
+			s.state.PushRequest(pgwire.PendingRequest{
+				RequestType:   pgwire.MsgTypeDescribe,
+				Action:        pgwire.ActionForward,
+				StatementName: parsed.Name,
+			})
 			return &pgproto3.Describe{
 				ObjectType: parsed.ObjectType,
 				Name:       s.clientToServerObjectName(parsed.ObjectType, parsed.Name),
@@ -727,10 +765,28 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		},
 		Close: func(msg *pgwire.ClientExtendedQueryClose) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
+			// Track pending request
+			s.state.PushRequest(pgwire.PendingRequest{
+				RequestType:   pgwire.MsgTypeClose,
+				Action:        pgwire.ActionForward,
+				StatementName: parsed.Name,
+			})
 			return &pgproto3.Close{
 				ObjectType: parsed.ObjectType,
 				Name:       s.clientToServerObjectName(parsed.ObjectType, parsed.Name),
 			}, nil
+		},
+		Sync: func(msg *pgwire.ClientExtendedQuerySync) (pgproto3.FrontendMessage, error) {
+			// Track pending request - Sync expects ReadyForQuery response
+			s.state.PushRequest(pgwire.PendingRequest{
+				RequestType: pgwire.MsgTypeSync,
+				Action:      pgwire.ActionForward,
+			})
+			return &pgproto3.Sync{}, nil
+		},
+		Flush: func(msg *pgwire.ClientExtendedQueryFlush) (pgproto3.FrontendMessage, error) {
+			// Flush doesn't expect a response, just pass through
+			return &pgproto3.Flush{}, nil
 		},
 	}
 
@@ -779,9 +835,16 @@ func (s *Session) handleServerResponse(msg pgwire.ServerResponse, msgIdx int64, 
 	if _, ok := msg.(*pgwire.ServerResponseReadyForQuery); ok {
 		// TODO: double-check and flush ParameterStatuses?
 		inTxOrQuery := s.state.InTxOrQuery()
-		s.logger.Debug("ReadyForQuery", "inTx", inTxOrQuery, "txStatus", s.state.TxStatus)
+		outstandingReqs := s.state.OutstandingRequestCount()
+		s.logger.Debug("ReadyForQuery",
+			"inTx", inTxOrQuery,
+			"txStatus", s.state.TxStatus,
+			"outstandingRequests", outstandingReqs)
+
 		if !inTxOrQuery {
 			s.logger.Debug("releasing backend")
+			// End the request flow when releasing the backend
+			s.state.EndRequestFlow()
 			continueWithBackend = false
 		}
 	}
