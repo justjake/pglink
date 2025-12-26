@@ -1,6 +1,7 @@
 package pgwire
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"slices"
@@ -241,8 +242,66 @@ func (r *RingRange) String() string {
 	return fmt.Sprintf("RingRange{[%d-%d) %d bytes ring=%p}", r.startIdx, r.endIdx, r.Bytes(), r.ring)
 }
 
-func (r *RingRange) WriteTo(w io.Writer) error {
-	return r.ring.WriteBatch(r.startIdx, r.endIdx, w)
+// NewReader returns an io.Reader that reads the raw wire bytes of all messages
+// in this range.
+//
+// For streaming (oversized) messages, Read will block while reading remaining
+// bytes directly from the network source.
+//
+// The reader is only valid while the underlying RingRange is valid. Do not call
+// ReleaseThrough on messages that are still being read.
+func (r *RingRange) NewReader() io.Reader {
+	if r.Empty() {
+		return bytes.NewReader(nil)
+	}
+
+	lastIdx := r.endIdx - 1
+
+	// Check if last message is streaming (only last can be - reader pauses after detecting it)
+	if r.ring.isStreaming(lastIdx) {
+		streamingPart := &streamingCompleter{
+			ring:   r.ring,
+			reader: r.ring.streamingMessageReader(lastIdx),
+		}
+
+		if r.startIdx == lastIdx {
+			// Only one message and it's streaming
+			return streamingPart
+		}
+
+		// Multiple messages: buffered prefix + streaming last
+		bufferedStart := r.ring.MessageOffset(r.startIdx)
+		bufferedEnd := r.ring.MessageOffset(lastIdx)
+		return io.MultiReader(
+			r.ring.rangeReader(bufferedStart, bufferedEnd),
+			streamingPart,
+		)
+	}
+
+	// All buffered - single contiguous range
+	start := r.ring.MessageOffset(r.startIdx)
+	end := r.ring.MessageEnd(lastIdx)
+	return r.ring.rangeReader(start, end)
+}
+
+// streamingCompleter wraps a reader and calls completeStreaming on EOF/error.
+type streamingCompleter struct {
+	ring   *RingBuffer
+	reader io.Reader
+	done   bool
+}
+
+func (s *streamingCompleter) Read(p []byte) (int, error) {
+	n, err := s.reader.Read(p)
+	if err != nil && !s.done {
+		s.done = true
+		if err == io.EOF {
+			s.ring.completeStreaming(nil)
+		} else {
+			s.ring.completeStreaming(err)
+		}
+	}
+	return n, err
 }
 
 // RingMsg represents a single message in a RingBuffer.
@@ -297,7 +356,7 @@ func (r *RingMsg) Retain() RawMessageSource {
 }
 
 func (r *RingMsg) String() string {
-	return fmt.Sprintf("RingMsg{idx=%d type=%s bytes=%d ring=%p}", r.msgIdx, r.MessageType(), r.MessageLen(), r.ring)
+	return fmt.Sprintf("RingMsg{idx=%d type=%c bytes=%d ring=%p}", r.msgIdx, r.MessageType(), r.MessageLen(), r.in.ring)
 }
 
 func (r *RingMsg) panicUnlessValid() {

@@ -22,8 +22,8 @@ func BenchmarkFlyweightAllocation(b *testing.B) {
 	cursor := NewClientCursor(ring)
 
 	// Prime the cursor
-	cursor.batchStart = 0
-	cursor.batchEnd = 1
+	cursor.startIdx = 0
+	cursor.endIdx = 1
 	cursor.msgIdx = 0
 
 	b.ResetTimer()
@@ -52,8 +52,8 @@ func BenchmarkFlyweightAllocationNoInterface(b *testing.B) {
 	ring.publishedMsgs = 1
 
 	cursor := NewClientCursor(ring)
-	cursor.batchStart = 0
-	cursor.batchEnd = 1
+	cursor.startIdx = 0
+	cursor.endIdx = 1
 	cursor.msgIdx = 0
 
 	fw := cursor.clientFlyweights

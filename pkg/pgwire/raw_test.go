@@ -348,4 +348,3 @@ func TestEncodeFrontendMessage(t *testing.T) {
 		})
 	}
 }
-

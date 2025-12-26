@@ -322,8 +322,8 @@ func (s *Session) Run() {
 			// Rewind so that runWithbackend starts at the "current" message
 			// when it calls cursor.NextMsg()
 			frontendCursor.PrevMsg()
-			// Drop any client-pgwire-only messages we have handled so far
-			frontendCursor.SkipThrough()
+			// TODO: Drop any client-pgwire-only messages we have handled so far
+			// frontendCursor.SkipThrough()
 			// Enter the backend-acquired state loop.
 			if err := s.runWithBackend(msg); err != nil {
 				s.sendError(err)

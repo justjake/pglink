@@ -6,6 +6,15 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
+// mustClientMessage converts a pgproto3 frontend message to ClientMessage for testing.
+func mustClientMessage(msg pgproto3.FrontendMessage) ClientMessage {
+	cm, ok := ToClientMessage(msg)
+	if !ok {
+		panic("unexpected message type")
+	}
+	return cm
+}
+
 // TestNewProtocolState tests that NewProtocolState creates a properly initialized state.
 func TestNewProtocolState(t *testing.T) {
 	state := NewProtocolState()
@@ -35,7 +44,7 @@ func TestProtocolState_SimpleQuery(t *testing.T) {
 	state := NewProtocolState()
 
 	// Send a Query message
-	state.UpdateForFrontentMessage(&pgproto3.Query{String: "SELECT 1"})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Query{String: "SELECT 1"}))
 
 	if state.ExtendedQueryMode {
 		t.Error("ExtendedQueryMode should be false after Query")
@@ -67,7 +76,7 @@ func TestProtocolState_ExtendedQuery(t *testing.T) {
 	state := NewProtocolState()
 
 	// Parse
-	state.UpdateForFrontentMessage(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"}))
 
 	if !state.ExtendedQueryMode {
 		t.Error("ExtendedQueryMode should be true after Parse")
@@ -77,10 +86,10 @@ func TestProtocolState_ExtendedQuery(t *testing.T) {
 	}
 
 	// Describe statement
-	state.UpdateForFrontentMessage(&pgproto3.Describe{ObjectType: 'S', Name: "stmt1"})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Describe{ObjectType: 'S', Name: "stmt1"}))
 
 	// Sync
-	state.UpdateForFrontentMessage(&pgproto3.Sync{})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Sync{}))
 
 	if state.SyncsInFlight != 1 {
 		t.Errorf("SyncsInFlight = %v, want 1", state.SyncsInFlight)
@@ -115,25 +124,25 @@ func TestProtocolState_BindExecute(t *testing.T) {
 	state := NewProtocolState()
 
 	// First prepare a statement
-	state.UpdateForFrontentMessage(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"})
-	state.UpdateForFrontentMessage(&pgproto3.Sync{})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"}))
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Sync{}))
 	state.UpdateForServerMessage((*ServerExtendedQueryParseComplete)(ServerParsed(&pgproto3.ParseComplete{})))
 	state.UpdateForServerMessage((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})))
 
 	// Now bind and execute
-	state.UpdateForFrontentMessage(&pgproto3.Bind{DestinationPortal: "p1", PreparedStatement: "stmt1"})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Bind{DestinationPortal: "p1", PreparedStatement: "stmt1"}))
 
 	if _, ok := state.Portals.PendingCreate["p1"]; !ok {
 		t.Error("p1 should be in Portals.PendingCreate after Bind")
 	}
 
-	state.UpdateForFrontentMessage(&pgproto3.Execute{Portal: "p1"})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Execute{Portal: "p1"}))
 
 	if state.Portals.Executing == nil || *state.Portals.Executing != "p1" {
 		t.Error("Portals.Executing should be 'p1' after Execute")
 	}
 
-	state.UpdateForFrontentMessage(&pgproto3.Sync{})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Sync{}))
 
 	// Server responses
 	state.UpdateForServerMessage((*ServerExtendedQueryBindComplete)(ServerParsed(&pgproto3.BindComplete{})))
@@ -159,13 +168,13 @@ func TestProtocolState_CloseStatement(t *testing.T) {
 	state.Statements.Alive["stmt1"] = true
 
 	// Close the statement
-	state.UpdateForFrontentMessage(&pgproto3.Close{ObjectType: 'S', Name: "stmt1"})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Close{ObjectType: 'S', Name: "stmt1"}))
 
 	if _, ok := state.Statements.PendingClose["stmt1"]; !ok {
 		t.Error("stmt1 should be in PendingClose after Close")
 	}
 
-	state.UpdateForFrontentMessage(&pgproto3.Sync{})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Sync{}))
 
 	// Server: CloseComplete
 	state.UpdateForServerMessage((*ServerExtendedQueryCloseComplete)(ServerParsed(&pgproto3.CloseComplete{})))
@@ -226,8 +235,8 @@ func TestProtocolState_ErrorInExtendedQuery(t *testing.T) {
 	state := NewProtocolState()
 
 	// Start extended query
-	state.UpdateForFrontentMessage(&pgproto3.Parse{Name: "stmt1", Query: "INVALID SQL"})
-	state.UpdateForFrontentMessage(&pgproto3.Sync{})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Parse{Name: "stmt1", Query: "INVALID SQL"}))
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Sync{}))
 
 	// Server sends ErrorResponse
 	state.UpdateForServerMessage((*ServerResponseErrorResponse)(ServerParsed(&pgproto3.ErrorResponse{
@@ -383,10 +392,10 @@ func TestProtocolState_MultipleSyncsInFlight(t *testing.T) {
 	state := NewProtocolState()
 
 	// Send multiple Parse+Sync sequences (pipelining)
-	state.UpdateForFrontentMessage(&pgproto3.Parse{Name: "stmt1", Query: "SELECT 1"})
-	state.UpdateForFrontentMessage(&pgproto3.Sync{})
-	state.UpdateForFrontentMessage(&pgproto3.Parse{Name: "stmt2", Query: "SELECT 2"})
-	state.UpdateForFrontentMessage(&pgproto3.Sync{})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Parse{Name: "stmt1", Query: "SELECT 1"}))
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Sync{}))
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Parse{Name: "stmt2", Query: "SELECT 2"}))
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Sync{}))
 
 	if state.SyncsInFlight != 2 {
 		t.Errorf("SyncsInFlight = %v, want 2", state.SyncsInFlight)
@@ -414,8 +423,8 @@ func TestProtocolState_UnnamedStatementOverwrite(t *testing.T) {
 	state := NewProtocolState()
 
 	// Parse unnamed statement
-	state.UpdateForFrontentMessage(&pgproto3.Parse{Name: "", Query: "SELECT 1"})
-	state.UpdateForFrontentMessage(&pgproto3.Sync{})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Parse{Name: "", Query: "SELECT 1"}))
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Sync{}))
 	state.UpdateForServerMessage((*ServerExtendedQueryParseComplete)(ServerParsed(&pgproto3.ParseComplete{})))
 	state.UpdateForServerMessage((*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'})))
 
@@ -424,7 +433,7 @@ func TestProtocolState_UnnamedStatementOverwrite(t *testing.T) {
 	}
 
 	// Send Query which destroys unnamed statement
-	state.UpdateForFrontentMessage(&pgproto3.Query{String: "SELECT 2"})
+	state.UpdateForFrontentMessage(mustClientMessage(&pgproto3.Query{String: "SELECT 2"}))
 
 	if _, ok := state.Statements.Alive[""]; ok {
 		t.Error("Unnamed statement should be destroyed after Query")

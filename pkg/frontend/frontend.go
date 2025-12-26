@@ -4,6 +4,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -19,7 +20,6 @@ type Frontend struct {
 	ringBuffer *pgwire.RingBuffer
 	cursor     *pgwire.Cursor
 	ctx        context.Context
-	pgwire.WriteBatch[pgwire.ServerMessage]
 }
 
 func NewFrontend(ctx context.Context, conn net.Conn) *Frontend {
@@ -61,40 +61,19 @@ func (f *Frontend) StopRingBuffer() {
 	f.ringBuffer.StopNetConnReader()
 }
 
+// Flush flushes any messages queued with Send() to the client.
 func (f *Frontend) Flush() error {
-	backendNeedsFlush := false
-	maybeFlushBackend := func() error {
-		if backendNeedsFlush {
-			if err := f.Backend.Flush(); err != nil {
-				return err
-			}
-			backendNeedsFlush = false
-		}
-		return nil
-	}
-
-	for batch, msg := range f.IterWriteBatch() {
-		if batch != nil {
-			if err := maybeFlushBackend(); err != nil {
-				return err
-			}
-
-			if err := batch.WriteAll(f.conn); err != nil {
-				return err
-			}
-		}
-
-		if msg != nil {
-			f.Backend.Send(msg.Server())
-			backendNeedsFlush = true
-		}
-	}
-
-	return maybeFlushBackend()
+	return f.Backend.Flush()
 }
 
 // Cursor returns the cursor for reading client messages from the ring buffer.
 // Only valid after StartRingBuffer() has been called.
 func (f *Frontend) Cursor() *pgwire.Cursor {
 	return f.cursor
+}
+
+// WriteRange writes a range of messages to the client connection.
+func (f *Frontend) WriteRange(r *pgwire.RingRange) error {
+	_, err := io.Copy(f.conn, r.NewReader())
+	return err
 }

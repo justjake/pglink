@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -141,11 +142,16 @@ func (s *Session) RingBuffer() *pgwire.RingBuffer {
 }
 
 func (s *Session) WriteRange(r *pgwire.RingRange) error {
-	return r.WriteTo(s.Conn.Conn())
+	_, err := io.Copy(s.Conn.Conn(), r.NewReader())
+	return err
 }
 
 func (s *Session) WriteMsg(msg pgproto3.FrontendMessage) error {
 	s.Conn.Frontend().Send(msg)
+	return s.Conn.Frontend().Flush()
+}
+
+func (s *Session) Flush() error {
 	return s.Conn.Frontend().Flush()
 }
 

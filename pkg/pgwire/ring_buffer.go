@@ -1,11 +1,14 @@
 package pgwire
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sync/atomic"
 	"time"
 )
@@ -41,8 +44,7 @@ const (
 //
 // For messages too large to buffer, the ring buffer supports streaming: the
 // header and any buffered portion are written from the ring, then the remaining
-// bytes are streamed directly from the source to the destination. This is
-// transparent to the consumer - WriteBatch handles both cases internally.
+// bytes are streamed directly from the source to the destination.
 //
 // Cache-line padding separates variables with different access patterns to
 // prevent false sharing. Variables with the same writer can share a cache line.
@@ -79,15 +81,15 @@ type RingBuffer struct {
 
 	// === Streaming state (for oversized messages) ===
 	// When a message is too large to buffer, we record it as "streaming".
-	// The reader goroutine blocks until the consumer streams the message through.
+	// The reader goroutine pauses until the consumer finishes reading the
+	// streaming message directly from the network connection.
 	streaming struct {
 		active     bool  // True if current message is streaming
 		msgIdx     int64 // Which message is streaming
 		totalLen   int64 // Total wire length of the message
 		bodyInRing int64 // How many body bytes are in the ring buffer
 	}
-	streamReq  chan streamRequest // Consumer sends request to stream remaining bytes
-	streamDone chan error         // Reader goroutine signals completion
+	streamDone chan error // Consumer signals when streaming is complete
 
 	// === Signaling (cold path) ===
 	writerWake chan struct{} // Reader signals writer: space freed
@@ -97,12 +99,6 @@ type RingBuffer struct {
 	// Set by StartNetConnReader
 	conn       net.Conn
 	readerDone chan struct{}
-}
-
-// streamRequest is sent from consumer to reader goroutine to stream remaining bytes.
-type streamRequest struct {
-	dst       io.Writer
-	remaining int64
 }
 
 // NewRingBuffer creates a new ring buffer with default sizes.
@@ -125,7 +121,6 @@ func NewRingBufferWithSize(dataSize, metaSize int) *RingBuffer {
 		dataMask:   int64(dataSize - 1),
 		offsets:    make([]int64, metaSize),
 		metaMask:   int64(metaSize - 1),
-		streamReq:  make(chan streamRequest),
 		streamDone: make(chan error),
 		writerWake: make(chan struct{}, 1),
 		readerWake: make(chan struct{}, 1),
@@ -219,7 +214,7 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 			streamingDetected := r.parseCompleteMessages(&msgsUntilSpaceRefresh)
 
 			// Publish if we have new complete messages
-			if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
+			if r.localMsgCnt > r.publishedMsgs {
 				r.publish()
 			}
 
@@ -278,7 +273,7 @@ func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) bool {
 		} else {
 			// Slow path: header wraps around
 			var hdr [5]byte
-			for i := 0; i < 5; i++ {
+			for i := range 5 {
 				hdr[i] = r.data[(hdrOff+int64(i))&r.dataMask]
 			}
 			msgLen = int64(binary.BigEndian.Uint32(hdr[1:5])) + 1
@@ -286,7 +281,7 @@ func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) bool {
 
 		// Validate message length
 		if msgLen < 5 {
-			r.setError(errors.New("invalid message length"))
+			r.setError(fmt.Errorf("invalid message length %d < 5", msgLen))
 			return false
 		}
 
@@ -330,18 +325,15 @@ func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) bool {
 	}
 }
 
-// handleStreamingMessage waits for the consumer to request streaming,
-// then streams the remaining bytes directly from src to the consumer's dst.
+// handleStreamingMessage pauses the reader goroutine until the consumer
+// finishes reading the streaming message directly from the network connection.
 func (r *RingBuffer) handleStreamingMessage(ctx context.Context, src io.Reader) error {
+	// Wait for consumer to signal completion
 	select {
 	case <-ctx.Done():
 		r.setError(ctx.Err())
 		return ctx.Err()
-	case req := <-r.streamReq:
-		// Stream remaining bytes directly from src to dst
-		_, err := io.CopyN(req.dst, src, req.remaining)
-		r.streamDone <- err
-
+	case err := <-r.streamDone:
 		if err != nil {
 			r.setError(err)
 			return err
@@ -356,6 +348,27 @@ func (r *RingBuffer) handleStreamingMessage(ctx context.Context, src io.Reader) 
 	case <-r.done:
 		return r.Error()
 	}
+}
+
+// streamingMessageReader returns an io.Reader for reading the entire streaming
+// message: header + buffered body from ring + remaining from network.
+// The caller MUST call completeStreaming when done (even on error).
+func (r *RingBuffer) streamingMessageReader(msgIdx int64) io.Reader {
+	offset := r.MessageOffset(msgIdx)
+	bodyInRing := r.streaming.bodyInRing
+	remaining := r.streaming.totalLen - 5 - bodyInRing
+
+	return io.MultiReader(
+		r.rangeReader(offset, offset+5),              // header
+		r.rangeReader(offset+5, offset+5+bodyInRing), // buffered body
+		io.LimitReader(r.conn, remaining),            // network remainder
+	)
+}
+
+// completeStreaming signals that the consumer has finished reading the
+// streaming message. This resumes the paused reader goroutine.
+func (r *RingBuffer) completeStreaming(err error) {
+	r.streamDone <- err
 }
 
 func (r *RingBuffer) refreshCachedPositions() {
@@ -494,129 +507,28 @@ func (r *RingBuffer) MessageBody(msgIdx int64) []byte {
 
 // readRange reads bytes from start to end (exclusive), handling wraparound.
 func (r *RingBuffer) readRange(start, end int64) []byte {
-	n := end - start
-	if n <= 0 {
-		return nil
-	}
+	first, second := r.rangeSlices(start, end)
 
-	startOff := start & r.dataMask
-	endOff := end & r.dataMask
-
-	// Fast path: no wraparound
-	if startOff < endOff || endOff == 0 {
-		if endOff == 0 {
-			return r.data[startOff:]
-		}
-		return r.data[startOff:endOff]
+	if second == nil {
+		return first
 	}
 
 	// Slow path: message wraps around, need to copy
-	result := make([]byte, n)
-	firstChunk := int64(len(r.data)) - startOff
-	copy(result[:firstChunk], r.data[startOff:])
-	copy(result[firstChunk:], r.data[:endOff])
-	return result
+	return slices.Concat(first, second)
 }
 
 // === Batch write methods (for zero-copy proxying) ===
 
-// WriteBatch writes messages [fromIdx, toIdx) directly to dst.
-// This is the hot path for proxying unmodified messages.
-// Handles streaming messages transparently - if the last message in the batch
-// is streaming, coordinates with the reader goroutine to stream it through.
-func (r *RingBuffer) WriteBatch(fromIdx, toIdx int64, dst io.Writer) (int64, error) {
-	if fromIdx >= toIdx {
-		return 0, nil
-	}
-
-	lastIdx := toIdx - 1
-
-	// Check if last message is streaming
-	if r.isStreaming(lastIdx) {
-		var written int64
-
-		// Write all fully-buffered messages first [fromIdx, lastIdx)
-		if lastIdx > fromIdx {
-			start := r.MessageOffset(fromIdx)
-			end := r.MessageOffset(lastIdx)
-			n, err := r.writeRange(start, end, dst)
-			written += n
-			if err != nil {
-				return written, err
-			}
-		}
-
-		// Stream the last message
-		n, err := r.writeStreamingMessage(lastIdx, dst)
-		return written + n, err
-	}
-
-	// All buffered - simple batch write
-	start := r.MessageOffset(fromIdx)
-	end := r.MessageEnd(lastIdx)
-	return r.writeRange(start, end, dst)
-}
-
 // writeStreamingMessage writes a streaming message to dst.
-// Writes header + buffered body portion, then coordinates with reader goroutine
-// to stream the remaining bytes directly from the source.
+// Composes readers for: header + buffered body (from ring) + remaining (from network).
 func (r *RingBuffer) writeStreamingMessage(msgIdx int64, dst io.Writer) (int64, error) {
 	if !r.isStreaming(msgIdx) {
-		// Not streaming, use normal write
 		return r.WriteMessage(msgIdx, dst)
 	}
 
-	var written int64
-	offset := r.MessageOffset(msgIdx)
-
-	// Write header (5 bytes)
-	hdrOff := offset & r.dataMask
-	if hdrOff+5 <= int64(len(r.data)) {
-		n, err := dst.Write(r.data[hdrOff : hdrOff+5])
-		written += int64(n)
-		if err != nil {
-			return written, err
-		}
-	} else {
-		// Header wraps around
-		var hdr [5]byte
-		for i := 0; i < 5; i++ {
-			hdr[i] = r.data[(hdrOff+int64(i))&r.dataMask]
-		}
-		n, err := dst.Write(hdr[:])
-		written += int64(n)
-		if err != nil {
-			return written, err
-		}
-	}
-
-	// Write buffered body portion
-	bodyStart := offset + 5
-	bodyBuffered := r.streaming.bodyInRing
-	if bodyBuffered > 0 {
-		n, err := r.writeRange(bodyStart, bodyStart+bodyBuffered, dst)
-		written += n
-		if err != nil {
-			return written, err
-		}
-	}
-
-	// Calculate remaining bytes to stream
-	totalBodyLen := r.streaming.totalLen - 5
-	remaining := totalBodyLen - bodyBuffered
-
-	if remaining > 0 {
-		// Send request to reader goroutine to stream remaining bytes
-		r.streamReq <- streamRequest{dst: dst, remaining: remaining}
-
-		// Wait for completion
-		if err := <-r.streamDone; err != nil {
-			return written, err
-		}
-		written += remaining
-	}
-
-	return written, nil
+	n, err := io.Copy(dst, r.streamingMessageReader(msgIdx))
+	r.completeStreaming(err)
+	return n, err
 }
 
 // WriteMessage writes a single message to dst.
@@ -629,34 +541,44 @@ func (r *RingBuffer) WriteMessage(msgIdx int64, dst io.Writer) (int64, error) {
 	return r.writeRange(start, end, dst)
 }
 
-func (r *RingBuffer) writeRange(start, end int64, dst io.Writer) (int64, error) {
-	n := end - start
-	if n <= 0 {
-		return 0, nil
+func (r *RingBuffer) rangeSlices(start, end int64) ([]byte, []byte) {
+	if end <= start {
+		return nil, nil
 	}
 
 	startOff := start & r.dataMask
 	endOff := end & r.dataMask
 
-	// Fast path: no wraparound - single write syscall
+	// Fast path: no wraparound
 	if startOff < endOff || endOff == 0 {
-		var data []byte
 		if endOff == 0 {
-			data = r.data[startOff:]
-		} else {
-			data = r.data[startOff:endOff]
+			return r.data[startOff:], nil
 		}
-		written, err := dst.Write(data)
-		return int64(written), err
+		return r.data[startOff:endOff], nil
 	}
 
-	// Slow path: wraparound - two writes
-	n1, err := dst.Write(r.data[startOff:])
-	if err != nil {
-		return int64(n1), err
+	// Slow path: wraparound - combine two segments
+	return r.data[startOff:], r.data[:endOff]
+}
+
+// rangeReader returns an io.Reader for bytes [start, end) in the ring buffer.
+func (r *RingBuffer) rangeReader(start, end int64) io.Reader {
+	first, second := r.rangeSlices(start, end)
+
+	if second == nil {
+		// Fast path - single contiguous
+		return bytes.NewReader(first)
 	}
-	n2, err := dst.Write(r.data[:endOff])
-	return int64(n1 + n2), err
+
+	// Slow path - wraparound into two segments
+	return io.MultiReader(
+		bytes.NewReader(first),
+		bytes.NewReader(second),
+	)
+}
+
+func (r *RingBuffer) writeRange(start, end int64, dst io.Writer) (int64, error) {
+	return io.Copy(dst, r.rangeReader(start, end))
 }
 
 // Close closes the ring buffer and wakes up any waiting goroutines.
@@ -673,7 +595,6 @@ func (r *RingBuffer) NewWithSameBuffers() *RingBuffer {
 		dataMask:   r.dataMask,
 		offsets:    r.offsets,
 		metaMask:   r.metaMask,
-		streamReq:  make(chan streamRequest),
 		streamDone: make(chan error),
 		writerWake: make(chan struct{}, 1),
 		readerWake: make(chan struct{}, 1),
