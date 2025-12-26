@@ -453,6 +453,32 @@ func (h *Harness) Connect(ctx context.Context, database string) (*pgxpool.Pool, 
 	return h.ConnectWithUser(ctx, database, PredefinedUsers.App)
 }
 
+// ConnectWithExecMode creates a connection pool with a specific query exec mode.
+// This is useful for tests that need to use a different mode than the default
+// DescribeExec mode (e.g., SimpleProtocol for stress tests).
+func (h *Harness) ConnectWithExecMode(ctx context.Context, database string, mode pgx.QueryExecMode) (*pgxpool.Pool, error) {
+	connStr := fmt.Sprintf(
+		"postgres://%s:%s@localhost:%d/%s?sslmode=prefer",
+		PredefinedUsers.App.Username,
+		PredefinedUsers.App.Password,
+		DefaultPglinkPort,
+		database,
+	)
+
+	poolConfig, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse pool config: %w", err)
+	}
+
+	poolConfig.MaxConns = 10
+	poolConfig.MinConns = 1
+	poolConfig.ConnConfig.DefaultQueryExecMode = mode
+	poolConfig.ConnConfig.StatementCacheCapacity = 0
+	poolConfig.ConnConfig.DescriptionCacheCapacity = 0
+
+	return pgxpool.NewWithConfig(ctx, poolConfig)
+}
+
 // ConnectSingle creates a single connection through pglink (not a pool)
 func (h *Harness) ConnectSingle(ctx context.Context, database string, user TestUser) (*pgx.Conn, error) {
 	connStr := fmt.Sprintf(
@@ -472,6 +498,38 @@ func (h *Harness) ConnectSingle(ctx context.Context, database string, user TestU
 	// In transaction pooling mode, the proxy changes statement name prefixes
 	// each time a backend is acquired, so cached statements don't work.
 	config.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
+	config.StatementCacheCapacity = 0
+	config.DescriptionCacheCapacity = 0
+
+	conn, err := pgx.ConnectConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+
+	return conn, nil
+}
+
+// ConnectSingleExec creates a single pgx.Conn using QueryExecModeExec.
+// This mode sends Parse+Bind+Execute in a single pipelined message, avoiding
+// the two-round-trip behavior of QueryExecModeDescribeExec that can cause issues
+// with transaction pooling when the proxy reassigns backends between rounds.
+func (h *Harness) ConnectSingleExec(ctx context.Context, database string, user TestUser) (*pgx.Conn, error) {
+	connStr := fmt.Sprintf(
+		"postgres://%s:%s@localhost:%d/%s?sslmode=prefer",
+		user.Username,
+		user.Password,
+		DefaultPglinkPort,
+		database,
+	)
+
+	config, err := pgx.ParseConfig(connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// QueryExecModeExec sends Parse+Bind+Execute+Sync as a single pipelined
+	// message, which keeps the entire query on one backend connection.
+	config.DefaultQueryExecMode = pgx.QueryExecModeExec
 	config.StatementCacheCapacity = 0
 	config.DescriptionCacheCapacity = 0
 
