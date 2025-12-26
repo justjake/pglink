@@ -224,9 +224,20 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 			// Refresh metadata space info and try to parse
 			r.refreshCachedPositions()
 			usedMeta := r.localMsgCnt - r.cachedConsumedMsgs
-			if usedMeta < int64(len(r.offsets)) {
-				// We have metadata space, parse without reading more
-				streamingDetected := r.parseCompleteMessages(&msgsUntilSpaceRefresh)
+			if usedMeta >= int64(len(r.offsets)) {
+				// We have unparsed data but no metadata space.
+				// Wait for metadata space instead of blocking on Read().
+				if err := r.waitForSpace(ctx); err != nil {
+					return err
+				}
+				r.refreshCachedPositions()
+				continue
+			}
+			// We have metadata space, try to parse
+			prevMsgCnt := r.localMsgCnt
+			streamingDetected := r.parseCompleteMessages(&msgsUntilSpaceRefresh)
+			if r.localMsgCnt > prevMsgCnt {
+				// Made progress - parsed at least one message
 				if r.localMsgCnt > r.publishedMsgs {
 					r.publish()
 				}
@@ -235,15 +246,10 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 						return err
 					}
 				}
-				continue // Loop back to check again
+				continue // Loop back to check for more
 			}
-			// We have unparsed data but no metadata space.
-			// Wait for metadata space instead of blocking on Read().
-			if err := r.waitForSpace(ctx); err != nil {
-				return err
-			}
-			r.refreshCachedPositions()
-			continue
+			// No progress - we have a partial message (header but not body).
+			// Fall through to read more data from the network.
 		}
 
 		// Get contiguous region (handle wraparound)

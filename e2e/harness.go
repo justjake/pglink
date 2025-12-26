@@ -131,6 +131,7 @@ func NewHarnessForMain() *Harness {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: logLevel,
 	}))
+	slog.SetDefault(logger)
 
 	return &Harness{
 		t:          nil,
