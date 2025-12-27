@@ -15,6 +15,7 @@ package benchmarks
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -126,12 +127,16 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// getTarget returns the current benchmark target name.
-func getTarget() string {
-	return benchConfig.Target
-}
-
 // getPool returns the shared connection pool.
 func getPool() *pgxpool.Pool {
 	return pool
+}
+
+// getBenchName returns a benchmark sub-name with target and config metadata.
+// Format: target=<target>/conns=<max_conns>/workers=<concurrency>
+func getBenchName() string {
+	return fmt.Sprintf("target=%s/conns=%d/workers=%d",
+		benchConfig.Target,
+		benchConfig.MaxConns,
+		benchConfig.Concurrency)
 }

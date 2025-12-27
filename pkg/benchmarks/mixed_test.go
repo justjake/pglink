@@ -16,9 +16,7 @@ import (
 // - Prepared statements
 // - Transactions
 func BenchmarkMixed(b *testing.B) {
-	target := getTarget()
-
-	b.Run("target="+target, func(b *testing.B) {
+	b.Run(getBenchName(), func(b *testing.B) {
 		ctx := context.Background()
 		pool := getPool()
 

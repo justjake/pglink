@@ -9,9 +9,7 @@ import (
 // This is the baseline latency benchmark that measures proxy overhead
 // with minimal database work.
 func BenchmarkSelect1(b *testing.B) {
-	target := getTarget()
-
-	b.Run("target="+target, func(b *testing.B) {
+	b.Run(getBenchName(), func(b *testing.B) {
 		ctx := context.Background()
 		pool := getPool()
 
@@ -27,9 +25,7 @@ func BenchmarkSelect1(b *testing.B) {
 
 // BenchmarkSelect1Parallel measures SELECT 1 latency with concurrent connections.
 func BenchmarkSelect1Parallel(b *testing.B) {
-	target := getTarget()
-
-	b.Run("target="+target, func(b *testing.B) {
+	b.Run(getBenchName(), func(b *testing.B) {
 		ctx := context.Background()
 		pool := getPool()
 

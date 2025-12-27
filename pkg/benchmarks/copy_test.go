@@ -20,10 +20,9 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 // BenchmarkCopyOut measures COPY TO STDOUT throughput.
 // This benchmarks streaming large result sets through the proxy.
 func BenchmarkCopyOut(b *testing.B) {
-	target := getTarget()
 	rows := 1000 // Number of rows per COPY
 
-	b.Run(fmt.Sprintf("target=%s/rows=%d", target, rows), func(b *testing.B) {
+	b.Run(fmt.Sprintf("%s/rows=%d", getBenchName(), rows), func(b *testing.B) {
 		ctx := context.Background()
 		pool := getPool()
 
@@ -52,10 +51,9 @@ func BenchmarkCopyOut(b *testing.B) {
 // BenchmarkCopyIn measures COPY FROM STDIN throughput.
 // This benchmarks streaming data into the database through the proxy.
 func BenchmarkCopyIn(b *testing.B) {
-	target := getTarget()
 	rows := 1000 // Number of rows per COPY
 
-	b.Run(fmt.Sprintf("target=%s/rows=%d", target, rows), func(b *testing.B) {
+	b.Run(fmt.Sprintf("%s/rows=%d", getBenchName(), rows), func(b *testing.B) {
 		ctx := context.Background()
 		pool := getPool()
 
