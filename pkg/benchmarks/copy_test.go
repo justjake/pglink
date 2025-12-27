@@ -20,7 +20,7 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 // This benchmarks streaming large result sets through the proxy.
 //
 // Concurrency is controlled by the -cpu flag.
-// Connection management is controlled by BENCH_POOL_MODE (worker or loop).
+// Connection management is controlled by BENCH_CONNECT_MODE (per-worker or per-op).
 func BenchmarkCopyOut(b *testing.B) {
 	rows := 1000 // Number of rows per COPY
 
@@ -69,7 +69,7 @@ func BenchmarkCopyOut(b *testing.B) {
 // This benchmarks streaming data into the database through the proxy.
 //
 // Concurrency is controlled by the -cpu flag.
-// Connection management is controlled by BENCH_POOL_MODE (worker or loop).
+// Connection management is controlled by BENCH_CONNECT_MODE (per-worker or per-op).
 func BenchmarkCopyIn(b *testing.B) {
 	rows := 1000 // Number of rows per COPY
 

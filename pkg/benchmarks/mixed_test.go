@@ -17,7 +17,7 @@ import (
 // - Transactions
 //
 // Concurrency is controlled by the -cpu flag.
-// Connection management is controlled by BENCH_POOL_MODE (worker or loop).
+// Connection management is controlled by BENCH_CONNECT_MODE (per-worker or per-op).
 // workerID is used to give each parallel worker a unique RNG seed.
 var workerID atomic.Int64
 

@@ -70,17 +70,17 @@ func (o *Op) Failed(err error) string {
 //   - header:"name"  - header output name (default: snake_case of field name)
 //   - default:"val"  - default value
 //
-// PoolMode controls how connections are managed in benchmarks.
-type PoolMode string
+// ConnectMode controls how connections are managed in benchmarks.
+type ConnectMode string
 
 const (
-	// PoolModeWorker creates one connection per parallel worker, held for the worker's lifetime.
+	// ConnectPerWorker creates one connection per parallel worker, held for the worker's lifetime.
 	// This is efficient for benchmarks that focus on query throughput.
-	PoolModeWorker PoolMode = "worker"
+	ConnectPerWorker ConnectMode = "per-worker"
 
-	// PoolModeLoop creates a new connection for each loop iteration.
+	// ConnectPerOp creates a new connection for each loop iteration.
 	// This tests connection establishment overhead.
-	PoolModeLoop PoolMode = "loop"
+	ConnectPerOp ConnectMode = "per-op"
 )
 
 type BenchConfig struct {
@@ -89,7 +89,7 @@ type BenchConfig struct {
 	Duration    time.Duration `env:"BENCH_DURATION" default:"15s"`
 	Warmup      time.Duration `env:"BENCH_WARMUP" default:"5s"`
 	Protocol    string        `env:"BENCH_SIMPLE_QUERY" header:"protocol" default:"extended"` // "simple" or "extended"
-	PoolMode    PoolMode      `env:"BENCH_POOL_MODE" path:"pool" default:"worker"`            // "worker" or "loop"
+	ConnectMode ConnectMode   `env:"BENCH_CONNECT_MODE" path:"connect" default:"per-worker"`  // "per-worker" or "per-op"
 	Seed        int64         `env:"BENCH_SEED"`
 	RunID       string        `env:"BENCH_RUN_ID" header:"run_id"`
 	Round       int           `env:"BENCH_ROUND"`
@@ -160,14 +160,14 @@ type TestPool interface {
 	Close() error
 }
 
-// GetTestPool creates a TestPool based on the current benchConfig.PoolMode.
-// For PoolModeWorker: creates one connection at init, reuses it for all Acquire calls.
-// For PoolModeLoop: creates a new connection on each Acquire call.
+// GetTestPool creates a TestPool based on the current benchConfig.ConnectMode.
+// For ConnectPerWorker: creates one connection at init, reuses it for all Acquire calls.
+// For ConnectPerOp: creates a new connection on each Acquire call.
 func GetTestPool(b *testing.B, benchCtx context.Context) (TestPool, error) {
-	switch benchConfig.PoolMode {
-	case PoolModeLoop:
+	switch benchConfig.ConnectMode {
+	case ConnectPerOp:
 		return &loopPool{connString: benchConfig.ConnString}, nil
-	case PoolModeWorker:
+	case ConnectPerWorker:
 		fallthrough
 	default:
 		return newWorkerPool(benchCtx)

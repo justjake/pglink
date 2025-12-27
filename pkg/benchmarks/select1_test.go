@@ -9,13 +9,13 @@ import (
 // with minimal database work.
 //
 // Concurrency is controlled by the -cpu flag.
-// Connection management is controlled by BENCH_POOL_MODE (worker or loop).
+// Connection management is controlled by BENCH_CONNECT_MODE (per-worker or per-op).
 func BenchmarkSelect1(b *testing.B) {
 	b.Run(getBenchName(), func(b *testing.B) {
 		benchCtx := b.Context()
 
 		b.RunParallel(func(pb *testing.PB) {
-			// Each worker gets its own pool (worker mode: 1 conn, loop mode: conn per acquire)
+			// Each worker gets its own pool (per-worker: 1 conn, per-op: conn per acquire)
 			pool, err := GetTestPool(b, benchCtx)
 			if err != nil {
 				b.Fatalf("failed to create pool: %v", err)
@@ -54,13 +54,13 @@ func BenchmarkSelect1(b *testing.B) {
 // This tests the full connect/query/disconnect cycle.
 //
 // Concurrency is controlled by the -cpu flag.
-// This benchmark always uses loop mode regardless of BENCH_POOL_MODE.
+// This benchmark always uses per-op mode regardless of BENCH_CONNECT_MODE.
 func BenchmarkConnect(b *testing.B) {
 	b.Run(getBenchName(), func(b *testing.B) {
 		benchCtx := b.Context()
 
 		b.RunParallel(func(pb *testing.PB) {
-			// Always use loop mode for this benchmark
+			// Always use per-op mode for this benchmark
 			pool := &loopPool{connString: benchConfig.ConnString}
 
 			var i int
