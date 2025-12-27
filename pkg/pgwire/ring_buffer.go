@@ -51,7 +51,20 @@ func DefaultRingBufferConfig() RingBufferConfig {
 	return RingBufferConfig{
 		MessageBytes:  DefaultMessageBytes,
 		MessageCount:  DefaultMessageCount,
-		HeadroomBytes: DefaultHeadroomBytes,
+		HeadroomBytes: 0,
+	}
+}
+
+// RingBufferConfigForSize returns a config for the given buffer size in bytes.
+// Uses the default message count. If messageBytes is 0, returns the default config.
+func RingBufferConfigForSize(messageBytes int64) RingBufferConfig {
+	if messageBytes <= 0 {
+		return DefaultRingBufferConfig()
+	}
+	return RingBufferConfig{
+		MessageBytes:  messageBytes,
+		MessageCount:  DefaultMessageCount,
+		HeadroomBytes: 0,
 	}
 }
 

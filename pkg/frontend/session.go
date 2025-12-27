@@ -255,7 +255,7 @@ func (s *Session) Run() {
 	}
 
 	// Start ring buffer reader now that startup is complete
-	s.frontend.StartRingBuffer()
+	s.frontend.StartRingBuffer(s.dbConfig.GetMessageBufferBytes())
 
 	// Idle client state.
 	// When true, transition to backend connected state to handle the query.
@@ -1273,14 +1273,18 @@ func (s *Session) sendError(err error) {
 	if !errors.As(err, &pgErr) {
 		pgErr = pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InternalError, "unexpected error", err)
 	}
-	pgErr.InternalPosition = int32(s.frontend.Cursor().MsgIdx())
+	var msgIdx int64
+	if cursor := s.frontend.Cursor(); cursor != nil {
+		msgIdx = cursor.MsgIdx()
+	}
+	pgErr.InternalPosition = int32(msgIdx)
 	s.logger.Error("session error",
 		"severity", pgErr.Severity,
 		"code", pgErr.Code,
 		"message", pgErr.Message,
 		"file", pgErr.File,
 		"line", pgErr.Line,
-		"seq", s.frontend.Cursor().MsgIdx(),
+		"seq", msgIdx,
 	)
 
 	s.frontend.Send(pgErr)

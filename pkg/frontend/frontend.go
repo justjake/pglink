@@ -23,18 +23,15 @@ type Frontend struct {
 }
 
 func NewFrontend(ctx context.Context, conn net.Conn) *Frontend {
-	ringBuffer := pgwire.NewRingBuffer(pgwire.DefaultRingBufferConfig())
 	return &Frontend{
-		conn:       conn,
-		Backend:    pgproto3.NewBackend(conn, conn),
-		ringBuffer: ringBuffer,
-		cursor:     pgwire.NewClientCursor(ringBuffer),
-		ctx:        ctx,
+		conn:    conn,
+		Backend: pgproto3.NewBackend(conn, conn),
+		ctx:     ctx,
 	}
 }
 
 func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
-	if f.ringBuffer.Running() {
+	if f.ringBuffer != nil && f.ringBuffer.Running() {
 		return nil, fmt.Errorf("ring buffer already running, cannot blocking receive")
 	}
 
@@ -50,15 +47,22 @@ func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
 	return nil, fmt.Errorf("unknown frontend message: %T", msg)
 }
 
-// StartRingBuffer starts the ring buffer reader goroutine.
+// StartRingBuffer creates and starts the ring buffer reader goroutine.
 // Call this after startup is complete to enable zero-copy message reading.
-func (f *Frontend) StartRingBuffer() {
+// messageBufferBytes specifies the ring buffer size; use 0 for the default (256KiB).
+func (f *Frontend) StartRingBuffer(messageBufferBytes int64) {
+	f.ringBuffer = pgwire.NewRingBuffer(pgwire.RingBufferConfigForSize(messageBufferBytes))
+	f.cursor = pgwire.NewClientCursor(f.ringBuffer)
 	f.ringBuffer.StartNetConnReader(f.ctx, f.conn)
 }
 
 // StopRingBuffer stops the ring buffer reader using deadline-based interruption.
 // Returns an error if the reader couldn't be stopped cleanly.
+// Safe to call if the ring buffer was never started.
 func (f *Frontend) StopRingBuffer() error {
+	if f.ringBuffer == nil {
+		return nil
+	}
 	return f.ringBuffer.StopNetConnReader()
 }
 

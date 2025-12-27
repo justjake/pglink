@@ -149,6 +149,7 @@ func main() {
 	configPath := flag.String("config", "", "path to pglink.json config file")
 	listenAddr := flag.String("listen-addr", "", "listen address (overrides config file, e.g. :16432, 0.0.0.0:5432)")
 	algo := flag.String("algo", "", "session algorithm: default, ring (experimental)")
+	messageBufferBytes := flag.String("message-buffer-bytes", "", "ring buffer size (e.g. 16KiB, 256KiB, 1MiB) - overrides all databases")
 	prometheusListen := flag.String("prometheus-listen", "", "enable Prometheus metrics (format: :9090 or :9090/metrics)")
 	flightRecorderDir := flag.String("flight-recorder", "", "enable flight recorder, save snapshots to this directory")
 	flightRecorderMinAge := flag.String("flight-recorder-min-age", "", "flight recorder min age (e.g. 10s, 1m)")
@@ -198,6 +199,19 @@ func main() {
 	if *algo != "" {
 		cfg.SetAlgo(*algo)
 		logger.Info("using session algorithm", "algo", *algo)
+	}
+
+	// Apply message buffer size override to all databases
+	if *messageBufferBytes != "" {
+		bufSize, err := config.ParseByteSize(*messageBufferBytes)
+		if err != nil {
+			logger.Error("invalid message-buffer-bytes", "error", err)
+			os.Exit(1)
+		}
+		for _, dbCfg := range cfg.Databases {
+			dbCfg.MessageBufferBytes = bufSize
+		}
+		logger.Info("using message buffer size", "size", bufSize)
 	}
 
 	// Apply Prometheus CLI override

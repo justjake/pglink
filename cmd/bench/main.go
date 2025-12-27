@@ -127,6 +127,9 @@ type RunConfig struct {
 	PglinkPort    int
 	PgbouncerPort int
 
+	// Ring buffer size override for pglink (0 = use default 256KiB)
+	MessageBufferBytes int64
+
 	// A/B comparison config (optional)
 	Compare           *CompareConfig // Comparison target config
 	CompareGomaxprocs int            // GOMAXPROCS for comparison target
@@ -1003,6 +1006,9 @@ func (s *BenchmarkSuite) generatePglinkConfig() (*config.Config, error) {
 	}
 	for _, dbCfg := range cfg.Databases {
 		dbCfg.Backend.PoolMaxConns = int32(s.runCfg.MaxConns)
+		if s.runCfg.MessageBufferBytes > 0 {
+			dbCfg.MessageBufferBytes = config.ByteSize(s.runCfg.MessageBufferBytes)
+		}
 	}
 	return cfg, nil
 }
@@ -1956,6 +1962,9 @@ func main() {
 	pglinkPort := flag.Int("pglink-port", 16432, "Port for pglink proxy")
 	pgbouncerPort := flag.Int("pgbouncer-port", 16433, "Port for pgbouncer")
 
+	// Ring buffer size override
+	messageBufferBytes := flag.String("message-buffer-bytes", "", "Ring buffer size for pglink (e.g., 16KiB, 256KiB, 1MiB)")
+
 	// A/B comparison flags (mutually exclusive)
 	compareRef := flag.String("compare-ref", "", "Git ref (branch/tag/commit) to compare against. Builds and caches binary.")
 	compareWorktree := flag.String("compare-worktree", "", "Path to existing git worktree to compare against")
@@ -2009,21 +2018,33 @@ func main() {
 		}
 	}
 
+	// Parse message buffer bytes
+	var msgBufBytes int64
+	if *messageBufferBytes != "" {
+		parsed, err := config.ParseByteSize(*messageBufferBytes)
+		if err != nil {
+			log.Fatalf("Invalid -message-buffer-bytes: %v", err)
+		}
+		msgBufBytes = parsed.Int64()
+		log.Printf("Using message buffer size: %s (%d bytes)", *messageBufferBytes, msgBufBytes)
+	}
+
 	cfg := RunConfig{
-		Duration:          *duration,
-		Warmup:            *warmup,
-		Rounds:            *rounds,
-		MaxConns:          *maxConns,
-		Concurrency:       *concurrency,
-		FullTargets:       *fullTargets,
-		FlightRecorder:    *flightRecorder,
-		Seed:              *seed,
-		SimpleQueryMode:   *simpleQuery,
-		Cases:             cases,
-		PglinkPort:        *pglinkPort,
-		PgbouncerPort:     *pgbouncerPort,
-		Compare:           compareCfg,
-		CompareGomaxprocs: *compareGomaxprocs,
+		Duration:           *duration,
+		Warmup:             *warmup,
+		Rounds:             *rounds,
+		MaxConns:           *maxConns,
+		Concurrency:        *concurrency,
+		FullTargets:        *fullTargets,
+		FlightRecorder:     *flightRecorder,
+		Seed:               *seed,
+		SimpleQueryMode:    *simpleQuery,
+		Cases:              cases,
+		PglinkPort:         *pglinkPort,
+		PgbouncerPort:      *pgbouncerPort,
+		MessageBufferBytes: msgBufBytes,
+		Compare:            compareCfg,
+		CompareGomaxprocs:  *compareGomaxprocs,
 	}
 
 	projectDir, err := os.Getwd()

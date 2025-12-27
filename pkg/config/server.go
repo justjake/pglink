@@ -36,6 +36,12 @@ type DatabaseConfig struct {
 	// to track and forward to the backend. By default, only standard parameters
 	// like client_encoding and application_name are tracked.
 	TrackExtraParameters []string `json:"track_extra_parameters,omitzero"`
+
+	// MessageBufferBytes is the byte capacity for the ring buffer used to
+	// proxy messages between client and server.
+	// Must be a power of 2: 4KiB, 8KiB, 16KiB, 32KiB, 64KiB, 128KiB, 256KiB, 512KiB, 1MiB.
+	// Defaults to "256KiB".
+	MessageBufferBytes ByteSize `json:"message_buffer_bytes,omitzero"`
 }
 
 // Validate checks that the database configuration is valid.
@@ -45,6 +51,13 @@ func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) err
 
 	if c.PoolAcquireTimeoutMilliseconds != nil && *c.PoolAcquireTimeoutMilliseconds <= 0 {
 		errs = append(errs, fmt.Errorf("pool_acquire_timeout_milliseconds must be > 0"))
+	}
+
+	if c.MessageBufferBytes != 0 {
+		n := c.MessageBufferBytes.Int64()
+		if n <= 0 || (n&(n-1)) != 0 {
+			errs = append(errs, fmt.Errorf("message_buffer_bytes must be a power of 2 (e.g., 16KiB, 64KiB, 256KiB), got %s", c.MessageBufferBytes))
+		}
 	}
 
 	if c.Backend.PoolMaxConns <= 0 {
@@ -91,6 +104,15 @@ func (c *DatabaseConfig) PoolAcquireTimeout() time.Duration {
 		return time.Duration(*c.PoolAcquireTimeoutMilliseconds) * time.Millisecond
 	}
 	return 1 * time.Second
+}
+
+// GetMessageBufferBytes returns the ring buffer size in bytes.
+// Defaults to 256KiB if not configured.
+func (c *DatabaseConfig) GetMessageBufferBytes() int64 {
+	if c.MessageBufferBytes == 0 {
+		return 256 * 1024 // 256KiB default
+	}
+	return c.MessageBufferBytes.Int64()
 }
 
 // UserConfig configures authentication credentials for a user.
