@@ -136,6 +136,15 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		target.MetricsPort = ApplyPortOffset(target.MetricsPort, o.portOffset)
 	}
 
+	// Generate connection string if not provided
+	if target.ConnString == "" {
+		switch target.Type {
+		case TargetTypePglink, TargetTypePgbouncer:
+			// Connect through the proxy to alpha_uno database
+			target.ConnString = fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", target.Port)
+		}
+	}
+
 	// Start target process (if not direct connection)
 	if target.Type != TargetTypeDirect {
 		if err := o.startTargetProcess(ctx, &target); err != nil {
