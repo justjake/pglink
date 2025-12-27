@@ -10,7 +10,6 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -19,34 +18,6 @@ import (
 	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/observability"
 )
-
-// ShutdownMode represents how the service should shut down.
-type ShutdownMode int32
-
-const (
-	// ShutdownNone means the service is running normally.
-	ShutdownNone ShutdownMode = iota
-	// ShutdownWaitForClients stops accepting new connections and waits for
-	// all existing clients to disconnect gracefully. This is triggered by SIGTERM.
-	// Similar to PgBouncer's "SHUTDOWN WAIT_FOR_CLIENTS".
-	ShutdownWaitForClients
-	// ShutdownImmediate closes all connections immediately and exits.
-	// Triggered by a second signal during shutdown, or SIGQUIT.
-	ShutdownImmediate
-)
-
-func (m ShutdownMode) String() string {
-	switch m {
-	case ShutdownNone:
-		return "none"
-	case ShutdownWaitForClients:
-		return "wait_for_clients"
-	case ShutdownImmediate:
-		return "immediate"
-	default:
-		return fmt.Sprintf("unknown(%d)", m)
-	}
-}
 
 // Service handles incoming client connections.
 type Service struct {
@@ -79,10 +50,6 @@ type Service struct {
 	// validate the secret key, and forward the cancel to the backend.
 	cancelRegistry   map[uint32]*Session
 	cancelRegistryMu sync.RWMutex
-
-	// Shutdown state
-	shutdownMode atomic.Int32 // ShutdownMode
-	shutdownCh   chan struct{}
 }
 
 // NewService creates a new frontend Service with the given configuration.
@@ -113,16 +80,13 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 		cancelRegistry: make(map[uint32]*Session),
 		tracingEnabled: tracingEnabled,
 		metrics:        metrics,
-		shutdownCh:     make(chan struct{}),
 	}, nil
 }
 
 // Listen starts the service and listens for incoming connections on the
 // configured address. Returns an error if the listener fails to start.
-// When shutdown is initiated, the behavior depends on the shutdown mode:
-//   - ShutdownWaitForClients: stops accepting new connections and waits for
-//     existing clients to disconnect gracefully
-//   - ShutdownImmediate: closes all connections immediately
+// When the service's context is cancelled, all sessions are cancelled and
+// the method waits for them to close cleanly before returning.
 func (s *Service) Listen() error {
 	// Set up all databases
 	for name, dbConfig := range s.config.Databases {
@@ -144,8 +108,12 @@ func (s *Service) Listen() error {
 	s.listener = ln
 	s.logger.Info("listening", "addr", addr.String())
 
-	// Start a goroutine to handle shutdown
-	go s.shutdownHandler()
+	// Start a goroutine to close listener and cancel sessions when context is cancelled
+	go func() {
+		<-s.ctx.Done()
+		_ = s.listener.Close()
+		s.cancelAllSessions()
+	}()
 
 	// Run accept loop (blocks until listener is closed or error)
 	acceptErr := s.acceptLoop(ln)
@@ -158,62 +126,6 @@ func (s *Service) Listen() error {
 		return s.ctx.Err()
 	}
 	return acceptErr
-}
-
-// shutdownHandler handles shutdown based on the current mode.
-// It runs in a separate goroutine and responds to shutdown signals.
-func (s *Service) shutdownHandler() {
-	// Wait for shutdown to be initiated
-	<-s.shutdownCh
-
-	mode := ShutdownMode(s.shutdownMode.Load())
-	if s.logger != nil {
-		s.logger.Info("shutdown initiated", "mode", mode.String(), "active_connections", s.activeConns.Load())
-	}
-
-	// Always close the listener to stop accepting new connections
-	if s.listener != nil {
-		_ = s.listener.Close()
-	}
-
-	switch mode {
-	case ShutdownWaitForClients:
-		// Wait for clients to disconnect naturally
-		// Log progress periodically
-		go s.logShutdownProgress()
-		// The sessionsWg.Wait() in Listen() will wait for all sessions
-		// We don't cancel the context, allowing sessions to complete naturally
-
-	case ShutdownImmediate:
-		// Cancel context and force-close all connections
-		s.cancel()
-		s.cancelAllSessions()
-	}
-}
-
-// logShutdownProgress logs the shutdown progress every few seconds while waiting for clients.
-func (s *Service) logShutdownProgress() {
-	if s.logger == nil {
-		return
-	}
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			active := s.activeConns.Load()
-			if active == 0 {
-				return
-			}
-			s.logger.Info("waiting for clients to disconnect",
-				"active_connections", active,
-				"shutdown_mode", ShutdownMode(s.shutdownMode.Load()).String())
-		case <-s.ctx.Done():
-			return
-		}
-	}
 }
 
 // acceptLoop accepts connections on the given listener until it is closed.
@@ -332,66 +244,9 @@ func (s *Service) cancelAllSessions() {
 	}
 }
 
-// Shutdown initiates a shutdown with the specified mode.
-// If shutdown is already in progress, this escalates to immediate shutdown.
-//
-// Modes:
-//   - ShutdownWaitForClients: Stop accepting new connections, wait for clients to disconnect
-//   - ShutdownImmediate: Close all connections immediately
-//
-// Returns the actual shutdown mode that was set (may be escalated to immediate).
-func (s *Service) Shutdown(mode ShutdownMode) ShutdownMode {
-	// Try to set the shutdown mode atomically
-	// If already shutting down, escalate to immediate
-	for {
-		current := ShutdownMode(s.shutdownMode.Load())
-
-		if current == ShutdownImmediate {
-			// Already doing immediate shutdown, nothing to do
-			return current
-		}
-
-		if current != ShutdownNone {
-			// Already shutting down, escalate to immediate
-			if s.logger != nil {
-				s.logger.Info("signal during shutdown, escalating to immediate shutdown")
-			}
-			if s.shutdownMode.CompareAndSwap(int32(current), int32(ShutdownImmediate)) {
-				// Escalate: cancel context and close all connections
-				s.cancel()
-				s.cancelAllSessions()
-				return ShutdownImmediate
-			}
-			// CAS failed, retry
-			continue
-		}
-
-		// Not shutting down yet, try to set the mode
-		if s.shutdownMode.CompareAndSwap(int32(ShutdownNone), int32(mode)) {
-			// Successfully set shutdown mode, signal the handler
-			close(s.shutdownCh)
-
-			// For immediate shutdown, also cancel context directly
-			// (the handler will also do this, but we want immediate effect)
-			if mode == ShutdownImmediate {
-				s.cancel()
-				s.cancelAllSessions()
-			}
-
-			return mode
-		}
-		// CAS failed, retry
-	}
-}
-
-// ShutdownMode returns the current shutdown mode.
-func (s *Service) GetShutdownMode() ShutdownMode {
-	return ShutdownMode(s.shutdownMode.Load())
-}
-
-// IsShuttingDown returns true if shutdown has been initiated.
-func (s *Service) IsShuttingDown() bool {
-	return s.shutdownMode.Load() != int32(ShutdownNone)
+// Shutdown cancels the service's context, triggering graceful shutdown of all sessions.
+func (s *Service) Shutdown() {
+	s.cancel()
 }
 
 // ActiveConnections returns the current number of active client connections.
