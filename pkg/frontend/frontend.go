@@ -49,7 +49,7 @@ func (f *Frontend) Receive() (pgwire.ClientMessage, error) {
 
 // StartRingBuffer creates and starts the ring buffer reader goroutine.
 // Call this after startup is complete to enable zero-copy message reading.
-// messageBufferBytes specifies the ring buffer size; use 0 for the default (256KiB).
+// messageBufferBytes specifies the ring buffer size; use 0 for the default (16KiB).
 func (f *Frontend) StartRingBuffer(messageBufferBytes int64) {
 	f.ringBuffer = pgwire.NewRingBuffer(pgwire.RingBufferConfigForSize(messageBufferBytes))
 	f.cursor = pgwire.NewClientCursor(f.ringBuffer)

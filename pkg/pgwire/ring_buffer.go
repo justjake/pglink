@@ -21,7 +21,7 @@ const (
 	DefaultHeadroomBytes = 8192
 
 	// DefaultMessageBytes is the default ring buffer data capacity
-	DefaultMessageBytes = 256 * 1024 // 256KB
+	DefaultMessageBytes = 16 * 1024 // 16KiB
 
 	// DefaultMessageCount is the default number of message metadata slots
 	DefaultMessageCount = 4096
@@ -33,7 +33,7 @@ const (
 // RingBufferConfig configures a ring buffer's capacity.
 type RingBufferConfig struct {
 	// MessageBytes is the total byte capacity for message data.
-	// Must be a power of 2. Defaults to DefaultMessageBytes (256KB).
+	// Must be a power of 2. Defaults to DefaultMessageBytes (16KiB).
 	MessageBytes int64
 
 	// MessageCount is the maximum number of messages that can be tracked.

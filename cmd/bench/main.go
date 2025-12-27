@@ -130,9 +130,12 @@ type RunConfig struct {
 	// Ring buffer size override for pglink (0 = use default 256KiB)
 	MessageBufferBytes int64
 
-	// A/B comparison config (optional)
+	// A/B comparison config (optional - legacy)
 	Compare           *CompareConfig // Comparison target config
 	CompareGomaxprocs int            // GOMAXPROCS for comparison target
+
+	// A/B test config (new style - exclusive mode)
+	ABTest *ABTestConfig
 }
 
 // BenchmarkSuite manages the benchmark execution
@@ -321,6 +324,14 @@ func makePglinkTLSTarget(gomaxprocs int) *BenchmarkTarget {
 func (s *BenchmarkSuite) buildTargets() []*BenchmarkTarget {
 	var targets []*BenchmarkTarget
 
+	// A/B test mode: only run A and B targets (exclusive mode)
+	if s.runCfg.ABTest != nil {
+		return []*BenchmarkTarget{
+			makeABTarget(s.runCfg.ABTest.A, s.pglinkPort),
+			makeABTarget(s.runCfg.ABTest.B, s.pglinkPort+2),
+		}
+	}
+
 	// Get current commit for labeling when comparison is enabled
 	currentCommit := ""
 	if s.compareBinaryPath != "" {
@@ -373,6 +384,20 @@ type CompareConfig struct {
 
 	// Optional:
 	Label string // Custom label (default: derived from ref/path)
+}
+
+// ABVariant configures one side of an A/B test
+type ABVariant struct {
+	Label string // Display name (required)
+	Cmd   string // Path to pglink binary (default: ./out/pglink)
+	Args  string // Extra CLI args for pglink (e.g., "-message-buffer-bytes 16KiB")
+	Env   string // Extra env vars (format: "KEY=VAL,KEY2=VAL2")
+}
+
+// ABTestConfig configures an A/B comparison test
+type ABTestConfig struct {
+	A ABVariant
+	B ABVariant
 }
 
 // WorktreeManager handles git worktree creation and cleanup
@@ -613,6 +638,49 @@ func makePglinkCompareTarget(binaryPath string, port int, gomaxprocs int, label 
 					binaryPath: binaryPath,
 					port:       port,
 					label:      label,
+				})
+		},
+		TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
+			s.stopPglink()
+			return nil
+		},
+		ConnString: func(s *BenchmarkSuite) string {
+			return fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", port)
+		},
+	}
+}
+
+// makeABTarget creates a benchmark target for an A/B test variant
+func makeABTarget(variant ABVariant, port int) *BenchmarkTarget {
+	// Parse extra env vars
+	var extraEnv []string
+	if variant.Env != "" {
+		for _, kv := range strings.Split(variant.Env, ",") {
+			kv = strings.TrimSpace(kv)
+			if kv != "" {
+				extraEnv = append(extraEnv, kv)
+			}
+		}
+	}
+
+	// Parse extra args
+	var extraArgs []string
+	if variant.Args != "" {
+		extraArgs = strings.Fields(variant.Args)
+	}
+
+	return &BenchmarkTarget{
+		Name: variant.Label,
+		SetUp: func(ctx context.Context, s *BenchmarkSuite) error {
+			return s.startPglinkWithOpts(ctx, s.currentPglinkConfig,
+				pglinkOpts{
+					gomaxprocs: 16, // Default GOMAXPROCS for A/B tests
+					useTLS:     false,
+					binaryPath: variant.Cmd,
+					port:       port,
+					label:      variant.Label,
+					extraEnv:   extraEnv,
+					extraArgs:  extraArgs,
 				})
 		},
 		TearDown: func(ctx context.Context, s *BenchmarkSuite) error {
@@ -951,9 +1019,11 @@ type pgbouncerOpts struct {
 type pglinkOpts struct {
 	gomaxprocs int
 	useTLS     bool
-	binaryPath string // Path to pglink binary (empty = default out/pglink)
-	port       int    // Port to use (0 = default s.pglinkPort)
-	label      string // Label for this target (e.g., "current @ abc123")
+	binaryPath string   // Path to pglink binary (empty = default out/pglink)
+	port       int      // Port to use (0 = default s.pglinkPort)
+	label      string   // Label for this target (e.g., "current @ abc123")
+	extraEnv   []string // Extra environment variables (e.g., ["KEY=VAL", "KEY2=VAL2"])
+	extraArgs  []string // Extra CLI args for pglink (e.g., ["-message-buffer-bytes", "16KiB"])
 }
 
 func (s *BenchmarkSuite) generateCopyData() {
@@ -1090,8 +1160,17 @@ func (s *BenchmarkSuite) startPglinkWithOpts(ctx context.Context, cfg *config.Co
 	}
 
 	cmdArgs := append([]string{"-config", configPath}, args...)
+	// Add extra CLI args from A/B config
+	if len(opts.extraArgs) > 0 {
+		cmdArgs = append(cmdArgs, opts.extraArgs...)
+		log.Printf("  Extra args: %v", opts.extraArgs)
+	}
 	s.pglinkCmd = exec.Command(pglinkBinary, cmdArgs...)
 	s.pglinkCmd.Env = append(os.Environ(), fmt.Sprintf("GOMAXPROCS=%d", opts.gomaxprocs))
+	// Add extra environment variables from A/B config
+	if len(opts.extraEnv) > 0 {
+		s.pglinkCmd.Env = append(s.pglinkCmd.Env, opts.extraEnv...)
+	}
 	s.pglinkCmd.Dir = tmpDir
 
 	if err := s.pglinkCmd.Start(); err != nil {
@@ -1965,12 +2044,22 @@ func main() {
 	// Ring buffer size override
 	messageBufferBytes := flag.String("message-buffer-bytes", "", "Ring buffer size for pglink (e.g., 16KiB, 256KiB, 1MiB)")
 
-	// A/B comparison flags (mutually exclusive)
+	// A/B comparison flags (mutually exclusive with --a-*/--b-* flags)
 	compareRef := flag.String("compare-ref", "", "Git ref (branch/tag/commit) to compare against. Builds and caches binary.")
 	compareWorktree := flag.String("compare-worktree", "", "Path to existing git worktree to compare against")
 	compareBinary := flag.String("compare-binary", "", "Path to pre-built pglink binary to compare against")
 	compareLabel := flag.String("compare-label", "", "Label for comparison target (default: derived from ref/path)")
 	compareGomaxprocs := flag.Int("compare-gomaxprocs", 16, "GOMAXPROCS for comparison target")
+
+	// New-style A/B test flags (exclusive mode - only runs A and B)
+	aLabel := flag.String("a-label", "", "Label for variant A")
+	aCmd := flag.String("a-cmd", "", "Path to pglink binary for A (default: ./out/pglink)")
+	aArgs := flag.String("a-args", "", "Extra CLI args for A (e.g., '-message-buffer-bytes 16KiB')")
+	aEnv := flag.String("a-env", "", "Extra env vars for A (format: KEY=VAL,KEY2=VAL2)")
+	bLabel := flag.String("b-label", "", "Label for variant B")
+	bCmd := flag.String("b-cmd", "", "Path to pglink binary for B (default: ./out/pglink)")
+	bArgs := flag.String("b-args", "", "Extra CLI args for B (e.g., '-message-buffer-bytes 64KiB')")
+	bEnv := flag.String("b-env", "", "Extra env vars for B (format: KEY=VAL,KEY2=VAL2)")
 
 	flag.Parse()
 
@@ -2005,6 +2094,36 @@ func main() {
 			BinaryPath: *compareBinary,
 			Label:      *compareLabel,
 		}
+	}
+
+	// Build A/B test config if specified
+	var abTest *ABTestConfig
+	hasAFlags := *aLabel != "" || *aCmd != "" || *aArgs != "" || *aEnv != ""
+	hasBFlags := *bLabel != "" || *bCmd != "" || *bArgs != "" || *bEnv != ""
+	if hasAFlags || hasBFlags {
+		// Validate: both A and B labels are required
+		if *aLabel == "" || *bLabel == "" {
+			log.Fatal("Both -a-label and -b-label are required for A/B testing")
+		}
+		// Validate: can't use old-style compare flags with new A/B flags
+		if compareCount > 0 {
+			log.Fatal("Cannot use -compare-* flags with -a-*/-b-* flags")
+		}
+		abTest = &ABTestConfig{
+			A: ABVariant{
+				Label: *aLabel,
+				Cmd:   *aCmd,
+				Args:  *aArgs,
+				Env:   *aEnv,
+			},
+			B: ABVariant{
+				Label: *bLabel,
+				Cmd:   *bCmd,
+				Args:  *bArgs,
+				Env:   *bEnv,
+			},
+		}
+		log.Printf("A/B test mode: %q vs %q", *aLabel, *bLabel)
 	}
 
 	// Parse cases flag
@@ -2045,6 +2164,7 @@ func main() {
 		MessageBufferBytes: msgBufBytes,
 		Compare:            compareCfg,
 		CompareGomaxprocs:  *compareGomaxprocs,
+		ABTest:             abTest,
 	}
 
 	projectDir, err := os.Getwd()

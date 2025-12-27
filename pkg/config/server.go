@@ -40,7 +40,7 @@ type DatabaseConfig struct {
 	// MessageBufferBytes is the byte capacity for the ring buffer used to
 	// proxy messages between client and server.
 	// Must be a power of 2: 4KiB, 8KiB, 16KiB, 32KiB, 64KiB, 128KiB, 256KiB, 512KiB, 1MiB.
-	// Defaults to "256KiB".
+	// Defaults to "16KiB".
 	MessageBufferBytes ByteSize `json:"message_buffer_bytes,omitzero"`
 }
 
@@ -107,10 +107,10 @@ func (c *DatabaseConfig) PoolAcquireTimeout() time.Duration {
 }
 
 // GetMessageBufferBytes returns the ring buffer size in bytes.
-// Defaults to 256KiB if not configured.
+// Defaults to 16KiB if not configured.
 func (c *DatabaseConfig) GetMessageBufferBytes() int64 {
 	if c.MessageBufferBytes == 0 {
-		return 256 * 1024 // 256KiB default
+		return 16 * 1024 // 16KiB default
 	}
 	return c.MessageBufferBytes.Int64()
 }
