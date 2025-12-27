@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -102,14 +103,54 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 
 	cmd.Env = env
 
-	// Capture stdout (benchmark results) while streaming stderr (progress) to console
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdout, os.Stderr) // Stream benchmark output to stderr for visibility
-	cmd.Stderr = &stderr
+	// Set up pipes to stream output in real-time
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
 
-	// Run the benchmark
+	// Start the command
 	startTime := time.Now()
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start go test: %w", err)
+	}
+
+	// Stream output in real-time while capturing it
+	var stdout, stderr bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Stream stdout (benchmark results) to stderr for visibility and capture
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 1024)
+		for {
+			n, err := stdoutPipe.Read(buf)
+			if n > 0 {
+				_, _ = stdout.Write(buf[:n])
+				_, _ = os.Stderr.Write(buf[:n]) // Stream to stderr for real-time visibility
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	// Capture stderr
+	go func() {
+		defer wg.Done()
+		_, _ = io.Copy(&stderr, stderrPipe)
+	}()
+
+	// Wait for output streaming to complete
+	wg.Wait()
+
+	// Wait for command to finish
+	err = cmd.Wait()
 	duration := time.Since(startTime)
 
 	result := &BenchRunResult{
