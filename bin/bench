@@ -116,28 +116,38 @@ run_benchmarks() {
 
     # Default benchmark parameters
     duration="${BENCH_DURATION:-10s}"
-    warmup="${BENCH_WARMUP:-2s}"
-    max_conns="${BENCH_MAX_CONNS:-100,500,1000}"
-    concurrency="${BENCH_CONCURRENCY:-100,200,500,600,1000,1500}"
-    gomaxprocs="${BENCH_GOMAXPROCS:-1,2,4,8,16}"
+    warmup="${BENCH_WARMUP:-3s}"
+    rounds="${BENCH_ROUNDS:-2}"
+    max_conns="${BENCH_MAX_CONNS:-100}"
+    concurrency="${BENCH_CONCURRENCY:-100}"
+    full_targets="${BENCH_FULL_TARGETS:-false}"
 
     log "Benchmark parameters:"
     log "  Duration: $duration"
     log "  Warmup: $warmup"
+    log "  Rounds: $rounds"
     log "  Max connections: $max_conns"
     log "  Concurrency: $concurrency"
-    log "  GOMAXPROCS: $gomaxprocs"
+    log "  Full targets: $full_targets"
     log "  Output: $output_dir"
 
+    # Build args array
+    args=(
+        -duration "$duration"
+        -warmup "$warmup"
+        -rounds "$rounds"
+        -max-conns "$max_conns"
+        -concurrency "$concurrency"
+        -output "$output_dir"
+    )
+
+    # Add full-targets flag if enabled
+    if [[ "$full_targets" == "true" ]]; then
+        args+=(-full-targets)
+    fi
+
     # Run the benchmark
-    ./out/bench \
-        -duration "$duration" \
-        -warmup "$warmup" \
-        -max-conns "$max_conns" \
-        -concurrency "$concurrency" \
-        -gomaxprocs "$gomaxprocs" \
-        -output "$output_dir" \
-        2>&1 | tee "$output_dir/bench.log"
+    ./out/bench "${args[@]}" 2>&1 | tee "$output_dir/bench.log"
 
     # Copy results to latest
     ln -sfn "$timestamp" out/benchmark/latest
@@ -156,9 +166,9 @@ smoke_test() {
     ./out/bench \
         -duration 2s \
         -warmup 1s \
-        -max-conns 100 \
-        -concurrency 50,100 \
-        -gomaxprocs 4 \
+        -rounds 1 \
+        -max-conns 50 \
+        -concurrency 50 \
         -output "$output_dir" \
         2>&1 | tee "$output_dir/bench.log"
 
@@ -187,10 +197,10 @@ main() {
         quick)
             # Quick test with reduced parameters
             BENCH_DURATION=5s \
-            BENCH_WARMUP=1s \
-            BENCH_MAX_CONNS=100,500 \
-            BENCH_CONCURRENCY=100,500 \
-            BENCH_GOMAXPROCS=4,8 \
+            BENCH_WARMUP=2s \
+            BENCH_ROUNDS=1 \
+            BENCH_MAX_CONNS=100 \
+            BENCH_CONCURRENCY=100 \
             run_benchmarks
             ;;
         *)
