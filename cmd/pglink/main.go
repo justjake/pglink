@@ -158,6 +158,7 @@ func main() {
 	showHelp := flag.Bool("help", false, "show full documentation")
 	writePgbouncerDir := flag.String("write-pgbouncer-config-dir", "", "write equivalent pgbouncer config to this directory and exit")
 	pgbouncerPort := flag.Int("pgbouncer-port", 6432, "port for pgbouncer to listen on (used with -write-pgbouncer-config-dir)")
+	otelMode := flag.String("otel", "", "enable OpenTelemetry: minimal, traceparent, traceparent+appname")
 	flag.Usage = printUsage
 	flag.Parse()
 
@@ -234,6 +235,40 @@ func main() {
 		}
 		if *flightRecorderMaxBytes > 0 {
 			cfg.FlightRecorder.MaxBytes = *flightRecorderMaxBytes
+		}
+	}
+
+	// Apply OpenTelemetry CLI override
+	if *otelMode != "" {
+		switch *otelMode {
+		case "minimal":
+			// Enable otel with no regex parsing - just basic tracing infrastructure
+			cfg.OpenTelemetry = &config.OpenTelemetryConfig{
+				Enabled:             true,
+				ServiceName:         "pglink",
+				TraceparentSQLRegex: config.BoolOrString{Bool: false, IsSet: true},
+			}
+			logger.Info("OpenTelemetry enabled", "mode", "minimal")
+		case "traceparent":
+			// Enable otel with traceparent regex parsing
+			cfg.OpenTelemetry = &config.OpenTelemetryConfig{
+				Enabled:             true,
+				ServiceName:         "pglink",
+				TraceparentSQLRegex: config.BoolOrString{Bool: true, IsSet: true},
+			}
+			logger.Info("OpenTelemetry enabled", "mode", "traceparent")
+		case "traceparent+appname":
+			// Enable otel with both traceparent and application_name regex parsing
+			cfg.OpenTelemetry = &config.OpenTelemetryConfig{
+				Enabled:                 true,
+				ServiceName:             "pglink",
+				TraceparentSQLRegex:     config.BoolOrString{Bool: true, IsSet: true},
+				ApplicationNameSQLRegex: config.BoolOrString{Bool: true, IsSet: true},
+			}
+			logger.Info("OpenTelemetry enabled", "mode", "traceparent+appname")
+		default:
+			logger.Error("invalid -otel mode", "mode", *otelMode, "valid", "minimal, traceparent, traceparent+appname")
+			os.Exit(1)
 		}
 	}
 
