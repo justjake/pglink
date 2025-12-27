@@ -12,9 +12,8 @@ type BenchSuiteConfig struct {
 	Rounds   int           // Number of rounds per target (default: 2)
 	Count    int           // Iterations per benchmark for go test -count (default: 1)
 
-	// Connection pool settings
-	MaxConns    int // Max backend connections in pool (default: 100)
-	Concurrency int // Number of concurrent workers (default: 100)
+	// Concurrency settings (controls -cpu flag for go test)
+	CPU int // Number of parallel workers / GOMAXPROCS for benchmarks (default: 100)
 
 	// Output settings
 	OutputDir string // Output directory for results
@@ -42,13 +41,12 @@ type BenchSuiteConfig struct {
 // DefaultBenchSuiteConfig returns a BenchSuiteConfig with sensible defaults.
 func DefaultBenchSuiteConfig() BenchSuiteConfig {
 	return BenchSuiteConfig{
-		Duration:    15 * time.Second,
-		Warmup:      5 * time.Second,
-		Rounds:      2,
-		Count:       1,
-		MaxConns:    100,
-		Concurrency: 100,
-		OutputDir:   "out/benchmarks",
+		Duration:  15 * time.Second,
+		Warmup:    5 * time.Second,
+		Rounds:    2,
+		Count:     1,
+		CPU:       100,
+		OutputDir: "out/benchmarks",
 	}
 }
 
@@ -129,8 +127,7 @@ type BenchRunConfig struct {
 	// Suite-level config (inherited from BenchSuiteConfig)
 	Duration        time.Duration
 	Warmup          time.Duration
-	MaxConns        int
-	Concurrency     int
+	CPU             int // Number of parallel workers (-cpu flag)
 	SimpleQueryMode bool
 	Seed            int64
 	Cases           []string

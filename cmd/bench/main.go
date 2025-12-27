@@ -34,8 +34,7 @@ func main() {
 	warmup := flag.Duration("warmup", 5*time.Second, "warmup duration before measuring")
 	rounds := flag.Int("rounds", 2, "number of rounds per target")
 	count := flag.Int("count", 1, "iterations per benchmark for go test -count")
-	maxConns := flag.Int("max-conns", 100, "max backend connections in pool")
-	concurrency := flag.Int("concurrency", 100, "number of concurrent workers")
+	cpu := flag.Int("cpu", 100, "number of parallel workers (go test -cpu flag)")
 	outputDir := flag.String("output", "", "output directory for results (default: out/benchmarks/<timestamp>)")
 	cases := flag.String("cases", "", "comma-separated list of cases to run (empty = all)")
 	simpleQuery := flag.Bool("simple-query", false, "use simple query protocol instead of extended")
@@ -72,8 +71,7 @@ func main() {
 		Warmup:          *warmup,
 		Rounds:          *rounds,
 		Count:           *count,
-		MaxConns:        *maxConns,
-		Concurrency:     *concurrency,
+		CPU:             *cpu,
 		OutputDir:       *outputDir,
 		SimpleQueryMode: *simpleQuery,
 		Observable:      *observable,

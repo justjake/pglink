@@ -139,16 +139,14 @@ run_benchmarks() {
     duration="${BENCH_DURATION:-10s}"
     warmup="${BENCH_WARMUP:-3s}"
     rounds="${BENCH_ROUNDS:-2}"
-    max_conns="${BENCH_MAX_CONNS:-100}"
-    concurrency="${BENCH_CONCURRENCY:-100}"
+    cpu="${BENCH_CPU:-100}"
     full_targets="${BENCH_FULL_TARGETS:-false}"
 
     log "Benchmark parameters:"
     log "  Duration: $duration"
     log "  Warmup: $warmup"
     log "  Rounds: $rounds"
-    log "  Max connections: $max_conns"
-    log "  Concurrency: $concurrency"
+    log "  CPU (parallelism): $cpu"
     log "  Full targets: $full_targets"
     log "  Output: $output_dir"
 
@@ -157,8 +155,7 @@ run_benchmarks() {
         -duration "$duration"
         -warmup "$warmup"
         -rounds "$rounds"
-        -max-conns "$max_conns"
-        -concurrency "$concurrency"
+        -cpu "$cpu"
         -output "$output_dir"
     )
 
@@ -188,8 +185,7 @@ smoke_test() {
         -duration 2s \
         -warmup 1s \
         -rounds 1 \
-        -max-conns 50 \
-        -concurrency 50 \
+        -cpu 50 \
         -output "$output_dir" \
         2>&1 | tee "$output_dir/bench.log"
 
@@ -220,8 +216,7 @@ main() {
             BENCH_DURATION=5s \
             BENCH_WARMUP=2s \
             BENCH_ROUNDS=1 \
-            BENCH_MAX_CONNS=100 \
-            BENCH_CONCURRENCY=100 \
+            BENCH_CPU=100 \
             run_benchmarks
             ;;
         *)

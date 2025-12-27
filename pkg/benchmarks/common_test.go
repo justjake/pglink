@@ -8,6 +8,9 @@
 //	path:"foo"          - include in benchmark path as foo=<value> (for benchstat filtering)
 //	header:"foo"        - name to use in output header (defaults to snake_case of field name)
 //	default:"value"     - default value if env var is not set
+//
+// Concurrency is controlled via the -cpu flag (GOMAXPROCS), not connection pools.
+// Each parallel worker creates and holds its own dedicated connection.
 package benchmarks
 
 import (
@@ -16,12 +19,13 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 )
 
 // opTimeout is the maximum time any single benchmark operation should take.
@@ -65,27 +69,34 @@ func (o *Op) Failed(err error) string {
 //   - path:"name"    - include in benchmark path (for benchstat filtering)
 //   - header:"name"  - header output name (default: snake_case of field name)
 //   - default:"val"  - default value
+//
+// PoolMode controls how connections are managed in benchmarks.
+type PoolMode string
+
+const (
+	// PoolModeWorker creates one connection per parallel worker, held for the worker's lifetime.
+	// This is efficient for benchmarks that focus on query throughput.
+	PoolModeWorker PoolMode = "worker"
+
+	// PoolModeLoop creates a new connection for each loop iteration.
+	// This tests connection establishment overhead.
+	PoolModeLoop PoolMode = "loop"
+)
+
 type BenchConfig struct {
 	ConnString  string        `env:"BENCH_CONN_STRING"`
 	Target      string        `env:"BENCH_TARGET" path:"target" default:"unknown"`
-	MaxConns    int           `env:"BENCH_MAX_CONNS" path:"conns" default:"100"`
-	Concurrency int           `env:"BENCH_CONCURRENCY" path:"workers" default:"100"`
 	Duration    time.Duration `env:"BENCH_DURATION" default:"15s"`
 	Warmup      time.Duration `env:"BENCH_WARMUP" default:"5s"`
 	Protocol    string        `env:"BENCH_SIMPLE_QUERY" header:"protocol" default:"extended"` // "simple" or "extended"
+	PoolMode    PoolMode      `env:"BENCH_POOL_MODE" path:"pool" default:"worker"`            // "worker" or "loop"
 	Seed        int64         `env:"BENCH_SEED"`
 	RunID       string        `env:"BENCH_RUN_ID" header:"run_id"`
 	Round       int           `env:"BENCH_ROUND"`
 	TotalRounds int           `env:"BENCH_TOTAL_ROUNDS" header:"total_rounds"`
 }
 
-var (
-	// pool is the shared connection pool for all benchmarks.
-	pool *pgxpool.Pool
-
-	// benchConfig holds the loaded configuration.
-	benchConfig BenchConfig
-)
+var benchConfig BenchConfig
 
 func TestMain(m *testing.M) {
 	// Load configuration from environment using reflection
@@ -99,28 +110,17 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
-	// Create connection pool
-	ctx := context.Background()
-	poolConfig, err := pgxpool.ParseConfig(benchConfig.ConnString)
+	// Verify we can connect
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	conn, err := pgx.Connect(ctx, benchConfig.ConnString)
+	cancel()
 	if err != nil {
-		log.Fatalf("Failed to parse connection string: %v", err)
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
+	conn.Close(context.Background())
 
-	poolConfig.MaxConns = int32(benchConfig.MaxConns)
-
-	pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		log.Fatalf("Failed to create connection pool: %v", err)
-	}
-	defer pool.Close()
-
-	// Verify connection
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("Failed to ping database: %v", err)
-	}
-
-	log.Printf("Connected to database, target=%s, max_conns=%d, concurrency=%d",
-		benchConfig.Target, benchConfig.MaxConns, benchConfig.Concurrency)
+	log.Printf("Connected to database, target=%s, GOMAXPROCS=%d",
+		benchConfig.Target, runtime.GOMAXPROCS(0))
 
 	// Print benchstat-compatible configuration header
 	printBenchConfig(&benchConfig)
@@ -129,9 +129,105 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// getPool returns the shared connection pool.
-func getPool() *pgxpool.Pool {
-	return pool
+// connect creates a new database connection for a benchmark worker.
+// Each parallel worker should call this once and reuse the connection.
+func connect(ctx context.Context) (*pgx.Conn, error) {
+	return pgx.Connect(ctx, benchConfig.ConnString)
+}
+
+// TestConn wraps a pgx.Conn with a Release method compatible with pgxpool.
+type TestConn struct {
+	*pgx.Conn
+	release func()
+}
+
+// Release returns the connection to the pool or closes it, depending on pool mode.
+func (c *TestConn) Release() {
+	if c.release != nil {
+		c.release()
+	}
+}
+
+// TestPool provides pooled access to database connections.
+// The interface is compatible with pgxpool.Pool's Acquire/Release pattern.
+type TestPool interface {
+	// Acquire gets a connection from the pool.
+	// The returned TestConn must be Released when done.
+	Acquire(ctx context.Context) (*TestConn, error)
+
+	// Close releases all resources held by the pool.
+	// Returns an error if closing fails.
+	Close() error
+}
+
+// GetTestPool creates a TestPool based on the current benchConfig.PoolMode.
+// For PoolModeWorker: creates one connection at init, reuses it for all Acquire calls.
+// For PoolModeLoop: creates a new connection on each Acquire call.
+func GetTestPool(b *testing.B, benchCtx context.Context) (TestPool, error) {
+	switch benchConfig.PoolMode {
+	case PoolModeLoop:
+		return &loopPool{connString: benchConfig.ConnString}, nil
+	case PoolModeWorker:
+		fallthrough
+	default:
+		return newWorkerPool(benchCtx)
+	}
+}
+
+// workerPool holds a single connection for the worker's lifetime.
+// Acquire returns the same connection each time; Release is a no-op.
+// This pool is only used by a single goroutine, so no locking is needed.
+type workerPool struct {
+	conn *pgx.Conn
+}
+
+func newWorkerPool(ctx context.Context) (*workerPool, error) {
+	op := NewOp(ctx, "connect", 0)
+	defer op.Done()
+
+	conn, err := connect(op.Ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &workerPool{conn: conn}, nil
+}
+
+func (p *workerPool) Acquire(_ context.Context) (*TestConn, error) {
+	// Return the same connection; Release is a no-op
+	return &TestConn{Conn: p.conn, release: func() {}}, nil
+}
+
+func (p *workerPool) Close() error {
+	if p.conn != nil {
+		err := p.conn.Close(context.Background())
+		p.conn = nil
+		return err
+	}
+	return nil
+}
+
+// loopPool creates a new connection on each Acquire call.
+// Release closes the connection immediately.
+type loopPool struct {
+	connString string
+}
+
+func (p *loopPool) Acquire(ctx context.Context) (*TestConn, error) {
+	conn, err := pgx.Connect(ctx, p.connString)
+	if err != nil {
+		return nil, err
+	}
+	return &TestConn{
+		Conn: conn,
+		release: func() {
+			conn.Close(context.Background())
+		},
+	}, nil
+}
+
+func (p *loopPool) Close() error {
+	// Nothing to do - connections are closed on Release
+	return nil
 }
 
 // getBenchName returns a benchmark sub-name with path-tagged config fields.

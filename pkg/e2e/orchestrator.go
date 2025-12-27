@@ -194,8 +194,7 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		runCfg := BenchRunConfig{
 			Duration:        o.Config.Duration,
 			Warmup:          o.Config.Warmup,
-			MaxConns:        o.Config.MaxConns,
-			Concurrency:     o.Config.Concurrency,
+			CPU:             o.Config.CPU,
 			SimpleQueryMode: o.Config.SimpleQueryMode,
 			Seed:            o.Config.Seed,
 			Cases:           o.Config.Cases,

@@ -47,6 +47,11 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 		"-run=^$", // Skip unit tests, only run benchmarks
 	}
 
+	// Add -cpu flag for parallelism (controls GOMAXPROCS and number of parallel workers)
+	if cfg.CPU > 0 {
+		args = append(args, fmt.Sprintf("-cpu=%d", cfg.CPU))
+	}
+
 	// Add count flag
 	if cfg.Count > 0 {
 		args = append(args, fmt.Sprintf("-count=%d", cfg.Count))
@@ -80,8 +85,6 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 	env = append(env,
 		fmt.Sprintf("BENCH_CONN_STRING=%s", cfg.ConnString),
 		fmt.Sprintf("BENCH_TARGET=%s", cfg.Target.Name),
-		fmt.Sprintf("BENCH_MAX_CONNS=%d", cfg.MaxConns),
-		fmt.Sprintf("BENCH_CONCURRENCY=%d", cfg.Concurrency),
 		fmt.Sprintf("BENCH_DURATION=%s", cfg.Duration),
 		fmt.Sprintf("BENCH_WARMUP=%s", cfg.Warmup),
 	)
