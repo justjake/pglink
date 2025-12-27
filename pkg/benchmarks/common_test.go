@@ -39,6 +39,9 @@ var (
 		Warmup          time.Duration
 		SimpleQueryMode bool
 		Seed            int64
+		RunID           string
+		Round           int
+		TotalRounds     int
 	}
 )
 
@@ -100,6 +103,20 @@ func TestMain(m *testing.M) {
 		}
 	}
 
+	benchConfig.RunID = os.Getenv("BENCH_RUN_ID")
+
+	if v := os.Getenv("BENCH_ROUND"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			benchConfig.Round = n
+		}
+	}
+
+	if v := os.Getenv("BENCH_TOTAL_ROUNDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			benchConfig.TotalRounds = n
+		}
+	}
+
 	// Create connection pool
 	ctx := context.Background()
 	poolConfig, err := pgxpool.ParseConfig(benchConfig.ConnString)
@@ -123,6 +140,10 @@ func TestMain(m *testing.M) {
 	log.Printf("Connected to database, target=%s, max_conns=%d, concurrency=%d",
 		benchConfig.Target, benchConfig.MaxConns, benchConfig.Concurrency)
 
+	// Print benchstat-compatible configuration header
+	// These key: value lines are preserved by benchstat and appear in output
+	printBenchConfig()
+
 	// Run benchmarks
 	os.Exit(m.Run())
 }
@@ -139,4 +160,29 @@ func getBenchName() string {
 		benchConfig.Target,
 		benchConfig.MaxConns,
 		benchConfig.Concurrency)
+}
+
+// printBenchConfig prints benchmark configuration in benchstat-compatible format.
+// These "key: value" lines appear in the output header and are preserved by benchstat.
+func printBenchConfig() {
+	// Print config header - benchstat preserves these
+	fmt.Printf("target: %s\n", benchConfig.Target)
+	fmt.Printf("duration: %s\n", benchConfig.Duration)
+	fmt.Printf("warmup: %s\n", benchConfig.Warmup)
+	fmt.Printf("max_conns: %d\n", benchConfig.MaxConns)
+	fmt.Printf("concurrency: %d\n", benchConfig.Concurrency)
+	if benchConfig.SimpleQueryMode {
+		fmt.Printf("protocol: simple\n")
+	} else {
+		fmt.Printf("protocol: extended\n")
+	}
+	if benchConfig.Seed != 0 {
+		fmt.Printf("seed: %d\n", benchConfig.Seed)
+	}
+	if benchConfig.RunID != "" {
+		fmt.Printf("run_id: %s\n", benchConfig.RunID)
+	}
+	if benchConfig.TotalRounds > 0 {
+		fmt.Printf("round: %d/%d\n", benchConfig.Round, benchConfig.TotalRounds)
+	}
 }
