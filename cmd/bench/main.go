@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"hash/fnv"
@@ -1523,7 +1524,10 @@ func (s *BenchmarkSuite) runTarget(
 
 	defer func() {
 		if target.TearDown != nil {
-			_ = target.TearDown(ctx, s)
+			tearDownErr := target.TearDown(ctx, s)
+			if tearDownErr != nil {
+				err = errors.Join(err, fmt.Errorf("target teardown failed: %w", tearDownErr))
+			}
 		}
 		if s.lastTraceFile != "" {
 			result.TraceFile = s.lastTraceFile
@@ -1685,9 +1689,13 @@ func (s *BenchmarkSuite) runLoadForDuration(
 		close(done)
 	}()
 
+	// Wait for in-flight tasks to complete. COPY operations can take a while,
+	// so we wait up to 30 seconds (matching the per-query timeout) to avoid
+	// abandoning tasks mid-flight, which can leave connections in a bad state.
 	select {
 	case <-done:
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(30 * time.Second):
+		log.Printf("Warning: case %s: tasks did not end within 30s grace period", bc.Title)
 	}
 }
 
