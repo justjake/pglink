@@ -131,6 +131,15 @@ func (s *Session) RingBuffer() *pgwire.RingBuffer {
 	return s.ringBuffer
 }
 
+// TryFill attempts to read data directly into the ring buffer (for single-goroutine mode).
+// Returns true if data was read, false if no data available (timeout).
+func (s *Session) TryFill(ctx context.Context, timeout time.Duration) (bool, error) {
+	if s.ringBuffer == nil {
+		return false, fmt.Errorf("ring buffer not initialized")
+	}
+	return s.ringBuffer.TryReadOnce(ctx, s.Conn.Conn(), timeout)
+}
+
 func (s *Session) WriteRange(r *pgwire.RingRange) error {
 	_, err := io.Copy(s.Conn.Conn(), r.NewReader())
 	return err

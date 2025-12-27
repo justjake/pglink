@@ -1842,3 +1842,312 @@ func TestRingBuffer_NewWithSameBuffers(t *testing.T) {
 		assertMessageType(t, results[0], MsgClientSync)
 	})
 }
+
+// ============================================================================
+// TryReadOnce Tests
+// ============================================================================
+
+// TimeoutConn is a net.Conn that can simulate timeout behavior for testing.
+type TimeoutConn struct {
+	data         []byte
+	pos          int
+	readDeadline time.Time
+	mu           sync.Mutex
+}
+
+// NewTimeoutConn creates a TimeoutConn with the given data.
+func NewTimeoutConn(data []byte) *TimeoutConn {
+	return &TimeoutConn{data: data}
+}
+
+// NewTimeoutConnFromClient creates a TimeoutConn from pgproto3 frontend messages.
+func NewTimeoutConnFromClient(msgs ...pgproto3.FrontendMessage) *TimeoutConn {
+	var buf bytes.Buffer
+	for _, msg := range msgs {
+		encoded, err := msg.Encode(nil)
+		if err != nil {
+			panic("failed to encode client message: " + err.Error())
+		}
+		buf.Write(encoded)
+	}
+	return NewTimeoutConn(buf.Bytes())
+}
+
+func (tc *TimeoutConn) Read(b []byte) (int, error) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	// Check for EOF first - if there's no data, check deadline
+	if tc.pos >= len(tc.data) {
+		// No data available - check if we should timeout
+		if !tc.readDeadline.IsZero() && !time.Now().Before(tc.readDeadline) {
+			return 0, &timeoutError{}
+		}
+		return 0, io.EOF
+	}
+
+	// Data is available - return it even if deadline passed
+	// (this matches real socket behavior - buffered data is returned)
+	n := copy(b, tc.data[tc.pos:])
+	tc.pos += n
+	return n, nil
+}
+
+func (tc *TimeoutConn) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+func (tc *TimeoutConn) Close() error {
+	return nil
+}
+
+func (tc *TimeoutConn) LocalAddr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 5432}
+}
+
+func (tc *TimeoutConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+}
+
+func (tc *TimeoutConn) SetDeadline(t time.Time) error {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.readDeadline = t
+	return nil
+}
+
+func (tc *TimeoutConn) SetReadDeadline(t time.Time) error {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.readDeadline = t
+	return nil
+}
+
+func (tc *TimeoutConn) SetWriteDeadline(_ time.Time) error {
+	return nil
+}
+
+// timeoutError implements net.Error for timeout simulation
+type timeoutError struct{}
+
+func (e *timeoutError) Error() string   { return "i/o timeout" }
+func (e *timeoutError) Timeout() bool   { return true }
+func (e *timeoutError) Temporary() bool { return true }
+
+var _ net.Error = (*timeoutError)(nil)
+var _ net.Conn = (*TimeoutConn)(nil)
+
+func TestRingBuffer_TryReadOnce_NonBlocking(t *testing.T) {
+	forEachConfig(t, func(t *testing.T, cfg RingTestConfig) {
+		ring := cfg.NewRing()
+		ctx := context.Background()
+
+		// Create a connection with data
+		msg := &pgproto3.Query{String: "SELECT 1"}
+		conn := NewTimeoutConnFromClient(msg)
+
+		// Non-blocking read (timeout=0) should get data immediately
+		gotData, err := ring.TryReadOnce(ctx, conn, 0)
+		if err != nil {
+			t.Fatalf("TryReadOnce failed: %v", err)
+		}
+		if !gotData {
+			t.Error("expected gotData=true, got false")
+		}
+
+		// Verify the message was parsed
+		if ring.PublishedMsgCount() != 1 {
+			t.Errorf("expected 1 published message, got %d", ring.PublishedMsgCount())
+		}
+	})
+}
+
+func TestRingBuffer_TryReadOnce_NoData_ReturnsImmediately(t *testing.T) {
+	forEachConfig(t, func(t *testing.T, cfg RingTestConfig) {
+		ring := cfg.NewRing()
+		ctx := context.Background()
+
+		// Create an empty connection (will timeout immediately)
+		conn := NewTimeoutConn(nil)
+
+		start := time.Now()
+		gotData, err := ring.TryReadOnce(ctx, conn, 0)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("TryReadOnce failed: %v", err)
+		}
+		if gotData {
+			t.Error("expected gotData=false for empty connection")
+		}
+		// Should return very quickly (< 10ms)
+		if elapsed > 10*time.Millisecond {
+			t.Errorf("non-blocking read took too long: %v", elapsed)
+		}
+	})
+}
+
+func TestRingBuffer_TryReadOnce_TimeoutDoesNotCorruptBuffer(t *testing.T) {
+	forEachConfig(t, func(t *testing.T, cfg RingTestConfig) {
+		ring := cfg.NewRing()
+		ctx := context.Background()
+
+		// First, read a message successfully
+		msg1 := &pgproto3.Query{String: "SELECT 1"}
+		conn1 := NewTimeoutConnFromClient(msg1)
+
+		gotData, err := ring.TryReadOnce(ctx, conn1, 0)
+		if err != nil {
+			t.Fatalf("first TryReadOnce failed: %v", err)
+		}
+		if !gotData {
+			t.Fatal("expected first read to get data")
+		}
+
+		initialCount := ring.PublishedMsgCount()
+		if initialCount != 1 {
+			t.Fatalf("expected 1 message after first read, got %d", initialCount)
+		}
+
+		// Now try to read from an empty connection (will timeout)
+		emptyConn := NewTimeoutConn(nil)
+		gotData, err = ring.TryReadOnce(ctx, emptyConn, 0)
+		if err != nil {
+			t.Fatalf("timeout TryReadOnce returned error: %v", err)
+		}
+		if gotData {
+			t.Error("expected no data from empty connection")
+		}
+
+		// Buffer should still be intact
+		if ring.PublishedMsgCount() != initialCount {
+			t.Errorf("message count changed after timeout: got %d, want %d",
+				ring.PublishedMsgCount(), initialCount)
+		}
+
+		// Should still be able to read more messages
+		msg2 := &pgproto3.Query{String: "SELECT 2"}
+		conn2 := NewTimeoutConnFromClient(msg2)
+
+		gotData, err = ring.TryReadOnce(ctx, conn2, 0)
+		if err != nil {
+			t.Fatalf("third TryReadOnce failed: %v", err)
+		}
+		if !gotData {
+			t.Error("expected to get data after timeout recovery")
+		}
+
+		if ring.PublishedMsgCount() != 2 {
+			t.Errorf("expected 2 messages total, got %d", ring.PublishedMsgCount())
+		}
+	})
+}
+
+func TestRingBuffer_TryReadOnce_MultipleTimeoutsInARow(t *testing.T) {
+	forEachConfig(t, func(t *testing.T, cfg RingTestConfig) {
+		ring := cfg.NewRing()
+		ctx := context.Background()
+
+		// Multiple consecutive timeouts should not corrupt buffer state
+		for i := 0; i < 10; i++ {
+			emptyConn := NewTimeoutConn(nil)
+			gotData, err := ring.TryReadOnce(ctx, emptyConn, 0)
+			if err != nil {
+				t.Fatalf("timeout %d returned error: %v", i, err)
+			}
+			if gotData {
+				t.Errorf("timeout %d unexpectedly got data", i)
+			}
+		}
+
+		// Should still be able to read a real message
+		msg := &pgproto3.Query{String: "SELECT after timeouts"}
+		conn := NewTimeoutConnFromClient(msg)
+
+		gotData, err := ring.TryReadOnce(ctx, conn, 0)
+		if err != nil {
+			t.Fatalf("final TryReadOnce failed: %v", err)
+		}
+		if !gotData {
+			t.Error("expected to get data after multiple timeouts")
+		}
+		if ring.PublishedMsgCount() != 1 {
+			t.Errorf("expected 1 message, got %d", ring.PublishedMsgCount())
+		}
+	})
+}
+
+func TestRingBuffer_TryReadOnce_WithTimeout(t *testing.T) {
+	forEachConfig(t, func(t *testing.T, cfg RingTestConfig) {
+		ring := cfg.NewRing()
+		ctx := context.Background()
+
+		// Create a connection with data
+		msg := &pgproto3.Query{String: "SELECT with timeout"}
+		conn := NewTimeoutConnFromClient(msg)
+
+		// Read with a timeout (should succeed since data is available)
+		gotData, err := ring.TryReadOnce(ctx, conn, 100*time.Millisecond)
+		if err != nil {
+			t.Fatalf("TryReadOnce with timeout failed: %v", err)
+		}
+		if !gotData {
+			t.Error("expected gotData=true")
+		}
+	})
+}
+
+func TestRingBuffer_TryReadOnce_BlockingMode(t *testing.T) {
+	forEachConfig(t, func(t *testing.T, cfg RingTestConfig) {
+		ring := cfg.NewRing()
+		ctx := context.Background()
+
+		// Create a connection with data
+		msg := &pgproto3.Query{String: "SELECT blocking"}
+		conn := NewTimeoutConnFromClient(msg)
+
+		// Read in blocking mode (timeout < 0)
+		gotData, err := ring.TryReadOnce(ctx, conn, -1)
+		if err != nil {
+			t.Fatalf("blocking TryReadOnce failed: %v", err)
+		}
+		if !gotData {
+			t.Error("expected gotData=true in blocking mode")
+		}
+	})
+}
+
+func TestRingBuffer_TryReadOnce_EOF(t *testing.T) {
+	forEachConfig(t, func(t *testing.T, cfg RingTestConfig) {
+		ring := cfg.NewRing()
+		ctx := context.Background()
+
+		// Create a connection with data that will EOF after reading
+		msg := &pgproto3.Query{String: "SELECT before EOF"}
+		conn := NewTimeoutConnFromClient(msg)
+
+		// First read gets the data (use blocking mode to actually hit EOF)
+		gotData, err := ring.TryReadOnce(ctx, conn, -1) // blocking
+		if err != nil {
+			t.Fatalf("first TryReadOnce failed: %v", err)
+		}
+		if !gotData {
+			t.Error("expected gotData=true on first read")
+		}
+
+		// Second read should get EOF (use blocking mode)
+		gotData, err = ring.TryReadOnce(ctx, conn, -1) // blocking
+		if err != nil {
+			t.Fatalf("EOF TryReadOnce returned unexpected error: %v", err)
+		}
+		// gotData should be false since connection is exhausted
+		if gotData {
+			t.Error("expected gotData=false after EOF")
+		}
+
+		// Verify buffer error is set to EOF
+		if ring.Error() != io.EOF {
+			t.Errorf("expected buffer error to be EOF, got %v", ring.Error())
+		}
+	})
+}

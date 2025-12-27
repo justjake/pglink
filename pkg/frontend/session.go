@@ -583,13 +583,13 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		return err
 	}
 
+	// Track which side we expect data from (for protocol-biased waiting)
+	expectBackend := true // We just sent to backend, expect response
+
 	for {
 		// Check both sides without blocking
 		gotFrontend, errF := frontendCursor.TryNextBatch()
 		gotBackend, errB := backendCursor.TryNextBatch()
-		if gotFrontend || gotBackend {
-			s.logger.Debug("poll", "frontend", gotFrontend, "backend", gotBackend)
-		}
 		if errF != nil {
 			return errors.Join(errF, errB)
 		}
@@ -602,25 +602,93 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			if continueWithBackend, err := handleBackendBatch(); !continueWithBackend || err != nil {
 				return err
 			}
+			// Update expectation based on protocol state
+			// s.state is updated by handleBackendBatch via UpdateState calls
+			if s.state.TxStatus == pgwire.TxIdle {
+				expectBackend = false
+			}
 		}
 		if gotFrontend {
 			if continueWithBackend, err := handleFrontendBatch(); !continueWithBackend || err != nil {
 				return err
 			}
+			expectBackend = true // Sent to backend, expect response
 		}
 
 		// If nothing available, wait for either side
 		if !gotFrontend && !gotBackend {
-			select {
-			case <-backendCursor.Ready():
-			case <-frontendCursor.Ready():
-			case <-backendCursor.Done():
-				return backendCursor.Err()
-			case <-frontendCursor.Done():
-				return frontendCursor.Err()
+			if err := s.waitForIO(frontendCursor, backendCursor, expectBackend); err != nil {
+				return err
 			}
 		}
 	}
+}
+
+// waitForIO waits for data to be available from either the frontend or backend.
+// The implementation varies based on the configured session algorithm.
+func (s *Session) waitForIO(frontendCursor, backendCursor *pgwire.Cursor, expectBackend bool) error {
+	switch s.config.GetAlgo() {
+	case config.SessionAlgoSingle:
+		return s.waitForIOSingle(expectBackend)
+	default:
+		return s.waitForIOThreaded(frontendCursor, backendCursor)
+	}
+}
+
+// waitForIOThreaded uses the standard channel-based waiting (3 goroutines per session).
+func (s *Session) waitForIOThreaded(frontendCursor, backendCursor *pgwire.Cursor) error {
+	select {
+	case <-backendCursor.Ready():
+	case <-frontendCursor.Ready():
+	case <-backendCursor.Done():
+		return backendCursor.Err()
+	case <-frontendCursor.Done():
+		return frontendCursor.Err()
+	}
+	return nil
+}
+
+// waitForIOSingle uses spin-polling with direct I/O fills (1 goroutine per session).
+// This eliminates context switch overhead under load.
+func (s *Session) waitForIOSingle(expectBackend bool) error {
+	const maxSpins = 64
+
+	// Spin-poll phase: try non-blocking reads with protocol bias
+	for spin := 0; spin < maxSpins; spin++ {
+		if expectBackend {
+			// Bias: check backend first
+			if got, err := s.backend.TryFill(s.ctx, 0); err != nil {
+				return err
+			} else if got {
+				return nil
+			}
+			if got, err := s.frontend.TryFill(s.ctx, 0); err != nil {
+				return err
+			} else if got {
+				return nil
+			}
+		} else {
+			// Bias: check frontend first
+			if got, err := s.frontend.TryFill(s.ctx, 0); err != nil {
+				return err
+			} else if got {
+				return nil
+			}
+			if got, err := s.backend.TryFill(s.ctx, 0); err != nil {
+				return err
+			} else if got {
+				return nil
+			}
+		}
+	}
+
+	// Cold path: block on expected side
+	if expectBackend {
+		_, err := s.backend.TryFill(s.ctx, -1) // blocking
+		return err
+	}
+	_, err := s.frontend.TryFill(s.ctx, -1) // blocking
+	return err
 }
 
 func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtendedQuery, msgIdx int64, toServer **pgwire.RingRange) (bool, error) {

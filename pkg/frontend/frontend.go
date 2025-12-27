@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/pgwire"
@@ -77,4 +78,15 @@ func (f *Frontend) Cursor() *pgwire.Cursor {
 func (f *Frontend) WriteRange(r *pgwire.RingRange) error {
 	_, err := io.Copy(f.conn, r.NewReader())
 	return err
+}
+
+// TryFill attempts to read data directly into the ring buffer (for single-goroutine mode).
+// Returns true if data was read, false if no data available (timeout).
+func (f *Frontend) TryFill(ctx context.Context, timeout time.Duration) (bool, error) {
+	return f.ringBuffer.TryReadOnce(ctx, f.conn, timeout)
+}
+
+// RingBufferRunning returns true if the background reader goroutine is running.
+func (f *Frontend) RingBufferRunning() bool {
+	return f.ringBuffer.Running()
 }

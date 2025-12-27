@@ -1,6 +1,6 @@
 # pglink Benchmarks
 
-Generated: 2025-12-26T17:06:14-05:00
+Generated: 2025-12-26T17:40:44-05:00
 
 ## Configuration
 
@@ -17,9 +17,9 @@ Generated: 2025-12-26T17:06:14-05:00
 | Target | QPS | MB/s | Error Rate | P50 (μs) | P99 (μs) |
 |--------|-----|------|------------|----------|----------|
 
-| direct | 48229 | - | 0% | 2.0ms | 4.1ms |
-| pgbouncer | 44604 (8% slower) | - | 0% | 2.1ms (+7%) | 4.7ms (+16%) |
-| pglink (GOMAXPROCS=16) | 33075 (31% slower) | - | <0.01% | 2.9ms (+48%) | 5.3ms (+31%) |
+| direct | 46425 | - | 0% | 2.0ms | 4.4ms |
+| pgbouncer | 44778 (4% slower) | - | 0% | 2.1ms (+4%) | 4.4ms |
+| pglink (GOMAXPROCS=16) | 31928 (31% slower) | - | <0.01% | 3.0ms (+47%) | 5.9ms (+33%) |
 
 ## Analysis
 
