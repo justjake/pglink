@@ -89,11 +89,6 @@ type Config struct {
 	// If nil, flight recording is disabled.
 	FlightRecorder *FlightRecorderConfig `json:"flight_recorder,omitzero"`
 
-	// GracefulShutdown controls whether pglink waits for clients to disconnect
-	// on SIGTERM/SIGINT (true) or terminates immediately (false).
-	// Defaults to false for predictable shutdown in tests and benchmarks.
-	GracefulShutdown *bool `json:"graceful_shutdown,omitzero"`
-
 	// filePath is the path to the config file on disk (not serialized).
 	// Used for resolving relative paths in the config.
 	filePath string
@@ -111,15 +106,6 @@ func (c *Config) GetMaxClientConnections() int32 {
 		return 1000
 	}
 	return *c.MaxClientConnections
-}
-
-// GetGracefulShutdown returns whether graceful shutdown is enabled.
-// Defaults to false for predictable shutdown behavior in tests and benchmarks.
-func (c *Config) GetGracefulShutdown() bool {
-	if c.GracefulShutdown == nil {
-		return false
-	}
-	return *c.GracefulShutdown
 }
 
 // GetAuthMethod returns the configured auth method, defaulting to SCRAM-SHA-256.
