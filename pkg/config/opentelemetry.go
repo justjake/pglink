@@ -54,9 +54,27 @@ type OpenTelemetryConfig struct {
 	// - string: custom regex with capture group for application_name value
 	ApplicationNameSQLRegex BoolOrString `json:"application_name_sql_regex,omitzero"`
 
+	// ExtraAttributes adds additional resource attributes to all spans.
+	// Format: key=value pairs. Useful for tagging traces with bench_id, git info, etc.
+	// Example: {"bench_id": "abc123", "git.sha": "d2169b0", "target": "pglink"}
+	ExtraAttributes map[string]string `json:"extra_attributes,omitzero"`
+
+	// Logs configures OTLP log export (e.g., to Loki 3.0+).
+	Logs *OTLPLogsConfig `json:"logs,omitzero"`
+
 	// Compiled regexes (not serialized)
 	traceparentRegex *regexp.Regexp
 	appNameRegex     *regexp.Regexp
+}
+
+// OTLPLogsConfig configures OTLP log export (e.g., to Loki 3.0+).
+type OTLPLogsConfig struct {
+	// Enabled controls whether logs are exported via OTLP.
+	Enabled bool `json:"enabled"`
+
+	// Endpoint for OTLP logs (e.g., "http://localhost:13100/otlp" for Loki).
+	// If empty, uses the main OTLPEndpoint.
+	Endpoint string `json:"endpoint,omitzero"`
 }
 
 // BoolOrString is a type that can be unmarshaled from either a boolean or string JSON value.

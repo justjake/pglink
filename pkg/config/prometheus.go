@@ -17,6 +17,25 @@ type PrometheusConfig struct {
 	// Path is the HTTP path for the metrics endpoint.
 	// Default: "/metrics"
 	Path string `json:"path,omitzero"`
+
+	// Push configures push-based metrics export to Prometheus remote-write endpoint.
+	// When set, metrics are pushed to the endpoint in addition to being exposed via HTTP.
+	Push *PrometheusPushConfig `json:"push,omitzero"`
+
+	// ExtraLabels adds additional labels to all metrics.
+	// Useful for tagging metrics with bench_id, git info, target, etc.
+	// Example: {"bench_id": "abc123", "git_sha": "d2169b0", "target": "pglink"}
+	ExtraLabels map[string]string `json:"extra_labels,omitzero"`
+}
+
+// PrometheusPushConfig configures push-based metrics export to Prometheus remote-write endpoint.
+type PrometheusPushConfig struct {
+	// Endpoint is the Prometheus remote-write endpoint URL.
+	// Example: "http://localhost:19090/api/v1/write"
+	Endpoint string `json:"endpoint"`
+
+	// PushInterval is how often to push metrics. Default: 10s.
+	PushInterval Duration `json:"push_interval,omitzero"`
 }
 
 // GetListen returns the listen address, defaulting to ":9090".

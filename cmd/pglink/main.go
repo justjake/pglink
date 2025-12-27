@@ -159,6 +159,12 @@ func main() {
 	writePgbouncerDir := flag.String("write-pgbouncer-config-dir", "", "write equivalent pgbouncer config to this directory and exit")
 	pgbouncerPort := flag.Int("pgbouncer-port", 6432, "port for pgbouncer to listen on (used with -write-pgbouncer-config-dir)")
 	otelMode := flag.String("otel", "", "enable OpenTelemetry: minimal, traceparent, traceparent+appname")
+
+	// Push-based observability flags for benchmark integration
+	otelEndpoint := flag.String("otel-endpoint", "", "OTLP endpoint for traces (e.g., localhost:14317)")
+	otelAttrs := flag.String("otel-attrs", "", "extra OTEL resource attributes (format: key=val,key2=val2)")
+	prometheusAttrs := flag.String("prometheus-attrs", "", "extra Prometheus labels (format: key=val,key2=val2)")
+
 	flag.Usage = printUsage
 	flag.Parse()
 
@@ -270,6 +276,57 @@ func main() {
 			logger.Error("invalid -otel mode", "mode", *otelMode, "valid", "minimal, traceparent, traceparent+appname")
 			os.Exit(1)
 		}
+	}
+
+	// Apply OTEL endpoint CLI override
+	if *otelEndpoint != "" {
+		if cfg.OpenTelemetry == nil {
+			cfg.OpenTelemetry = &config.OpenTelemetryConfig{
+				Enabled:             true,
+				ServiceName:         "pglink",
+				TraceparentSQLRegex: config.BoolOrString{Bool: false, IsSet: true},
+			}
+		}
+		cfg.OpenTelemetry.OTLPEndpoint = *otelEndpoint
+		logger.Info("OTLP endpoint set", "endpoint", *otelEndpoint)
+	}
+
+	// Apply OTEL extra attributes CLI override
+	if *otelAttrs != "" {
+		if cfg.OpenTelemetry == nil {
+			cfg.OpenTelemetry = &config.OpenTelemetryConfig{
+				Enabled:             true,
+				ServiceName:         "pglink",
+				TraceparentSQLRegex: config.BoolOrString{Bool: false, IsSet: true},
+			}
+		}
+		if cfg.OpenTelemetry.ExtraAttributes == nil {
+			cfg.OpenTelemetry.ExtraAttributes = make(map[string]string)
+		}
+		for _, kv := range strings.Split(*otelAttrs, ",") {
+			parts := strings.SplitN(kv, "=", 2)
+			if len(parts) == 2 {
+				cfg.OpenTelemetry.ExtraAttributes[parts[0]] = parts[1]
+			}
+		}
+		logger.Info("OTEL extra attributes set", "attrs", cfg.OpenTelemetry.ExtraAttributes)
+	}
+
+	// Apply Prometheus extra labels CLI override
+	if *prometheusAttrs != "" {
+		if cfg.Prometheus == nil {
+			cfg.Prometheus = config.ParsePrometheusListen(":9090")
+		}
+		if cfg.Prometheus.ExtraLabels == nil {
+			cfg.Prometheus.ExtraLabels = make(map[string]string)
+		}
+		for _, kv := range strings.Split(*prometheusAttrs, ",") {
+			parts := strings.SplitN(kv, "=", 2)
+			if len(parts) == 2 {
+				cfg.Prometheus.ExtraLabels[parts[0]] = parts[1]
+			}
+		}
+		logger.Info("Prometheus extra labels set", "labels", cfg.Prometheus.ExtraLabels)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

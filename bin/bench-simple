@@ -24,9 +24,9 @@ log() {
 
 # Check for required tools
 check_requirements() {
-    # Check for docker-compose
-    if ! command -v docker-compose &> /dev/null; then
-        echo "Error: docker-compose is required but not installed" >&2
+    # Check for docker compose (V2)
+    if ! docker compose version &> /dev/null; then
+        echo "Error: docker compose V2 is required but not installed" >&2
         exit 1
     fi
 
@@ -38,7 +38,7 @@ check_requirements() {
     fi
 }
 
-# Ensure docker-compose is running
+# Ensure docker compose is running
 ensure_docker() {
     log "Checking PostgreSQL backends..."
 
@@ -56,9 +56,9 @@ ensure_docker() {
         return
     fi
 
-    # Try to start docker-compose (may already be running from main repo)
-    log "Starting docker-compose services..."
-    docker-compose up -d --wait 2>/dev/null || true
+    # Try to start docker compose (may already be running from main repo)
+    log "Starting docker compose services..."
+    docker compose up -d --wait 2>/dev/null || true
 
     # Verify backends are healthy
     for port in 15432 15433 15434; do

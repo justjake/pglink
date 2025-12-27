@@ -25,9 +25,9 @@ error() {
 check_requirements() {
     log "Checking requirements..."
 
-    # Check for docker-compose
-    if ! command -v docker-compose &> /dev/null; then
-        error "docker-compose is required but not installed"
+    # Check for docker compose (V2)
+    if ! docker compose version &> /dev/null; then
+        error "docker compose V2 is required but not installed"
         exit 1
     fi
 
@@ -69,10 +69,10 @@ check_requirements() {
     fi
 }
 
-# Ensure docker-compose is running
+# Ensure docker compose is running
 ensure_docker() {
-    log "Ensuring docker-compose services are running..."
-    docker-compose up -d --wait
+    log "Ensuring docker compose services are running..."
+    docker compose up -d --wait
 
     # Verify backends are healthy
     for port in 15432 15433 15434; do

@@ -1,7 +1,7 @@
 // Package backend provides tests for the MultiPool connection pool.
 //
-// These tests require PostgreSQL to be running. Start the docker-compose
-// infrastructure with: docker-compose up -d
+// These tests require PostgreSQL to be running. Start the docker compose
+// infrastructure with: docker compose up -d
 //
 // The tests use the same backends as the e2e tests (ports 15432, 15433, 15434).
 package backend

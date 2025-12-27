@@ -1,4 +1,5 @@
 services:
+  # PostgreSQL instances for testing
   alpha:
     image: postgres:16
     container_name: pglink-alpha
@@ -49,3 +50,69 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Observability stack (ports +10000 to avoid conflicts)
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: pglink-prometheus
+    ports:
+      - "19090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'
+      - '--storage.tsdb.path=/prometheus'
+    profiles:
+      - observability
+
+  tempo:
+    image: grafana/tempo:2.3.1
+    container_name: pglink-tempo
+    ports:
+      - "13200:3200"   # Query API
+      - "14317:4317"   # OTLP gRPC
+      - "14318:4318"   # OTLP HTTP
+    volumes:
+      - ./docker/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    profiles:
+      - observability
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: pglink-loki
+    ports:
+      - "13100:3100"   # Loki API
+    volumes:
+      - ./docker/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    profiles:
+      - observability
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: pglink-grafana
+    ports:
+      - "13000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    profiles:
+      - observability
+
+volumes:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+  grafana-data:

@@ -56,14 +56,21 @@ func NewTracerProvider(ctx context.Context, cfg *config.OpenTelemetryConfig) (*T
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
 
-	// Create resource with service name
+	// Build resource attributes
+	attrs := []attribute.KeyValue{
+		semconv.ServiceName(cfg.GetServiceName()),
+		semconv.ServiceVersion("0.1.0"), // TODO: inject version
+	}
+
+	// Add extra attributes from config
+	for k, v := range cfg.ExtraAttributes {
+		attrs = append(attrs, attribute.String(k, v))
+	}
+
+	// Create resource with service name and extra attributes
 	res, err := resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(cfg.GetServiceName()),
-			semconv.ServiceVersion("0.1.0"), // TODO: inject version
-		),
+		resource.NewWithAttributes(semconv.SchemaURL, attrs...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create resource: %w", err)

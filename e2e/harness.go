@@ -1,5 +1,5 @@
 // Package e2e provides end-to-end testing infrastructure for pglink.
-// It manages docker-compose backend databases and pglink service lifecycle,
+// It manages docker compose backend databases and pglink service lifecycle,
 // providing a clean test environment for comprehensive integration testing.
 package e2e
 
@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	// DockerComposeStartTimeout is how long to wait for docker-compose services
+	// DockerComposeStartTimeout is how long to wait for docker compose services
 	DockerComposeStartTimeout = 2 * time.Minute
 
 	// BackendHealthCheckInterval is how often to check backend health
@@ -87,7 +87,7 @@ type Harness struct {
 	serviceWg sync.WaitGroup
 	cancel    context.CancelFunc
 
-	// Track whether we started docker-compose (so we know whether to stop it)
+	// Track whether we started docker compose (so we know whether to stop it)
 	startedDockerCompose bool
 
 	logger *slog.Logger
@@ -280,34 +280,34 @@ func (h *Harness) fatalf(format string, args ...any) {
 	}
 }
 
-// ensureDockerCompose starts docker-compose if not already running.
-// Docker-compose runs from the main repo directory so containers are shared
+// ensureDockerCompose starts docker compose if not already running.
+// Docker compose runs from the main repo directory so containers are shared
 // across all worktrees.
 func (h *Harness) ensureDockerCompose(ctx context.Context) {
 	// Check if containers are already running
 	if h.isDockerComposeRunning(ctx) {
-		h.logger.Info("docker-compose already running")
+		h.logger.Info("docker compose already running")
 		return
 	}
 
-	h.logger.Info("starting docker-compose", "dir", h.mainRepoDir)
+	h.logger.Info("starting docker compose", "dir", h.mainRepoDir)
 	h.startedDockerCompose = true
 
-	cmd := exec.CommandContext(ctx, "docker-compose", "up", "-d", "--wait")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "up", "-d", "--wait")
 	cmd.Dir = h.mainRepoDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		h.fatalf("failed to start docker-compose: %v", err)
+		h.fatalf("failed to start docker compose: %v", err)
 	}
 
-	h.logger.Info("docker-compose started")
+	h.logger.Info("docker compose started")
 }
 
 // isDockerComposeRunning checks if all required containers are running
 func (h *Harness) isDockerComposeRunning(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, "docker-compose", "ps", "--format", "{{.State}}")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "ps", "--format", "{{.State}}")
 	cmd.Dir = h.mainRepoDir
 	output, err := cmd.Output()
 	if err != nil {

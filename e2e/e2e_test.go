@@ -23,7 +23,7 @@ func testTimeout(t *testing.T) (context.Context, context.CancelFunc) {
 }
 
 // TestMain sets up and tears down the test harness for all e2e tests.
-// This ensures docker-compose and pglink are running before any tests execute.
+// This ensures docker compose and pglink are running before any tests execute.
 //
 // The session algorithm can be selected via the PGLINK_ALGO environment variable.
 // Valid values are "default" (channel-based) and "ring" (experimental ring buffer).

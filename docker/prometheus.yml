@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Enable remote write receiver for push-based metrics
+# pglink can push metrics to http://localhost:19090/api/v1/write
+
+scrape_configs:
+  # Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Scrape pglink metrics (when running locally with -prometheus-listen)
+  # Note: pglink instances are ephemeral during benchmarks, so push-based
+  # metrics via remote write is preferred
+  - job_name: 'pglink'
+    static_configs:
+      - targets: ['host.docker.internal:19432']
+    # Add relabel config for worktree identification
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: 'host.docker.internal:(\d+)'
+        replacement: 'pglink:$1'

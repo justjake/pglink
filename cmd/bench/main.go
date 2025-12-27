@@ -1054,13 +1054,13 @@ func (s *BenchmarkSuite) generateMixedWorkload() {
 }
 
 func (s *BenchmarkSuite) ensureDockerCompose(ctx context.Context) error {
-	// Just verify backends are reachable - let the shell script manage docker-compose
+	// Just verify backends are reachable - let the shell script manage docker compose
 	// This avoids conflicts when running from worktrees
 	for _, port := range []int{15432, 15433, 15434} {
 		connStr := fmt.Sprintf("postgres://app:app_password@localhost:%d/uno?sslmode=disable&connect_timeout=2", port)
 		conn, err := pgx.Connect(ctx, connStr)
 		if err != nil {
-			return fmt.Errorf("PostgreSQL backend on port %d not reachable: %w (run docker-compose up -d from main repo)", port, err)
+			return fmt.Errorf("PostgreSQL backend on port %d not reachable: %w (run docker compose up -d from main repo)", port, err)
 		}
 		_ = conn.Close(ctx)
 	}
@@ -1367,9 +1367,9 @@ func (s *BenchmarkSuite) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create output dir: %w", err)
 	}
 
-	log.Println("Ensuring docker-compose is running...")
+	log.Println("Ensuring docker compose is running...")
 	if err := s.ensureDockerCompose(ctx); err != nil {
-		return fmt.Errorf("docker-compose setup failed: %w", err)
+		return fmt.Errorf("docker compose setup failed: %w", err)
 	}
 
 	log.Println("Generating workloads...")
