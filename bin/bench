@@ -69,10 +69,31 @@ check_requirements() {
     fi
 }
 
+# Get main worktree path (docker compose must run from there)
+get_main_worktree() {
+    local git_file="$(pwd)/.git"
+    if [[ -f "$git_file" ]]; then
+        # We're in a worktree - .git is a file containing "gitdir: /path/to/main/.git/worktrees/name"
+        local gitdir
+        gitdir=$(cat "$git_file" | sed 's/gitdir: //')
+        # Extract main repo path: /path/to/main/.git/worktrees/name -> /path/to/main
+        echo "$gitdir" | sed 's|/.git/worktrees/.*||'
+    else
+        # We're in the main repo
+        pwd
+    fi
+}
+
 # Ensure docker compose is running
 ensure_docker() {
+    local main_worktree
+    main_worktree=$(get_main_worktree)
+
     log "Ensuring docker compose services are running..."
-    docker compose up -d --wait
+    log "  (using docker compose from: $main_worktree)"
+
+    # Run docker compose from main worktree (containers are shared)
+    docker compose -f "$main_worktree/docker-compose.yaml" up -d --wait
 
     # Verify backends are healthy
     for port in 15432 15433 15434; do

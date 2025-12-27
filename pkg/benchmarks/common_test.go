@@ -24,6 +24,41 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// opTimeout is the maximum time any single benchmark operation should take.
+// If an operation exceeds this, something is wrong (deadlock, network issue, etc.)
+const opTimeout = 10 * time.Second
+
+// Op wraps a benchmark operation with timeout and error handling.
+type Op struct {
+	Ctx    context.Context
+	Cancel context.CancelFunc
+	name   string
+	idx    int
+}
+
+// NewOp creates a new benchmark operation with a timeout.
+// Call op.Done() when the operation completes, or op.Fatal(b, err) on error.
+func NewOp(benchCtx context.Context, name string, idx int) *Op {
+	ctx, cancel := context.WithTimeout(benchCtx, opTimeout)
+	return &Op{
+		Ctx:    ctx,
+		Cancel: cancel,
+		name:   name,
+		idx:    idx,
+	}
+}
+
+// Done cancels the operation's context. Call this when the operation succeeds.
+func (o *Op) Done() {
+	o.Cancel()
+}
+
+// Failed formats an error message for the operation and cancels the context.
+func (o *Op) Failed(err error) string {
+	o.Cancel()
+	return fmt.Sprintf("%s [iter %d]: %v", o.name, o.idx, err)
+}
+
 // BenchConfig holds configuration loaded from environment.
 // Use struct tags to control behavior:
 //   - env:"VAR"      - environment variable name

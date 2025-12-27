@@ -1,7 +1,6 @@
 package benchmarks
 
 import (
-	"context"
 	"testing"
 )
 
@@ -10,15 +9,18 @@ import (
 // with minimal database work.
 func BenchmarkSelect1(b *testing.B) {
 	b.Run(getBenchName(), func(b *testing.B) {
-		ctx := context.Background()
 		pool := getPool()
+		benchCtx := b.Context()
 
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		var i int
+		for b.Loop() {
+			op := NewOp(benchCtx, "query", i)
 			var result int
-			if err := pool.QueryRow(ctx, "SELECT 1").Scan(&result); err != nil {
-				b.Fatal(err)
+			if err := pool.QueryRow(op.Ctx, "SELECT 1").Scan(&result); err != nil {
+				b.Fatal(op.Failed(err))
 			}
+			op.Done()
+			i++
 		}
 	})
 }
@@ -26,16 +28,19 @@ func BenchmarkSelect1(b *testing.B) {
 // BenchmarkSelect1Parallel measures SELECT 1 latency with concurrent connections.
 func BenchmarkSelect1Parallel(b *testing.B) {
 	b.Run(getBenchName(), func(b *testing.B) {
-		ctx := context.Background()
 		pool := getPool()
+		benchCtx := b.Context()
 
-		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
+			var i int
 			for pb.Next() {
+				op := NewOp(benchCtx, "query", i)
 				var result int
-				if err := pool.QueryRow(ctx, "SELECT 1").Scan(&result); err != nil {
-					b.Fatal(err)
+				if err := pool.QueryRow(op.Ctx, "SELECT 1").Scan(&result); err != nil {
+					b.Fatal(op.Failed(err))
 				}
+				op.Done()
+				i++
 			}
 		})
 	})
