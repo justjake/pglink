@@ -1,16 +1,13 @@
 // Package benchmarks contains standard Go benchmarks for pglink performance testing.
 //
 // These benchmarks are designed to be run via the orchestrator (cmd/bench) which sets
-// up the appropriate environment variables:
+// up the appropriate environment variables. Configuration is defined in BenchConfig
+// using struct tags:
 //
-//   - BENCH_CONN_STRING: PostgreSQL connection string
-//   - BENCH_TARGET: Target name for sub-benchmark naming
-//   - BENCH_MAX_CONNS: Maximum pool connections
-//   - BENCH_CONCURRENCY: Number of concurrent workers
-//   - BENCH_DURATION: Duration of each measurement
-//   - BENCH_WARMUP: Warmup duration before measuring
-//   - BENCH_SIMPLE_QUERY: If "true", use simple query protocol
-//   - BENCH_SEED: Random seed for reproducibility
+//	env:"BENCH_FOO"     - environment variable to read from
+//	path:"foo"          - include in benchmark path as foo=<value> (for benchstat filtering)
+//	header:"foo"        - name to use in output header (defaults to snake_case of field name)
+//	default:"value"     - default value if env var is not set
 package benchmarks
 
 import (
@@ -18,103 +15,53 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// BenchConfig holds configuration loaded from environment.
+// Use struct tags to control behavior:
+//   - env:"VAR"      - environment variable name
+//   - path:"name"    - include in benchmark path (for benchstat filtering)
+//   - header:"name"  - header output name (default: snake_case of field name)
+//   - default:"val"  - default value
+type BenchConfig struct {
+	ConnString  string        `env:"BENCH_CONN_STRING"`
+	Target      string        `env:"BENCH_TARGET" path:"target" default:"unknown"`
+	MaxConns    int           `env:"BENCH_MAX_CONNS" path:"conns" default:"100"`
+	Concurrency int           `env:"BENCH_CONCURRENCY" path:"workers" default:"100"`
+	Duration    time.Duration `env:"BENCH_DURATION" default:"15s"`
+	Warmup      time.Duration `env:"BENCH_WARMUP" default:"5s"`
+	Protocol    string        `env:"BENCH_SIMPLE_QUERY" header:"protocol" default:"extended"` // "simple" or "extended"
+	Seed        int64         `env:"BENCH_SEED"`
+	RunID       string        `env:"BENCH_RUN_ID" header:"run_id"`
+	Round       int           `env:"BENCH_ROUND"`
+	TotalRounds int           `env:"BENCH_TOTAL_ROUNDS" header:"total_rounds"`
+}
+
 var (
 	// pool is the shared connection pool for all benchmarks.
 	pool *pgxpool.Pool
 
-	// benchConfig holds configuration loaded from environment.
-	benchConfig struct {
-		ConnString      string
-		Target          string
-		MaxConns        int
-		Concurrency     int
-		Duration        time.Duration
-		Warmup          time.Duration
-		SimpleQueryMode bool
-		Seed            int64
-		RunID           string
-		Round           int
-		TotalRounds     int
-	}
+	// benchConfig holds the loaded configuration.
+	benchConfig BenchConfig
 )
 
 func TestMain(m *testing.M) {
-	// Load configuration from environment
-	benchConfig.ConnString = os.Getenv("BENCH_CONN_STRING")
+	// Load configuration from environment using reflection
+	if err := loadBenchConfig(&benchConfig); err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
 	if benchConfig.ConnString == "" {
 		// Skip benchmarks if not configured (running outside orchestrator)
 		log.Println("BENCH_CONN_STRING not set, skipping benchmarks")
 		os.Exit(0)
-	}
-
-	benchConfig.Target = os.Getenv("BENCH_TARGET")
-	if benchConfig.Target == "" {
-		benchConfig.Target = "unknown"
-	}
-
-	if v := os.Getenv("BENCH_MAX_CONNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			benchConfig.MaxConns = n
-		}
-	}
-	if benchConfig.MaxConns == 0 {
-		benchConfig.MaxConns = 100
-	}
-
-	if v := os.Getenv("BENCH_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			benchConfig.Concurrency = n
-		}
-	}
-	if benchConfig.Concurrency == 0 {
-		benchConfig.Concurrency = 100
-	}
-
-	if v := os.Getenv("BENCH_DURATION"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			benchConfig.Duration = d
-		}
-	}
-	if benchConfig.Duration == 0 {
-		benchConfig.Duration = 15 * time.Second
-	}
-
-	if v := os.Getenv("BENCH_WARMUP"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			benchConfig.Warmup = d
-		}
-	}
-	if benchConfig.Warmup == 0 {
-		benchConfig.Warmup = 5 * time.Second
-	}
-
-	benchConfig.SimpleQueryMode = os.Getenv("BENCH_SIMPLE_QUERY") == "true"
-
-	if v := os.Getenv("BENCH_SEED"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			benchConfig.Seed = n
-		}
-	}
-
-	benchConfig.RunID = os.Getenv("BENCH_RUN_ID")
-
-	if v := os.Getenv("BENCH_ROUND"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			benchConfig.Round = n
-		}
-	}
-
-	if v := os.Getenv("BENCH_TOTAL_ROUNDS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			benchConfig.TotalRounds = n
-		}
 	}
 
 	// Create connection pool
@@ -141,8 +88,7 @@ func TestMain(m *testing.M) {
 		benchConfig.Target, benchConfig.MaxConns, benchConfig.Concurrency)
 
 	// Print benchstat-compatible configuration header
-	// These key: value lines are preserved by benchstat and appear in output
-	printBenchConfig()
+	printBenchConfig(&benchConfig)
 
 	// Run benchmarks
 	os.Exit(m.Run())
@@ -153,36 +99,177 @@ func getPool() *pgxpool.Pool {
 	return pool
 }
 
-// getBenchName returns a benchmark sub-name with target and config metadata.
-// Format: target=<target>/conns=<max_conns>/workers=<concurrency>
+// getBenchName returns a benchmark sub-name with path-tagged config fields.
+// Fields with `path:"name"` tags are included as name=value in the path.
 func getBenchName() string {
-	return fmt.Sprintf("target=%s/conns=%d/workers=%d",
-		benchConfig.Target,
-		benchConfig.MaxConns,
-		benchConfig.Concurrency)
+	return buildBenchPath(&benchConfig)
+}
+
+// loadBenchConfig loads configuration from environment variables using struct tags.
+func loadBenchConfig(cfg *BenchConfig) error {
+	v := reflect.ValueOf(cfg).Elem()
+	t := v.Type()
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldVal := v.Field(i)
+
+		envVar := field.Tag.Get("env")
+		if envVar == "" {
+			continue
+		}
+
+		envVal := os.Getenv(envVar)
+		defaultVal := field.Tag.Get("default")
+
+		// Use default if env var is empty
+		if envVal == "" {
+			envVal = defaultVal
+		}
+
+		if envVal == "" {
+			continue
+		}
+
+		// Parse based on field type
+		// Check time.Duration first (it has Kind int64 but needs special parsing)
+		if field.Type == reflect.TypeOf(time.Duration(0)) {
+			if d, err := time.ParseDuration(envVal); err == nil {
+				fieldVal.Set(reflect.ValueOf(d))
+			}
+			continue
+		}
+
+		switch fieldVal.Kind() {
+		case reflect.String:
+			// Special handling for Protocol field (BENCH_SIMPLE_QUERY is a bool env var)
+			if field.Name == "Protocol" {
+				if envVal == "true" {
+					fieldVal.SetString("simple")
+				} else if envVal != "simple" && envVal != "extended" {
+					fieldVal.SetString(defaultVal)
+				} else {
+					fieldVal.SetString(envVal)
+				}
+			} else {
+				fieldVal.SetString(envVal)
+			}
+		case reflect.Int, reflect.Int64:
+			if n, err := strconv.ParseInt(envVal, 10, 64); err == nil {
+				fieldVal.SetInt(n)
+			}
+		case reflect.Bool:
+			fieldVal.SetBool(envVal == "true")
+		}
+	}
+
+	return nil
+}
+
+// buildBenchPath builds the benchmark sub-test path from path-tagged fields.
+func buildBenchPath(cfg *BenchConfig) string {
+	var parts []string
+
+	v := reflect.ValueOf(cfg).Elem()
+	t := v.Type()
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		pathName := field.Tag.Get("path")
+		if pathName == "" {
+			continue
+		}
+
+		fieldVal := v.Field(i)
+		var valStr string
+
+		switch fieldVal.Kind() {
+		case reflect.String:
+			valStr = fieldVal.String()
+		case reflect.Int, reflect.Int64:
+			valStr = strconv.FormatInt(fieldVal.Int(), 10)
+		case reflect.Bool:
+			valStr = strconv.FormatBool(fieldVal.Bool())
+		default:
+			if field.Type == reflect.TypeOf(time.Duration(0)) {
+				valStr = fieldVal.Interface().(time.Duration).String()
+			} else {
+				valStr = fmt.Sprintf("%v", fieldVal.Interface())
+			}
+		}
+
+		if valStr != "" && valStr != "0" && valStr != "0s" {
+			parts = append(parts, fmt.Sprintf("%s=%s", pathName, valStr))
+		}
+	}
+
+	return strings.Join(parts, "/")
 }
 
 // printBenchConfig prints benchmark configuration in benchstat-compatible format.
-// These "key: value" lines appear in the output header and are preserved by benchstat.
-func printBenchConfig() {
-	// Print config header - benchstat preserves these
-	fmt.Printf("target: %s\n", benchConfig.Target)
-	fmt.Printf("duration: %s\n", benchConfig.Duration)
-	fmt.Printf("warmup: %s\n", benchConfig.Warmup)
-	fmt.Printf("max_conns: %d\n", benchConfig.MaxConns)
-	fmt.Printf("concurrency: %d\n", benchConfig.Concurrency)
-	if benchConfig.SimpleQueryMode {
-		fmt.Printf("protocol: simple\n")
-	} else {
-		fmt.Printf("protocol: extended\n")
+func printBenchConfig(cfg *BenchConfig) {
+	v := reflect.ValueOf(cfg).Elem()
+	t := v.Type()
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldVal := v.Field(i)
+
+		// Skip ConnString (contains credentials)
+		if field.Name == "ConnString" {
+			continue
+		}
+
+		// Get header name (use header tag, or convert field name to snake_case)
+		headerName := field.Tag.Get("header")
+		if headerName == "" {
+			headerName = toSnakeCase(field.Name)
+		}
+
+		// Get value as string
+		var valStr string
+
+		// Check time.Duration first (it has Kind int64 but needs special formatting)
+		if field.Type == reflect.TypeOf(time.Duration(0)) {
+			d := time.Duration(fieldVal.Int())
+			if d == 0 {
+				continue
+			}
+			valStr = d.String()
+		} else {
+			switch fieldVal.Kind() {
+			case reflect.String:
+				valStr = fieldVal.String()
+			case reflect.Int, reflect.Int64:
+				n := fieldVal.Int()
+				if n == 0 {
+					continue // Skip zero values
+				}
+				valStr = strconv.FormatInt(n, 10)
+			case reflect.Bool:
+				if !fieldVal.Bool() {
+					continue // Skip false values
+				}
+				valStr = "true"
+			default:
+				valStr = fmt.Sprintf("%v", fieldVal.Interface())
+			}
+		}
+
+		if valStr != "" {
+			fmt.Printf("%s: %s\n", headerName, valStr)
+		}
 	}
-	if benchConfig.Seed != 0 {
-		fmt.Printf("seed: %d\n", benchConfig.Seed)
+}
+
+// toSnakeCase converts CamelCase to snake_case.
+func toSnakeCase(s string) string {
+	var result strings.Builder
+	for i, r := range s {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result.WriteByte('_')
+		}
+		result.WriteRune(r)
 	}
-	if benchConfig.RunID != "" {
-		fmt.Printf("run_id: %s\n", benchConfig.RunID)
-	}
-	if benchConfig.TotalRounds > 0 {
-		fmt.Printf("round: %d/%d\n", benchConfig.Round, benchConfig.TotalRounds)
-	}
+	return strings.ToLower(result.String())
 }
