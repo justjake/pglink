@@ -1,9 +1,7 @@
 package backend
 
 import (
-	"context"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -147,11 +145,4 @@ func (c *PooledBackend) panicIfReleased() {
 	if c.released {
 		panic(fmt.Errorf("PooledConn: already released: %s", c.String()))
 	}
-}
-
-// TryFill attempts to read data directly into the ring buffer (for single-goroutine mode).
-// Returns true if data was read, false if no data available (timeout).
-func (c *PooledBackend) TryFill(ctx context.Context, timeout time.Duration) (bool, error) {
-	c.panicIfReleased()
-	return c.session.TryFill(ctx, timeout)
 }

@@ -143,14 +143,11 @@ const (
 	SessionAlgoDefault = "default"
 	// SessionAlgoRing uses the RingBuffer-based session for lower latency.
 	SessionAlgoRing = "ring"
-	// SessionAlgoSingle uses a single goroutine per session with spin-polling.
-	// This eliminates goroutine context switches under load.
-	SessionAlgoSingle = "single"
 )
 
 // AllSessionAlgos returns all valid session algorithm names.
 func AllSessionAlgos() []string {
-	return []string{SessionAlgoDefault, SessionAlgoRing, SessionAlgoSingle}
+	return []string{SessionAlgoDefault, SessionAlgoRing}
 }
 
 // GetAlgo returns the session algorithm, defaulting to "default".

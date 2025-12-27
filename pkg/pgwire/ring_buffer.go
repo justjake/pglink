@@ -305,161 +305,43 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 			// Fall through to read more data from the network.
 		}
 
-		// Do one read attempt
-		gotData, streamingDetected, err := r.readOnce(ctx, src, available, &msgsUntilSpaceRefresh)
+		// Get contiguous region (handle wraparound)
+		writeOff := r.rawEnd & r.dataMask
+		contiguous := int64(len(r.data)) - writeOff
+		if contiguous > available {
+			contiguous = available
+		}
+
+		// Read directly from network into ring buffer
+		n, err := src.Read(r.data[writeOff : writeOff+contiguous])
+		if n > 0 {
+			r.rawEnd += int64(n)
+
+			// Parse all complete messages from the new data
+			streamingDetected := r.parseCompleteMessages(&msgsUntilSpaceRefresh)
+
+			// Publish if we have new complete messages
+			if r.localMsgCnt > r.publishedMsgs {
+				r.publish()
+			}
+
+			// If we detected a streaming message, wait for consumer to handle it
+			if streamingDetected {
+				if err := r.handleStreamingMessage(ctx, src); err != nil {
+					return err
+				}
+			}
+		}
+
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil // Clean shutdown
+				r.setError(io.EOF)
+				return nil
 			}
+			r.setError(err)
 			return err
 		}
-
-		// If we detected a streaming message, wait for consumer to handle it
-		if streamingDetected {
-			if err := r.handleStreamingMessage(ctx, src); err != nil {
-				return err
-			}
-		}
-
-		_ = gotData // In the loop, we just continue regardless
 	}
-}
-
-// readOnce performs a single read from src into the ring buffer.
-// It reads data, parses complete messages, and publishes them.
-// Returns (gotData, streamingDetected, error).
-// - gotData: true if any data was read and parsed
-// - streamingDetected: true if an oversized message needs streaming
-// - error: non-nil on fatal errors (EOF is handled internally, not returned)
-//
-// Timeout errors are NOT treated as errors - they return (false, false, nil).
-// This allows callers to use deadlines for non-blocking reads.
-func (r *RingBuffer) readOnce(ctx context.Context, src io.Reader, available int64, msgsUntilSpaceRefresh *int) (gotData bool, streamingDetected bool, err error) {
-	// Get contiguous region (handle wraparound)
-	writeOff := r.rawEnd & r.dataMask
-	contiguous := int64(len(r.data)) - writeOff
-	if contiguous > available {
-		contiguous = available
-	}
-
-	// Read directly from network into ring buffer
-	n, readErr := src.Read(r.data[writeOff : writeOff+contiguous])
-	if n > 0 {
-		r.rawEnd += int64(n)
-
-		// Parse all complete messages from the new data
-		streamingDetected = r.parseCompleteMessages(msgsUntilSpaceRefresh)
-
-		// Publish if we have new complete messages
-		if r.localMsgCnt > r.publishedMsgs {
-			r.publish()
-		}
-
-		gotData = true
-	}
-
-	if readErr != nil {
-		// Timeout: not an error, just means no data available right now
-		var netErr net.Error
-		if errors.As(readErr, &netErr) && netErr.Timeout() {
-			return gotData, streamingDetected, nil
-		}
-		// EOF: set internal error and return EOF so caller knows to stop
-		if errors.Is(readErr, io.EOF) {
-			r.setError(io.EOF)
-			return gotData, streamingDetected, io.EOF
-		}
-		// Real error
-		r.setError(readErr)
-		return gotData, streamingDetected, readErr
-	}
-
-	return gotData, streamingDetected, nil
-}
-
-// TryReadOnce attempts a single read from conn into the ring buffer.
-//
-// timeout behavior:
-//   - timeout > 0: wait up to timeout for data
-//   - timeout == 0: non-blocking, return immediately if no data
-//   - timeout < 0: block indefinitely until data arrives
-//
-// The connection's read deadline is cleared after the call (set to zero).
-//
-// Returns (gotData, error):
-//   - (true, nil): data was read and parsed successfully
-//   - (false, nil): no data available (timeout or would block)
-//   - (false, err): a real error occurred
-//
-// Note: This method does not support streaming (oversized) messages.
-// If a streaming message is detected, it returns an error.
-func (r *RingBuffer) TryReadOnce(ctx context.Context, conn net.Conn, timeout time.Duration) (gotData bool, err error) {
-	// Set deadline based on timeout
-	if timeout >= 0 {
-		var deadline time.Time
-		if timeout == 0 {
-			deadline = time.Now() // Immediate deadline = non-blocking
-		} else {
-			deadline = time.Now().Add(timeout)
-		}
-		if err := conn.SetReadDeadline(deadline); err != nil {
-			return false, fmt.Errorf("SetReadDeadline: %w", err)
-		}
-		defer func() {
-			// Clear deadline after read (ignore error - connection may be closed)
-			_ = conn.SetReadDeadline(time.Time{})
-		}()
-	}
-	// If timeout < 0, don't touch deadline (fully blocking)
-
-	// Calculate available space
-	r.refreshCachedPositions()
-	used := r.rawEnd - r.cachedConsumedBytes
-	available := int64(len(r.data)) - used - r.HeadroomBytes
-
-	if available <= 0 {
-		// No space in buffer - not an error, caller should consume messages first
-		return false, nil
-	}
-
-	// Check for unparsed data we can parse without reading
-	unparsedData := r.rawEnd - r.parsePos
-	if unparsedData >= 5 {
-		usedMeta := r.localMsgCnt - r.cachedConsumedMsgs
-		if usedMeta < int64(len(r.offsets)) {
-			prevMsgCnt := r.localMsgCnt
-			msgsUntilSpaceRefresh := spaceCheckMsgs
-			streamingDetected := r.parseCompleteMessages(&msgsUntilSpaceRefresh)
-			if r.localMsgCnt > prevMsgCnt {
-				if r.localMsgCnt > r.publishedMsgs {
-					r.publish()
-				}
-				if streamingDetected {
-					return false, errors.New("TryReadOnce does not support streaming messages")
-				}
-				return true, nil
-			}
-		}
-	}
-
-	// Do the read
-	msgsUntilSpaceRefresh := spaceCheckMsgs
-	gotData, streamingDetected, err := r.readOnce(ctx, conn, available, &msgsUntilSpaceRefresh)
-	if err != nil {
-		// EOF after reading data is fine - we got the data
-		if errors.Is(err, io.EOF) {
-			if streamingDetected {
-				return false, errors.New("TryReadOnce does not support streaming messages")
-			}
-			return gotData, nil
-		}
-		return false, err
-	}
-	if streamingDetected {
-		return false, errors.New("TryReadOnce does not support streaming messages")
-	}
-
-	return gotData, nil
 }
 
 // parseCompleteMessages scans from parsePos to rawEnd finding complete messages.
