@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -39,6 +40,7 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 	// Build the go test command
 	args := []string{
 		"test",
+		"-v", // Verbose output to show progress
 		"-bench=.",
 		"-benchmem",
 		"-run=^$", // Skip unit tests, only run benchmarks
@@ -100,9 +102,9 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 
 	cmd.Env = env
 
-	// Capture output
+	// Capture stdout (benchmark results) while streaming stderr (progress) to console
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	cmd.Stdout = io.MultiWriter(&stdout, os.Stderr) // Stream benchmark output to stderr for visibility
 	cmd.Stderr = &stderr
 
 	// Run the benchmark

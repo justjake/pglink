@@ -99,8 +99,23 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 		return nil, fmt.Errorf("failed to start docker containers: %w", err)
 	}
 
+	// Estimate total time
+	numTargets := len(o.Config.Targets)
+	numRounds := o.Config.Rounds
+	estTimePerRound := o.Config.Duration + o.Config.Warmup + 30*time.Second // Add buffer for setup
+	estTotalTime := time.Duration(numTargets*numRounds) * estTimePerRound
+	o.Logger.Info("estimated total time",
+		"targets", numTargets,
+		"rounds", numRounds,
+		"est_per_round", estTimePerRound,
+		"est_total", estTotalTime.Round(time.Second))
+
 	// Run benchmarks for each target
-	for _, target := range o.Config.Targets {
+	for i, target := range o.Config.Targets {
+		o.Logger.Info("starting target",
+			"target", target.Name,
+			"progress", fmt.Sprintf("%d/%d", i+1, numTargets))
+
 		targetResult, err := o.runTarget(ctx, target)
 		if err != nil {
 			o.Logger.Error("target benchmark failed", "target", target.Name, "error", err)
