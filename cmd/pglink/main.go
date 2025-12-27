@@ -343,17 +343,28 @@ func main() {
 	}
 
 	// Handle shutdown signals in goroutine
-	// SIGTERM/SIGINT: graceful shutdown (wait for clients to disconnect)
-	// Second signal during shutdown: immediate shutdown
+	// Behavior depends on graceful_shutdown config:
+	// - false (default): immediate shutdown on first signal
+	// - true: wait for clients on first signal, immediate on second
+	gracefulShutdown := cfg.GetGracefulShutdown()
 	go func() {
 		for {
 			sig := <-sigChan
 			mode := svc.GetShutdownMode()
 			if mode == frontend.ShutdownNone {
-				// First signal: initiate graceful shutdown
-				logger.Info("received signal, initiating graceful shutdown (waiting for clients to disconnect)",
-					"signal", sig)
-				svc.Shutdown(frontend.ShutdownWaitForClients)
+				if gracefulShutdown {
+					// Graceful mode: wait for clients to disconnect
+					logger.Info("received signal, initiating graceful shutdown (waiting for clients to disconnect)",
+						"signal", sig)
+					svc.Shutdown(frontend.ShutdownWaitForClients)
+				} else {
+					// Immediate mode (default): shutdown now
+					logger.Info("received signal, initiating immediate shutdown",
+						"signal", sig)
+					svc.Shutdown(frontend.ShutdownImmediate)
+					cancel()
+					return
+				}
 			} else {
 				// Second signal: escalate to immediate shutdown
 				logger.Info("received signal during shutdown, forcing immediate shutdown",

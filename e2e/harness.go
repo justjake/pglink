@@ -249,6 +249,8 @@ func (h *Harness) Stop() {
 
 	// Shutdown service with a timeout
 	if h.service != nil {
+		// Trigger immediate shutdown to close all connections
+		h.service.Shutdown(frontend.ShutdownImmediate)
 		h.cancel()
 
 		// Wait for service shutdown with a timeout
