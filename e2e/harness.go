@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/justjake/pglink/pkg/config"
+	pkge2e "github.com/justjake/pglink/pkg/e2e"
 	"github.com/justjake/pglink/pkg/frontend"
 )
 
@@ -113,14 +114,14 @@ func NewHarness(t *testing.T) *Harness {
 // NewHarnessForMain creates a harness for use in TestMain (without a *testing.T).
 // Errors will cause a panic instead of t.Fatalf.
 func NewHarnessForMain() *Harness {
-	// Find project root (directory containing docker-compose.yaml)
-	projectDir, err := findProjectRoot()
+	// Find project root (worktree root containing docker-compose.yaml)
+	projectDir, err := pkge2e.CurrentWorktreePath()
 	if err != nil {
 		panic(fmt.Sprintf("failed to find project root: %v", err))
 	}
 
 	// Find main repo for docker-compose (shared across worktrees)
-	mainRepoDir, err := findMainRepoDir()
+	mainRepoDir, err := pkge2e.MainWorktreePath(projectDir)
 	if err != nil {
 		panic(fmt.Sprintf("failed to find main repo: %v", err))
 	}
@@ -162,54 +163,6 @@ func NewHarnessForMain() *Harness {
 		pglinkPort:  pglinkPort,
 		logger:      logger,
 	}
-}
-
-// findProjectRoot locates the project root by looking for docker-compose.yaml
-func findProjectRoot() (string, error) {
-	// Start from current working directory and walk up
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "docker-compose.yaml")); err == nil {
-			return dir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached root
-			break
-		}
-		dir = parent
-	}
-
-	return "", fmt.Errorf("could not find docker-compose.yaml in any parent directory")
-}
-
-// findMainRepoDir finds the main git repository directory.
-// If we're in a worktree, this returns the main repo path, not the worktree.
-// Docker-compose containers are shared across all worktrees.
-func findMainRepoDir() (string, error) {
-	// git rev-parse --git-common-dir gives us the path to the shared .git directory
-	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to find git common dir: %w", err)
-	}
-
-	gitCommonDir := strings.TrimSpace(string(output))
-
-	// The common dir is either ".git" (main repo) or "/path/to/main/.git" (worktree)
-	// We want the parent of that directory
-	if gitCommonDir == ".git" {
-		// We're in the main repo
-		return os.Getwd()
-	}
-
-	// We're in a worktree - gitCommonDir is an absolute path to main/.git
-	return filepath.Dir(gitCommonDir), nil
 }
 
 // findFreePort finds an available TCP port
