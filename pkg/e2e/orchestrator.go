@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -216,8 +217,21 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 	}()
 
 	// Run rounds
+	var cpuProfileWg sync.WaitGroup
+	var cpuProfileErr error
 	for round := 1; round <= o.Config.Rounds; round++ {
 		o.Logger.Info("running round", "target", target.Name, "round", round, "total", o.Config.Rounds)
+
+		// On the last round, start CPU profile collection concurrently (if pprof enabled)
+		// This captures the profile while there's actual load on pglink
+		isLastRound := round == o.Config.Rounds
+		if isLastRound && o.Config.Pprof && target.Type == TargetTypePglink {
+			cpuProfileWg.Add(1)
+			go func() {
+				defer cpuProfileWg.Done()
+				cpuProfileErr = o.collectCPUProfile(target)
+			}()
+		}
 
 		runCfg := BenchRunConfig{
 			Duration:        o.Config.Duration,
@@ -269,6 +283,12 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		result.Rounds = append(result.Rounds, roundResult)
 	}
 
+	// Wait for CPU profile collection to complete
+	cpuProfileWg.Wait()
+	if cpuProfileErr != nil {
+		o.Logger.Warn("failed to collect CPU profile", "target", target.Name, "error", cpuProfileErr)
+	}
+
 	// Scrape metrics before stopping the target (if observable mode)
 	// Note: pglink uses prometheus client library for metrics, not OTEL metrics.
 	// Push metrics won't work until we migrate to OTEL. For now, scrape directly.
@@ -281,6 +301,13 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 				"target", target.Name,
 				"families", len(scraped.MetricNames),
 				"samples", scraped.SampleCount)
+		}
+	}
+
+	// Collect profiles before stopping the target (if pprof enabled)
+	if needsStop && o.Config.Pprof && target.Type == TargetTypePglink {
+		if err := o.collectProfiles(ctx, target); err != nil {
+			o.Logger.Warn("failed to collect profiles", "target", target.Name, "error", err)
 		}
 	}
 
@@ -342,6 +369,12 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 		args = append(args, "-message-buffer-bytes", target.MessageBufferBytes)
 	}
 
+	// Determine metrics port - needed for both observability and pprof
+	metricsPort := target.Port + 3000 // e.g., 16432 -> 19432
+	if target.MetricsPort != 0 {
+		metricsPort = target.MetricsPort
+	}
+
 	// Add observability flags if enabled
 	if o.Config.Observable {
 		// Enable OTEL with minimal mode (no SQL parsing)
@@ -360,12 +393,19 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 		args = append(args, "-otel-logs-endpoint", "localhost:13100")
 
 		// Also enable metrics scraping endpoint for backup verification
-		metricsPort := target.Port + 3000 // e.g., 16432 -> 19432
-		if target.MetricsPort != 0 {
-			metricsPort = target.MetricsPort
-		}
 		args = append(args, "-prometheus-listen", fmt.Sprintf(":%d", metricsPort))
 		// Record metrics port for backup scraping
+		o.metricsPorts[target.Name] = metricsPort
+	}
+
+	// Add pprof flag if profiling enabled
+	if o.Config.Pprof {
+		args = append(args, "-pprof")
+		// Ensure metrics server is running for pprof endpoints
+		if !o.Config.Observable {
+			args = append(args, "-prometheus-listen", fmt.Sprintf(":%d", metricsPort))
+		}
+		// Record metrics port for profile collection
 		o.metricsPorts[target.Name] = metricsPort
 	}
 
@@ -1322,6 +1362,166 @@ func (o *Orchestrator) scrapeMetricsEndpoint(ctx context.Context) (*MetricsCheck
 		"samples", result.SampleCount)
 
 	return result, nil
+}
+
+// collectProfiles collects heap, goroutine, and allocs profiles from a pglink target.
+// CPU profile is collected separately during benchmark rounds by collectCPUProfile.
+// Uses a background context since the parent context may be canceled during shutdown.
+func (o *Orchestrator) collectProfiles(_ context.Context, target TargetConfig) error {
+	metricsPort, ok := o.metricsPorts[target.Name]
+	if !ok {
+		return fmt.Errorf("no metrics port found for target %s", target.Name)
+	}
+
+	baseURL := fmt.Sprintf("http://localhost:%d/debug/pprof", metricsPort)
+
+	// Create profiles directory
+	profileDir := filepath.Join(o.outputDir, fmt.Sprintf("profiles.%s", target.Name))
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		return fmt.Errorf("failed to create profile directory: %w", err)
+	}
+
+	// Instant snapshot profiles (heap, goroutine, allocs)
+	// CPU profile is collected separately during benchmark rounds
+	profiles := []struct {
+		name string
+		path string
+	}{
+		{"heap", "/heap"},
+		{"goroutine", "/goroutine"},
+		{"allocs", "/allocs"},
+	}
+
+	for _, p := range profiles {
+		o.Logger.Info("collecting profile",
+			"target", target.Name,
+			"profile", p.name)
+
+		profileURL := baseURL + p.path
+
+		reqCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, profileURL, nil)
+		if err != nil {
+			cancel()
+			return fmt.Errorf("failed to create request for %s: %w", p.name, err)
+		}
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			cancel()
+			o.Logger.Warn("failed to collect profile",
+				"target", target.Name,
+				"profile", p.name,
+				"error", err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			cancel()
+			o.Logger.Warn("profile endpoint returned error",
+				"target", target.Name,
+				"profile", p.name,
+				"status", resp.StatusCode,
+				"body", string(body))
+			continue
+		}
+
+		// Save profile to file
+		outPath := filepath.Join(profileDir, fmt.Sprintf("%s.pprof", p.name))
+		outFile, err := os.Create(outPath)
+		if err != nil {
+			_ = resp.Body.Close()
+			cancel()
+			return fmt.Errorf("failed to create profile file: %w", err)
+		}
+
+		_, err = io.Copy(outFile, resp.Body)
+		_ = resp.Body.Close()
+		_ = outFile.Close()
+		cancel()
+		if err != nil {
+			return fmt.Errorf("failed to write profile: %w", err)
+		}
+
+		o.Logger.Info("saved profile",
+			"target", target.Name,
+			"profile", p.name,
+			"path", outPath)
+	}
+
+	return nil
+}
+
+// collectCPUProfile collects a CPU profile from a pglink target.
+// This is called during the last benchmark round to capture profile under load.
+func (o *Orchestrator) collectCPUProfile(target TargetConfig) error {
+	metricsPort, ok := o.metricsPorts[target.Name]
+	if !ok {
+		return fmt.Errorf("no metrics port found for target %s", target.Name)
+	}
+
+	// Determine profile duration - default to 30s or use configured value
+	profileDuration := 30 * time.Second
+	if o.Config.ProfileDuration > 0 {
+		profileDuration = o.Config.ProfileDuration
+	}
+
+	// Create profiles directory
+	profileDir := filepath.Join(o.outputDir, fmt.Sprintf("profiles.%s", target.Name))
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		return fmt.Errorf("failed to create profile directory: %w", err)
+	}
+
+	profileURL := fmt.Sprintf("http://localhost:%d/debug/pprof/profile?seconds=%d",
+		metricsPort, int(profileDuration.Seconds()))
+
+	o.Logger.Info("collecting CPU profile during benchmark",
+		"target", target.Name,
+		"duration", profileDuration)
+
+	// Create timeout that accounts for profile duration
+	timeout := profileDuration + 30*time.Second
+
+	reqCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, profileURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to collect CPU profile: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("CPU profile endpoint returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Save profile to file
+	outPath := filepath.Join(profileDir, "cpu.pprof")
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		return fmt.Errorf("failed to create profile file: %w", err)
+	}
+	defer func() { _ = outFile.Close() }()
+
+	if _, err = io.Copy(outFile, resp.Body); err != nil {
+		return fmt.Errorf("failed to write profile: %w", err)
+	}
+
+	o.Logger.Info("saved CPU profile",
+		"target", target.Name,
+		"path", outPath)
+
+	return nil
 }
 
 // checkLoki queries Loki to verify logs were pushed.

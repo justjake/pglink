@@ -173,6 +173,7 @@ func main() {
 	otelLogs := flag.Bool("otel-logs", false, "enable OTEL logs export (uses -otel-endpoint or -otel-logs-endpoint)")
 	otelLogsEndpoint := flag.String("otel-logs-endpoint", "", "OTLP endpoint for logs (e.g., localhost:13100)")
 	logLevel := flag.String("log-level", "", "log level: debug, info, warn, error (overrides PGLINK_LOG_LEVEL env var)")
+	enablePprof := flag.Bool("pprof", false, "enable pprof profiling endpoints at /debug/pprof/*")
 
 	flag.Usage = printUsage
 	flag.Parse()
@@ -439,7 +440,11 @@ func main() {
 		}
 		if logProvider != nil {
 			// Replace logger with one that writes to both stdout and OTEL
-			multiHandler := observability.MultiHandler(handler, logProvider.Handler())
+			// Wrap OTEL handler with level filter because OTEL's BatchProcessor always
+			// returns true for Enabled(), causing overhead from debug logs even when
+			// debug logging is disabled.
+			otelHandler := observability.NewLevelFilterHandler(logProvider.Handler(), slogLevel)
+			multiHandler := observability.MultiHandler(handler, otelHandler)
 			logger = slog.New(multiHandler)
 			slog.SetDefault(logger)
 			logger.Info("OTEL logs enabled",
@@ -521,9 +526,28 @@ func main() {
 			"listen", cfg.Prometheus.GetListen(),
 			"path", cfg.Prometheus.GetPath(),
 			"prefix", metricPrefix)
+		// Enable pprof endpoints if requested
+		if *enablePprof {
+			metricsServer.EnablePprof()
+		}
 		defer func() {
 			if err := metricsServer.Shutdown(context.Background()); err != nil {
 				logger.Error("failed to shutdown metrics server", "error", err)
+			}
+		}()
+	} else if *enablePprof {
+		// No Prometheus configured but pprof requested - start standalone metrics server for pprof
+		cfg.Prometheus = config.ParsePrometheusListen(":9090")
+		metricsServer = observability.NewMetricsServer(cfg.Prometheus, logger)
+		metricsServer.EnablePprof()
+		if err := metricsServer.Start(); err != nil {
+			logger.Error("failed to start pprof server", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("pprof-only server enabled", "listen", cfg.Prometheus.GetListen())
+		defer func() {
+			if err := metricsServer.Shutdown(context.Background()); err != nil {
+				logger.Error("failed to shutdown pprof server", "error", err)
 			}
 		}()
 	}

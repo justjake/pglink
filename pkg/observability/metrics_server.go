@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -91,4 +92,25 @@ func (s *MetricsServer) String() string {
 		return "MetricsServer(disabled)"
 	}
 	return fmt.Sprintf("MetricsServer(addr=%s)", s.server.Addr)
+}
+
+// EnablePprof registers pprof handlers on the server.
+// The handlers are registered at /debug/pprof/* paths.
+func (s *MetricsServer) EnablePprof() {
+	if s == nil || s.mux == nil {
+		return
+	}
+	s.mux.HandleFunc("/debug/pprof/", pprof.Index)
+	s.mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	s.mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	s.mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	s.mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// Also register specific handlers for common profiles
+	s.mux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	s.mux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	s.mux.Handle("/debug/pprof/block", pprof.Handler("block"))
+	s.mux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+	s.mux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+	s.mux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	s.logger.Info("pprof endpoints enabled", "base_path", "/debug/pprof/")
 }

@@ -32,6 +32,10 @@ type BenchSuiteConfig struct {
 	CheckObservable bool // Verify observability data was recorded after benchmark
 	FlightRecorder  bool // Enable flight recorder for pglink targets
 
+	// Profiling
+	Pprof           bool          // Enable pprof profiling for pglink targets
+	ProfileDuration time.Duration // Duration for CPU profile collection (default: 30s)
+
 	// Pglink pool settings
 	PglinkPoolMaxConns int // Backend pool max connections (0 = use CPU setting)
 

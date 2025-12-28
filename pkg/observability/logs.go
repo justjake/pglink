@@ -102,6 +102,44 @@ func (lp *LogProvider) Enabled() bool {
 	return lp != nil && lp.provider != nil
 }
 
+// LevelFilterHandler wraps an slog.Handler and filters out log records below the specified level.
+// This is useful because some handlers (like OTEL BatchProcessor) always return true for Enabled(),
+// which causes unnecessary overhead when debug logging is disabled.
+type LevelFilterHandler struct {
+	handler slog.Handler
+	level   slog.Leveler
+}
+
+// NewLevelFilterHandler creates a new LevelFilterHandler that filters out log records below the specified level.
+func NewLevelFilterHandler(handler slog.Handler, level slog.Leveler) *LevelFilterHandler {
+	return &LevelFilterHandler{
+		handler: handler,
+		level:   level,
+	}
+}
+
+func (h *LevelFilterHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return level >= h.level.Level() && h.handler.Enabled(ctx, level)
+}
+
+func (h *LevelFilterHandler) Handle(ctx context.Context, r slog.Record) error {
+	return h.handler.Handle(ctx, r)
+}
+
+func (h *LevelFilterHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &LevelFilterHandler{
+		handler: h.handler.WithAttrs(attrs),
+		level:   h.level,
+	}
+}
+
+func (h *LevelFilterHandler) WithGroup(name string) slog.Handler {
+	return &LevelFilterHandler{
+		handler: h.handler.WithGroup(name),
+		level:   h.level,
+	}
+}
+
 // MultiHandler creates an slog.Handler that writes to multiple handlers.
 // Useful for writing to both OTEL and stdout.
 func MultiHandler(handlers ...slog.Handler) slog.Handler {

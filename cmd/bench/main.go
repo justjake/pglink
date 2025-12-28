@@ -63,6 +63,10 @@ func main() {
 	// Debug flags
 	debug := flag.Bool("debug", false, "enable debug logging for spawned pglink processes")
 
+	// Profiling flags
+	pprof := flag.Bool("pprof", false, "collect CPU and memory profiles from pglink targets")
+	profileDuration := flag.Duration("profile-duration", 30*time.Second, "duration for CPU profile collection")
+
 	flag.Parse()
 
 	// Default -check-observable to -observable if not explicitly set
@@ -95,6 +99,8 @@ func main() {
 		CheckObservable:    *checkObservable,
 		Seed:               *seed,
 		PglinkPoolMaxConns: *pglinkPoolMaxConns,
+		Pprof:              *pprof,
+		ProfileDuration:    *profileDuration,
 	}
 
 	// Parse cases
