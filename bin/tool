@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Execute a Go tool with mise environment.
+# Usage: bin/tool <tool-name> [args...]
+#
+# This script ensures tools installed via `go install` are available
+# regardless of how the parent process was invoked.
+#
+# Examples:
+#   bin/tool benchstat direct=bench1.txt pglink=bench2.txt
+#   bin/tool pprof -http=:8080 profile.pprof
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: bin/tool <tool-name> [args...]" >&2
+    echo "" >&2
+    echo "Examples:" >&2
+    echo "  bin/tool benchstat file1.txt file2.txt" >&2
+    echo "  bin/tool pprof -http=:8080 profile.pprof" >&2
+    exit 1
+fi
+
+# Activate mise environment
+if command -v mise &> /dev/null; then
+    eval "$(mise activate bash --shims)"
+fi
+
+exec "$@"

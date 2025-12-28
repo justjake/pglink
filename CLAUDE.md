@@ -68,6 +68,7 @@ When adding or modifying scripts in `bin/`, update this list.
 | `bin/setup` | Install mise tools and configure git hooks |
 | `bin/test` | Run tests (e.g., `bin/test ./pkg/config`) |
 | `bin/tidy` | Run `go mod tidy` |
+| `bin/tool` | Run Go tools with mise environment (e.g., `bin/tool benchstat file1.txt file2.txt`) |
 | `bin/worktree-new` | Create a new git worktree for independent development |
 | `bin/worktree-list` | List all worktrees with their branches and Claude plans |
 | `bin/worktree-rm` | Remove a worktree |

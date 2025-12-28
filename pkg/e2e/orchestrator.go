@@ -131,6 +131,11 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 		o.Logger.Error("failed to write results", "error", err)
 	}
 
+	// Generate BENCHMARK.md report
+	if err := o.generateBenchmarkReport(results); err != nil {
+		o.Logger.Warn("failed to generate benchmark report", "error", err)
+	}
+
 	// Update latest symlink
 	if err := o.updateLatestSymlink(); err != nil {
 		o.Logger.Warn("failed to update latest symlink", "error", err)
@@ -452,4 +457,170 @@ func CopyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// generateBenchmarkReport creates a BENCHMARK.md file summarizing the results.
+func (o *Orchestrator) generateBenchmarkReport(results *BenchmarkResults) error {
+	var b strings.Builder
+
+	// Write header
+	b.WriteString("# Benchmark Results\n\n")
+	fmt.Fprintf(&b, "**Execution ID:** `%s`\n\n", o.executionID)
+	fmt.Fprintf(&b, "**Timestamp:** %s\n\n", results.Timestamp.Format(time.RFC3339))
+	fmt.Fprintf(&b, "**Git SHA:** `%s`\n\n", o.runnerGitInfo.Git.SHA[:12])
+	fmt.Fprintf(&b, "**Branch:** `%s`\n\n", o.runnerGitInfo.Git.Branch)
+
+	// Write configuration summary
+	b.WriteString("## Configuration\n\n")
+	b.WriteString("| Setting | Value |\n")
+	b.WriteString("|---------|-------|\n")
+	fmt.Fprintf(&b, "| Duration | %s |\n", o.Config.Duration)
+	fmt.Fprintf(&b, "| Warmup | %s |\n", o.Config.Warmup)
+	fmt.Fprintf(&b, "| Rounds | %d |\n", o.Config.Rounds)
+	fmt.Fprintf(&b, "| CPU (parallelism) | %d |\n", o.Config.CPU)
+	fmt.Fprintf(&b, "| Targets | %d |\n", len(o.Config.Targets))
+	b.WriteString("\n")
+
+	// List targets
+	b.WriteString("### Targets\n\n")
+	for _, t := range o.Config.Targets {
+		fmt.Fprintf(&b, "- **%s** (%s)\n", t.Name, t.Type)
+	}
+	b.WriteString("\n")
+
+	// Run benchstat comparison if we have multiple targets
+	if len(results.Results) >= 2 {
+		b.WriteString("## Benchstat Comparison\n\n")
+		benchstatOutput := o.runBenchstat()
+		if benchstatOutput != "" {
+			fmt.Fprintf(&b, "```\n%s```\n\n", benchstatOutput)
+		} else {
+			b.WriteString("_benchstat not available or failed to run_\n\n")
+		}
+	}
+
+	// Write individual target results
+	b.WriteString("## Results by Target\n\n")
+	for _, tr := range results.Results {
+		fmt.Fprintf(&b, "### %s\n\n", tr.Target)
+		if tr.Git != nil {
+			fmt.Fprintf(&b, "- Git SHA: `%s`\n", tr.Git.SHA[:12])
+			fmt.Fprintf(&b, "- Branch: `%s`\n", tr.Git.Branch)
+		}
+		fmt.Fprintf(&b, "- Rounds completed: %d\n", len(tr.Rounds))
+		fmt.Fprintf(&b, "- Metrics collected: %d\n", len(tr.Metrics))
+		b.WriteString("\n")
+
+		// Show key metrics if available
+		if len(tr.Metrics) > 0 {
+			b.WriteString("| Benchmark | Iterations | ns/op | MB/s |\n")
+			b.WriteString("|-----------|------------|-------|------|\n")
+			for _, m := range tr.Metrics {
+				mbps := ""
+				if m.MBPerSec > 0 {
+					mbps = fmt.Sprintf("%.2f", m.MBPerSec)
+				}
+				fmt.Fprintf(&b, "| %s | %d | %.0f | %s |\n", m.Name, m.Iterations, m.NsPerOp, mbps)
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	// Write file listing
+	b.WriteString("## Output Files\n\n")
+	b.WriteString("| File | Description |\n")
+	b.WriteString("|------|-------------|\n")
+
+	files, _ := os.ReadDir(o.outputDir)
+	for _, file := range files {
+		desc := describeOutputFile(file.Name())
+		fmt.Fprintf(&b, "| `%s` | %s |\n", file.Name(), desc)
+	}
+
+	// Write to file
+	reportPath := filepath.Join(o.outputDir, "BENCHMARK.md")
+	if err := os.WriteFile(reportPath, []byte(b.String()), 0644); err != nil {
+		return fmt.Errorf("failed to write report file: %w", err)
+	}
+
+	o.Logger.Info("generated benchmark report", "path", reportPath)
+	return nil
+}
+
+// runBenchstat runs benchstat to compare benchmark results.
+// It uses bin/tool to ensure mise environment is activated.
+func (o *Orchestrator) runBenchstat() string {
+	// Find all bench.*.txt files
+	pattern := filepath.Join(o.outputDir, "bench.*.txt")
+	files, err := filepath.Glob(pattern)
+	if err != nil || len(files) < 2 {
+		return ""
+	}
+
+	// Build benchstat command with labeled inputs
+	// Format: benchstat name1=file1 name2=file2
+	args := []string{"benchstat"}
+	for _, file := range files {
+		// Extract target name from filename (bench.TARGET.txt)
+		base := filepath.Base(file)
+		name := strings.TrimPrefix(base, "bench.")
+		name = strings.TrimSuffix(name, ".txt")
+		args = append(args, fmt.Sprintf("%s=%s", name, file))
+	}
+
+	// Use bin/tool to run benchstat with mise environment
+	toolPath := filepath.Join(o.currentWorktree, "bin", "tool")
+	cmd := exec.Command(toolPath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		o.Logger.Warn("benchstat failed", "error", err, "output", string(output))
+		return ""
+	}
+
+	return string(output)
+}
+
+// describeOutputFile returns a human-readable description for a benchmark output file.
+func describeOutputFile(filename string) string {
+	// Exact matches
+	descriptions := map[string]string{
+		"BENCHMARK.md": "This benchmark report",
+		"results.json": "Full benchmark results in JSON format (for programmatic analysis)",
+		"git-sha":      "Git commit SHA of the worktree running the benchmark",
+		"git-branch":   "Git branch name of the benchmark runner",
+		"git-diff":     "Output of `git diff` showing uncommitted changes",
+		"git-status":   "Output of `git status --porcelain`",
+	}
+
+	if desc, ok := descriptions[filename]; ok {
+		return desc
+	}
+
+	// Pattern matches
+	switch {
+	case strings.HasPrefix(filename, "bench.") && strings.HasSuffix(filename, ".txt"):
+		target := strings.TrimSuffix(strings.TrimPrefix(filename, "bench."), ".txt")
+		return fmt.Sprintf("Go benchmark output for target `%s` (benchstat compatible)", target)
+
+	case strings.HasPrefix(filename, "pglink.") && strings.HasSuffix(filename, ".log"):
+		target := strings.TrimSuffix(strings.TrimPrefix(filename, "pglink."), ".log")
+		return fmt.Sprintf("pglink stdout/stderr logs for target `%s`", target)
+
+	case strings.HasPrefix(filename, "pgbouncer.") && strings.HasSuffix(filename, ".log"):
+		target := strings.TrimSuffix(strings.TrimPrefix(filename, "pgbouncer."), ".log")
+		return fmt.Sprintf("pgbouncer logs for target `%s`", target)
+
+	case strings.HasPrefix(filename, "postgres.") && strings.HasSuffix(filename, ".log"):
+		target := strings.TrimSuffix(strings.TrimPrefix(filename, "postgres."), ".log")
+		return fmt.Sprintf("PostgreSQL container logs for `%s`", target)
+
+	case strings.HasSuffix(filename, ".trace"):
+		return "Flight recorder trace file (can be viewed with go tool trace)"
+
+	case strings.HasSuffix(filename, ".pprof"):
+		return "CPU/memory profile (can be viewed with go tool pprof)"
+
+	default:
+		return "Benchmark artifact"
+	}
 }
