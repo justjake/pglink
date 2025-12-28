@@ -589,26 +589,7 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 
 // ensureDockerContainers ensures required docker containers are running.
 func (o *Orchestrator) ensureDockerContainers(ctx context.Context) error {
-	// Build docker compose command
-	args := []string{"compose", "up", "-d"}
-
-	// Include observability profile if enabled
-	if o.Config.Observable {
-		args = []string{"compose", "--profile", "observability", "up", "-d", "--wait"}
-	}
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = o.mainWorktreePath
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker compose up failed: %w\nOutput: %s", err, string(output))
-	}
-
-	o.Logger.Info("docker containers running",
-		"observable", o.Config.Observable,
-		"output", string(output))
-	return nil
+	return EnsureDockerCompose(ctx, o.mainWorktreePath, o.Config.Observable, o.Logger)
 }
 
 // initOutputDir creates the output directory for this benchmark run.

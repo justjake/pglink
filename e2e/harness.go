@@ -8,11 +8,8 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,50 +22,16 @@ import (
 )
 
 const (
-	// DockerComposeStartTimeout is how long to wait for docker compose services
-	DockerComposeStartTimeout = 2 * time.Minute
-
-	// BackendHealthCheckInterval is how often to check backend health
-	BackendHealthCheckInterval = 500 * time.Millisecond
-
 	// ServiceStartTimeout is how long to wait for pglink to start
 	ServiceStartTimeout = 30 * time.Second
 )
 
-// TestUser represents credentials for connecting through pglink
-type TestUser struct {
-	Username string
-	Password string
-}
+// Re-export types and values from pkg/e2e for convenience in tests.
+type TestUser = pkge2e.TestUser
+type TestDatabase = pkge2e.TestDatabase
 
-// PredefinedUsers are the users configured in the test setup
-var PredefinedUsers = struct {
-	App       TestUser
-	Admin     TestUser
-	Developer TestUser
-}{
-	App:       TestUser{Username: "app", Password: "app_password"},
-	Admin:     TestUser{Username: "admin", Password: "admin_password"},
-	Developer: TestUser{Username: "developer", Password: "developer_password"},
-}
-
-// TestDatabase represents a database accessible through pglink
-type TestDatabase struct {
-	Name        string // Name as exposed through pglink (e.g., "alpha_uno")
-	BackendHost string // Backend postgres host
-	BackendPort int    // Backend postgres port
-	BackendDB   string // Actual database name on backend (e.g., "uno")
-}
-
-// PredefinedDatabases are the databases configured in pglink.json
-var PredefinedDatabases = []TestDatabase{
-	{Name: "alpha_uno", BackendHost: "localhost", BackendPort: 15432, BackendDB: "uno"},
-	{Name: "alpha_dos", BackendHost: "localhost", BackendPort: 15432, BackendDB: "dos"},
-	{Name: "bravo_uno", BackendHost: "localhost", BackendPort: 15433, BackendDB: "uno"},
-	{Name: "bravo_dos", BackendHost: "localhost", BackendPort: 15433, BackendDB: "dos"},
-	{Name: "charlie_uno", BackendHost: "localhost", BackendPort: 15434, BackendDB: "uno"},
-	{Name: "charlie_dos", BackendHost: "localhost", BackendPort: 15434, BackendDB: "dos"},
-}
+var PredefinedUsers = pkge2e.PredefinedUsers
+var PredefinedDatabases = pkge2e.PredefinedDatabases
 
 // ConfigModifier is a function that modifies a config before starting the service.
 // Used by StartWithConfig to customize timeout settings, pool sizes, etc.
@@ -127,7 +90,7 @@ func NewHarnessForMain() *Harness {
 	}
 
 	// Allocate a free port for pglink to avoid conflicts between worktrees
-	pglinkPort, err := findFreePort()
+	pglinkPort, err := pkge2e.FindFreePort()
 	if err != nil {
 		panic(fmt.Sprintf("failed to find free port: %v", err))
 	}
@@ -163,19 +126,6 @@ func NewHarnessForMain() *Harness {
 		pglinkPort:  pglinkPort,
 		logger:      logger,
 	}
-}
-
-// findFreePort finds an available TCP port
-func findFreePort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	if err := listener.Close(); err != nil {
-		return 0, err
-	}
-	return port, nil
 }
 
 // Start initializes the test infrastructure:
@@ -245,110 +195,17 @@ func (h *Harness) fatalf(format string, args ...any) {
 // Docker compose runs from the main repo directory so containers are shared
 // across all worktrees.
 func (h *Harness) ensureDockerCompose(ctx context.Context) {
-	// Check if containers are already running
-	if h.isDockerComposeRunning(ctx) {
-		h.logger.Info("docker compose already running")
-		return
-	}
-
-	h.logger.Info("starting docker compose", "dir", h.mainRepoDir)
-	h.startedDockerCompose = true
-
-	cmd := exec.CommandContext(ctx, "docker", "compose", "up", "-d", "--wait")
-	cmd.Dir = h.mainRepoDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	wasRunning := pkge2e.IsDockerComposeRunning(ctx, h.mainRepoDir)
+	if err := pkge2e.EnsureDockerCompose(ctx, h.mainRepoDir, false, h.logger); err != nil {
 		h.fatalf("failed to start docker compose: %v", err)
 	}
-
-	h.logger.Info("docker compose started")
-}
-
-// isDockerComposeRunning checks if all required containers are running
-func (h *Harness) isDockerComposeRunning(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "ps", "--format", "{{.State}}")
-	cmd.Dir = h.mainRepoDir
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	// Check that we have running containers
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	runningCount := 0
-	for _, line := range lines {
-		if strings.Contains(line, "running") {
-			runningCount++
-		}
-	}
-
-	// We need all 3 containers (alpha, bravo, charlie) running
-	return runningCount >= 3
+	h.startedDockerCompose = !wasRunning
 }
 
 // waitForBackends waits for all backend databases to accept connections
 func (h *Harness) waitForBackends(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, DockerComposeStartTimeout)
-	defer cancel()
-
-	backends := []struct {
-		name string
-		port int
-	}{
-		{"alpha", 15432},
-		{"bravo", 15433},
-		{"charlie", 15434},
-	}
-
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(backends))
-
-	for _, b := range backends {
-		wg.Add(1)
-		go func(name string, port int) {
-			defer wg.Done()
-			if err := h.waitForBackend(ctx, name, port); err != nil {
-				errCh <- fmt.Errorf("backend %s: %w", name, err)
-			}
-		}(b.name, b.port)
-	}
-
-	wg.Wait()
-	close(errCh)
-
-	var errs []error
-	for err := range errCh {
-		errs = append(errs, err)
-	}
-	if len(errs) > 0 {
-		h.fatalf("failed to connect to backends: %v", errs)
-	}
-
-	h.logger.Info("all backends healthy")
-}
-
-// waitForBackend waits for a single backend to be ready
-func (h *Harness) waitForBackend(ctx context.Context, name string, port int) error {
-	connStr := fmt.Sprintf("postgres://postgres:postgres@localhost:%d/postgres?sslmode=disable", port)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		conn, err := pgx.Connect(ctx, connStr)
-		if err == nil {
-			_ = conn.Close(ctx)
-			h.logger.Info("backend ready", "name", name, "port", port)
-			return nil
-		}
-
-		h.logger.Debug("waiting for backend", "name", name, "port", port, "error", err)
-		time.Sleep(BackendHealthCheckInterval)
+	if err := pkge2e.WaitForBackends(ctx, h.logger); err != nil {
+		h.fatalf("failed to connect to backends: %v", err)
 	}
 }
 
@@ -414,23 +271,8 @@ func (h *Harness) waitForService(ctx context.Context) {
 	defer cancel()
 
 	addr := fmt.Sprintf("localhost:%d", h.pglinkPort)
-
-	for {
-		select {
-		case <-ctx.Done():
-			h.fatalf("pglink service did not start in time")
-		default:
-		}
-
-		conn, err := net.DialTimeout("tcp", addr, time.Second)
-		if err == nil {
-			_ = conn.Close()
-			h.logger.Info("pglink service ready", "addr", addr)
-			return
-		}
-
-		h.logger.Debug("waiting for pglink service", "addr", addr, "error", err)
-		time.Sleep(100 * time.Millisecond)
+	if err := pkge2e.WaitForTCPPort(ctx, addr, h.logger); err != nil {
+		h.fatalf("pglink service did not start in time: %v", err)
 	}
 }
 
@@ -617,12 +459,11 @@ func (h *Harness) ExecDirect(ctx context.Context, db TestDatabase, sql string) e
 // GetTestDatabase returns the TestDatabase config for the given database name.
 // Panics if the database is not found.
 func (h *Harness) GetTestDatabase(name string) TestDatabase {
-	for _, db := range PredefinedDatabases {
-		if db.Name == name {
-			return db
-		}
+	db := pkge2e.GetTestDatabase(name)
+	if db == nil {
+		panic(fmt.Sprintf("database %q not found in PredefinedDatabases", name))
 	}
-	panic(fmt.Sprintf("database %q not found in PredefinedDatabases", name))
+	return *db
 }
 
 // GetAlgo returns the session algorithm being used by this harness.
