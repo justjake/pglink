@@ -863,10 +863,14 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
 		Bind: func(msg *pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
-			serverName := s.clientToServerPreparedStatementName(parsed.PreparedStatement)
+			serverStmt := s.clientToServerPreparedStatementName(parsed.PreparedStatement)
+			serverPortal := s.clientToServerPortalName(parsed.DestinationPortal)
 
 			// Check if statement exists on this backend connection
-			statementExistsOnBackend := s.backend.HasStatement(serverName)
+			statementExistsOnBackend := s.backend.HasStatement(serverStmt)
+
+			// Track if we re-created the statement (requires WriteMsg, can't passthrough)
+			didRecreation := false
 
 			if !statementExistsOnBackend {
 				// Statement doesn't exist on backend - try to re-create it using cached query.
@@ -874,13 +878,13 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				// this can happen with QueryExecModeDescribeExec where Parse+Describe+Sync
 				// happens on one backend (then released), and Bind+Execute+Sync happens on
 				// a different backend that doesn't have the unnamed statement.
-				queryHash, hasHash := s.serverStatementQueryHash[serverName]
+				queryHash, hasHash := s.serverStatementQueryHash[serverStmt]
 				if hasHash {
 					cachedStmt, inCache := s.database.StatementCache().Get(queryHash)
 					if inCache {
 						s.logger.Debug("re-creating statement on backend",
 							"clientName", parsed.PreparedStatement,
-							"serverName", serverName,
+							"serverName", serverStmt,
 							"queryHash", queryHash)
 
 						// Record metrics
@@ -909,7 +913,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 
 						// Send Parse to backend
 						parseMsg := &pgproto3.Parse{
-							Name:          serverName,
+							Name:          serverStmt,
 							Query:         cachedStmt.Query,
 							ParameterOIDs: cachedStmt.ParameterOIDs,
 						}
@@ -919,18 +923,19 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 						if err := s.backend.WriteMsg(parseMsg); err != nil {
 							return nil, fmt.Errorf("failed to send Parse for statement re-creation: %w", err)
 						}
+						didRecreation = true
 					} else {
 						// Cache miss - statement not in cache
 						s.metrics.RecordPreparedStatementCacheMiss(s.databaseName)
 						s.logger.Warn("statement not in cache for re-creation",
 							"clientName", parsed.PreparedStatement,
-							"serverName", serverName,
+							"serverName", serverStmt,
 							"queryHash", queryHash)
 					}
 				} else {
 					s.logger.Warn("no query hash for statement re-creation",
 						"clientName", parsed.PreparedStatement,
-						"serverName", serverName)
+						"serverName", serverStmt)
 				}
 			}
 
@@ -946,9 +951,14 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				s.metrics.RecordBind(s.databaseName)
 			}
 
+			// If names unchanged and no re-creation, passthrough original message
+			if serverStmt == parsed.PreparedStatement && serverPortal == parsed.DestinationPortal && !didRecreation {
+				return nil, nil
+			}
+
 			return &pgproto3.Bind{
-				PreparedStatement:    serverName,
-				DestinationPortal:    s.clientToServerPortalName(parsed.DestinationPortal),
+				PreparedStatement:    serverStmt,
+				DestinationPortal:    serverPortal,
 				ParameterFormatCodes: parsed.ParameterFormatCodes,
 				Parameters:           parsed.Parameters,
 				ResultFormatCodes:    parsed.ResultFormatCodes,
@@ -1030,6 +1040,11 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				s.metrics.RecordServerParse(s.databaseName)
 			}
 
+			// If name unchanged, passthrough original message
+			if serverName == parsed.Name {
+				return nil, nil
+			}
+
 			return &pgproto3.Parse{
 				Name:          serverName,
 				Query:         parsed.Query,
@@ -1038,40 +1053,64 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		},
 		Execute: func(msg *pgwire.ClientExtendedQueryExecute) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
+			serverPortal := s.clientToServerPortalName(parsed.Portal)
+
 			// Track pending request
 			s.state.PushRequest(pgwire.PendingRequest{
 				RequestType: pgwire.MsgClientExecute,
 				Action:      pgwire.ActionForward,
 			})
+
+			// If portal unchanged, passthrough original message
+			if serverPortal == parsed.Portal {
+				return nil, nil
+			}
+
 			return &pgproto3.Execute{
-				Portal:  s.clientToServerPortalName(parsed.Portal),
+				Portal:  serverPortal,
 				MaxRows: parsed.MaxRows,
 			}, nil
 		},
 		Describe: func(msg *pgwire.ClientExtendedQueryDescribe) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
+			serverName := s.clientToServerObjectName(parsed.ObjectType, parsed.Name)
+
 			// Track pending request
 			s.state.PushRequest(pgwire.PendingRequest{
 				RequestType:   pgwire.MsgClientDescribe,
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.Name,
 			})
+
+			// If name unchanged, passthrough original message
+			if serverName == parsed.Name {
+				return nil, nil
+			}
+
 			return &pgproto3.Describe{
 				ObjectType: parsed.ObjectType,
-				Name:       s.clientToServerObjectName(parsed.ObjectType, parsed.Name),
+				Name:       serverName,
 			}, nil
 		},
 		Close: func(msg *pgwire.ClientExtendedQueryClose) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
+			serverName := s.clientToServerObjectName(parsed.ObjectType, parsed.Name)
+
 			// Track pending request
 			s.state.PushRequest(pgwire.PendingRequest{
 				RequestType:   pgwire.MsgClientClose,
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.Name,
 			})
+
+			// If name unchanged, passthrough original message
+			if serverName == parsed.Name {
+				return nil, nil
+			}
+
 			return &pgproto3.Close{
 				ObjectType: parsed.ObjectType,
-				Name:       s.clientToServerObjectName(parsed.ObjectType, parsed.Name),
+				Name:       serverName,
 			}, nil
 		},
 		Sync: func(msg *pgwire.ClientExtendedQuerySync) (pgproto3.FrontendMessage, error) {
@@ -1080,11 +1119,12 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				RequestType: pgwire.MsgClientSync,
 				Action:      pgwire.ActionForward,
 			})
-			return &pgproto3.Sync{}, nil
+			// No variable content - always passthrough
+			return nil, nil
 		},
 		Flush: func(msg *pgwire.ClientExtendedQueryFlush) (pgproto3.FrontendMessage, error) {
-			// Flush doesn't expect a response, just pass through
-			return &pgproto3.Flush{}, nil
+			// No variable content - always passthrough
+			return nil, nil
 		},
 	}
 
@@ -1119,6 +1159,15 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		if err := s.backend.WriteMsg(rewritten); err != nil {
 			return false, err
 		}
+	} else {
+		// Passthrough - still need to update backend state with original message
+		// so the backend knows about statements/portals that exist.
+		clientMsg, ok := pgwire.ToClientMessage(msg.Client())
+		if ok {
+			s.backend.UpdateState(clientMsg)
+		}
+		// Include the original message in the toServer range so it gets flushed.
+		(*toServer).SetEndInclusive(msgIdx)
 	}
 
 	return true, nil

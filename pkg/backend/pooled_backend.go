@@ -40,9 +40,10 @@ func (c *PooledBackend) TrackedParameters() []string {
 }
 
 // HasStatement returns true if the named prepared statement exists on this backend connection.
+// This includes statements that are pending creation (Parse in-flight but ParseComplete not yet received).
 func (c *PooledBackend) HasStatement(name string) bool {
 	c.panicIfReleased()
-	return c.session.State.Statements.Alive[name]
+	return c.session.State.Statements.Alive[name] || c.session.State.Statements.PendingCreate[name]
 }
 
 func (c *PooledBackend) String() string {
