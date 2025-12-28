@@ -164,6 +164,9 @@ func main() {
 	otelEndpoint := flag.String("otel-endpoint", "", "OTLP endpoint for traces (e.g., localhost:14317)")
 	otelAttrs := flag.String("otel-attrs", "", "extra OTEL resource attributes (format: key=val,key2=val2)")
 	prometheusAttrs := flag.String("prometheus-attrs", "", "extra Prometheus labels (format: key=val,key2=val2)")
+	prometheusPush := flag.String("prometheus-push", "", "Prometheus OTLP push endpoint (e.g., localhost:19090)")
+	otelLogs := flag.Bool("otel-logs", false, "enable OTEL logs export (uses -otel-endpoint or -otel-logs-endpoint)")
+	otelLogsEndpoint := flag.String("otel-logs-endpoint", "", "OTLP endpoint for logs (e.g., localhost:13100)")
 
 	flag.Usage = printUsage
 	flag.Parse()
@@ -329,6 +332,40 @@ func main() {
 		logger.Info("Prometheus extra labels set", "labels", cfg.Prometheus.ExtraLabels)
 	}
 
+	// Apply Prometheus push CLI override
+	if *prometheusPush != "" {
+		if cfg.Prometheus == nil {
+			cfg.Prometheus = &config.PrometheusConfig{}
+		}
+		cfg.Prometheus.Push = &config.PrometheusPushConfig{
+			Endpoint: *prometheusPush,
+		}
+		logger.Info("Prometheus push endpoint set", "endpoint", *prometheusPush)
+	}
+
+	// Apply OTEL logs CLI override
+	if *otelLogs {
+		if cfg.OpenTelemetry == nil {
+			cfg.OpenTelemetry = &config.OpenTelemetryConfig{
+				Enabled:     true,
+				ServiceName: "pglink",
+			}
+		}
+		// Determine logs endpoint
+		logsEndpoint := *otelLogsEndpoint
+		if logsEndpoint == "" {
+			logsEndpoint = cfg.OpenTelemetry.OTLPEndpoint
+		}
+		if logsEndpoint == "" {
+			logsEndpoint = *otelEndpoint
+		}
+		cfg.OpenTelemetry.Logs = &config.OTLPLogsConfig{
+			Enabled:  true,
+			Endpoint: logsEndpoint,
+		}
+		logger.Info("OTEL logs enabled", "endpoint", logsEndpoint)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -367,6 +404,51 @@ func main() {
 			"dir", *writePgbouncerDir,
 			"port", *pgbouncerPort)
 		os.Exit(0)
+	}
+
+	// Initialize OTEL logs if configured
+	var logProvider *observability.LogProvider
+	if cfg.OpenTelemetry != nil && cfg.OpenTelemetry.Logs != nil && cfg.OpenTelemetry.Logs.Enabled {
+		var err error
+		logProvider, err = observability.NewLogProvider(ctx, cfg.OpenTelemetry)
+		if err != nil {
+			logger.Error("failed to create log provider", "error", err)
+			os.Exit(1)
+		}
+		if logProvider != nil {
+			// Replace logger with one that writes to both stdout and OTEL
+			multiHandler := observability.MultiHandler(handler, logProvider.Handler())
+			logger = slog.New(multiHandler)
+			slog.SetDefault(logger)
+			logger.Info("OTEL logs enabled",
+				"service_name", cfg.OpenTelemetry.GetServiceName(),
+				"endpoint", cfg.OpenTelemetry.Logs.Endpoint)
+			defer func() {
+				if err := logProvider.Shutdown(context.Background()); err != nil {
+					logger.Error("failed to shutdown log provider", "error", err)
+				}
+			}()
+		}
+	}
+
+	// Initialize metrics push if configured
+	var metricsPusher *observability.MetricsPusher
+	if cfg.Prometheus != nil && cfg.Prometheus.Push != nil {
+		var err error
+		metricsPusher, err = observability.NewMetricsPusher(ctx, cfg.Prometheus, cfg.OpenTelemetry)
+		if err != nil {
+			logger.Error("failed to create metrics pusher", "error", err)
+			os.Exit(1)
+		}
+		if metricsPusher != nil {
+			logger.Info("Prometheus metrics push enabled",
+				"endpoint", cfg.Prometheus.Push.Endpoint)
+			defer func() {
+				if err := metricsPusher.Shutdown(context.Background()); err != nil {
+					logger.Error("failed to shutdown metrics pusher", "error", err)
+				}
+			}()
+		}
 	}
 
 	// Initialize OpenTelemetry tracing if configured

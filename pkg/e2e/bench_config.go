@@ -213,6 +213,8 @@ type ObservabilityCheckResult struct {
 	Traces *TracesCheckResult `json:"traces,omitempty"`
 	// Metrics contains metrics verification results.
 	Metrics *MetricsCheckResult `json:"metrics,omitempty"`
+	// Logs contains log verification results.
+	Logs *LogsCheckResult `json:"logs,omitempty"`
 	// Errors contains any errors encountered during verification.
 	Errors []string `json:"errors,omitempty"`
 }
@@ -237,23 +239,25 @@ type MetricsCheckResult struct {
 	MetricNames []string `json:"metric_names,omitempty"`
 	// SampleCount is the number of metric samples found.
 	SampleCount int `json:"sample_count"`
-	// ScrapedFrom indicates where metrics were scraped from (e.g., "pglink:19510/metrics")
-	ScrapedFrom string `json:"scraped_from,omitempty"`
+	// Source indicates where metrics were found (e.g., "prometheus:19090")
+	Source string `json:"source,omitempty"`
 }
 
-// ScrapedMetrics holds metrics scraped directly from a pglink instance.
-type ScrapedMetrics struct {
-	// Target is the target name these metrics came from.
-	Target string `json:"target"`
-	// Endpoint is the endpoint that was scraped (e.g., "http://localhost:19510/metrics").
-	Endpoint string `json:"endpoint"`
-	// MetricFamilies is the count of metric families found.
-	MetricFamilies int `json:"metric_families"`
-	// SampleCount is the total number of samples.
-	SampleCount int `json:"sample_count"`
-	// MetricNames lists the metric names found.
-	MetricNames []string `json:"metric_names"`
+// LogsCheckResult contains results from checking Loki for logs.
+type LogsCheckResult struct {
+	// Found is true if logs were found.
+	Found bool `json:"found"`
+	// LogCount is the number of log entries found.
+	LogCount int `json:"log_count"`
+	// StreamCount is the number of log streams found.
+	StreamCount int `json:"stream_count"`
+	// Source indicates where logs were found (e.g., "loki:13100")
+	Source string `json:"source,omitempty"`
 }
+
+// ScrapedMetrics is an alias for MetricsCheckResult for backwards compatibility.
+// It holds metrics scraped directly from a pglink instance's /metrics endpoint.
+type ScrapedMetrics = MetricsCheckResult
 
 // TargetResult contains results for a single target.
 type TargetResult struct {

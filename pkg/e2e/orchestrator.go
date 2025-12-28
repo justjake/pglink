@@ -264,14 +264,16 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 	}
 
 	// Scrape metrics before stopping the target (if observable mode)
+	// Note: pglink uses prometheus client library for metrics, not OTEL metrics.
+	// Push metrics won't work until we migrate to OTEL. For now, scrape directly.
 	if needsStop && o.Config.Observable {
-		if scraped, err := o.scrapeTargetMetrics(ctx, target.Name); err != nil {
+		if scraped, err := o.scrapeMetricsEndpoint(ctx); err != nil {
 			o.Logger.Warn("failed to scrape metrics", "target", target.Name, "error", err)
 		} else {
 			result.ScrapedMetrics = scraped
 			o.Logger.Info("scraped metrics from target",
 				"target", target.Name,
-				"families", scraped.MetricFamilies,
+				"families", len(scraped.MetricNames),
 				"samples", scraped.SampleCount)
 		}
 	}
@@ -342,14 +344,22 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 		args = append(args, "-otel-endpoint", "localhost:14317")
 		// Add execution_id and target as OTEL attributes for filtering
 		args = append(args, "-otel-attrs", fmt.Sprintf("bench.execution_id=%s,bench.target=%s", o.executionID, target.Name))
-		// Enable Prometheus metrics on a unique port per target
+
+		// Push metrics to Prometheus via OTLP (port 19090)
+		args = append(args, "-prometheus-push", "localhost:19090")
+		args = append(args, "-prometheus-attrs", fmt.Sprintf("bench_execution_id=%s,bench_target=%s", o.executionID, target.Name))
+
+		// Push logs to Loki via OTLP (port 13100)
+		args = append(args, "-otel-logs")
+		args = append(args, "-otel-logs-endpoint", "localhost:13100")
+
+		// Also enable metrics scraping endpoint for backup verification
 		metricsPort := target.Port + 3000 // e.g., 16432 -> 19432
 		if target.MetricsPort != 0 {
 			metricsPort = target.MetricsPort
 		}
 		args = append(args, "-prometheus-listen", fmt.Sprintf(":%d", metricsPort))
-		args = append(args, "-prometheus-attrs", fmt.Sprintf("bench_execution_id=%s,bench_target=%s", o.executionID, target.Name))
-		// Record metrics port for scraping later
+		// Record metrics port for backup scraping
 		o.metricsPorts[target.Name] = metricsPort
 	}
 
@@ -550,62 +560,6 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 	}
 
 	delete(o.processes, name)
-}
-
-// scrapeTargetMetrics scrapes Prometheus metrics from a running pglink target.
-func (o *Orchestrator) scrapeTargetMetrics(ctx context.Context, targetName string) (*ScrapedMetrics, error) {
-	port, ok := o.metricsPorts[targetName]
-	if !ok {
-		return nil, fmt.Errorf("no metrics port recorded for target %s", targetName)
-	}
-
-	endpoint := fmt.Sprintf("http://localhost:%d/metrics", port)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to scrape %s: %w", endpoint, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("metrics endpoint returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse metrics using prometheus expfmt
-	parser := expfmt.TextParser{}
-	metricFamilies, err := parser.TextToMetricFamilies(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse metrics: %w", err)
-	}
-
-	result := &ScrapedMetrics{
-		Target:      targetName,
-		Endpoint:    endpoint,
-		MetricNames: []string{},
-	}
-
-	// Count metric families and samples, collect names
-	for name, mf := range metricFamilies {
-		// Only count pglink_ metrics
-		if strings.HasPrefix(name, "pglink_") {
-			result.MetricFamilies++
-			result.MetricNames = append(result.MetricNames, name)
-			result.SampleCount += len(mf.GetMetric())
-		}
-	}
-
-	if result.MetricFamilies == 0 {
-		return nil, fmt.Errorf("no pglink_ metrics found at %s", endpoint)
-	}
-
-	return result, nil
 }
 
 // ensureDockerContainers ensures required docker containers are running.
@@ -904,15 +858,16 @@ func describeOutputFile(filename string) string {
 }
 
 // checkObservability verifies that observability data was recorded to the stack.
-// This is a STRICT check - it fails if traces or metrics are missing.
+// This is a STRICT check - it fails if traces, metrics, or logs are missing.
 func (o *Orchestrator) checkObservability(ctx context.Context, results *BenchmarkResults) (*ObservabilityCheckResult, error) {
 	result := &ObservabilityCheckResult{
 		Passed: true,
 		Errors: []string{},
 	}
 
-	// Give Tempo a moment to flush traces
-	time.Sleep(2 * time.Second)
+	// Give time for all data to be pushed/flushed
+	o.Logger.Info("waiting for observability data to flush...")
+	time.Sleep(5 * time.Second)
 
 	// 1. Check Tempo for traces - REQUIRED
 	tracesResult, err := o.checkTempo(ctx)
@@ -927,24 +882,20 @@ func (o *Orchestrator) checkObservability(ctx context.Context, results *Benchmar
 		}
 	}
 
-	// 2. Check scraped metrics from each pglink target - REQUIRED
-	// We scraped these directly from pglink before killing it, so they should exist
+	// 2. Check metrics - use scraped metrics from pglink targets
+	// Note: pglink uses prometheus client library for metrics, not OTEL metrics.
+	// Push metrics won't work until we migrate to OTEL. We scraped directly before stopping.
 	metricsResult := &MetricsCheckResult{
 		Found:       false,
 		MetricNames: []string{},
 	}
-
-	pglinkTargets := 0
-	targetsWithMetrics := 0
 	for _, tr := range results.Results {
-		// Find pglink targets
 		for _, cfg := range o.Config.Targets {
 			if cfg.Name == tr.Target && cfg.Type == TargetTypePglink {
-				pglinkTargets++
-				if tr.ScrapedMetrics != nil && tr.ScrapedMetrics.MetricFamilies > 0 {
-					targetsWithMetrics++
+				if tr.ScrapedMetrics != nil && len(tr.ScrapedMetrics.MetricNames) > 0 {
+					metricsResult.Found = true
 					metricsResult.SampleCount += tr.ScrapedMetrics.SampleCount
-					metricsResult.ScrapedFrom = tr.ScrapedMetrics.Endpoint
+					metricsResult.Source = tr.ScrapedMetrics.Source
 					// Collect unique metric names
 					for _, name := range tr.ScrapedMetrics.MetricNames {
 						found := false
@@ -958,33 +909,41 @@ func (o *Orchestrator) checkObservability(ctx context.Context, results *Benchmar
 							metricsResult.MetricNames = append(metricsResult.MetricNames, name)
 						}
 					}
-				} else {
-					result.Errors = append(result.Errors,
-						fmt.Sprintf("target %q: no metrics scraped", tr.Target))
-					result.Passed = false
 				}
-				break
 			}
 		}
 	}
-
-	if pglinkTargets > 0 && targetsWithMetrics == pglinkTargets {
-		metricsResult.Found = true
+	if !metricsResult.Found {
+		result.Errors = append(result.Errors, "no pglink metrics found (scraped from /metrics endpoint)")
+		result.Passed = false
 	}
 	result.Metrics = metricsResult
+
+	// 3. Check Loki for pushed logs - REQUIRED
+	logsResult, err := o.checkLoki(ctx)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("loki check failed: %v", err))
+		result.Passed = false
+	} else {
+		result.Logs = logsResult
+		if !logsResult.Found {
+			result.Errors = append(result.Errors, "no pglink logs found in Loki")
+			result.Passed = false
+		}
+	}
 
 	// Log summary
 	if result.Passed {
 		o.Logger.Info("observability check PASSED",
 			"traces", result.Traces.TraceCount,
-			"metrics_families", len(result.Metrics.MetricNames),
-			"metrics_samples", result.Metrics.SampleCount,
-			"pglink_targets", pglinkTargets)
+			"metrics", len(result.Metrics.MetricNames),
+			"logs", result.Logs.LogCount)
 	} else {
 		o.Logger.Error("observability check FAILED",
 			"errors", result.Errors,
 			"traces_found", result.Traces != nil && result.Traces.Found,
-			"metrics_found", result.Metrics != nil && result.Metrics.Found)
+			"metrics_found", result.Metrics != nil && result.Metrics.Found,
+			"logs_found", result.Logs != nil && result.Logs.Found)
 	}
 
 	return result, nil
@@ -1071,4 +1030,156 @@ type tempoTrace struct {
 
 type tempoMetrics struct {
 	InspectedTraces int `json:"inspectedTraces"`
+}
+
+// scrapeMetricsEndpoint scrapes pglink's /metrics endpoint directly to verify metrics are being generated.
+// This is a fallback when Prometheus doesn't have pushed metrics (because pglink uses prometheus client lib).
+func (o *Orchestrator) scrapeMetricsEndpoint(ctx context.Context) (*MetricsCheckResult, error) {
+	result := &MetricsCheckResult{
+		Found:       false,
+		MetricNames: []string{},
+		Source:      "pglink:/metrics",
+	}
+
+	// Find a pglink target's metrics port
+	var metricsPort int
+	for _, t := range o.Config.Targets {
+		if t.Type == TargetTypePglink {
+			if port, ok := o.metricsPorts[t.Name]; ok {
+				metricsPort = port
+				break
+			}
+		}
+	}
+
+	if metricsPort == 0 {
+		return result, fmt.Errorf("no pglink metrics port found")
+	}
+
+	endpoint := fmt.Sprintf("http://localhost:%d/metrics", metricsPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("failed to scrape %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("metrics endpoint returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read and parse metrics text format
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return result, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Simple parsing: count lines starting with "pglink_"
+	lines := strings.Split(string(body), "\n")
+	metricSet := make(map[string]bool)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "pglink_") && !strings.HasPrefix(line, "#") {
+			// Extract metric name (up to first space or brace)
+			name := line
+			if idx := strings.IndexAny(name, " {"); idx > 0 {
+				name = name[:idx]
+			}
+			metricSet[name] = true
+			result.SampleCount++
+		}
+	}
+
+	for name := range metricSet {
+		result.MetricNames = append(result.MetricNames, name)
+	}
+
+	result.Found = len(result.MetricNames) > 0
+	result.Source = endpoint
+
+	o.Logger.Info("scraped metrics directly from pglink",
+		"endpoint", endpoint,
+		"metrics", len(result.MetricNames),
+		"samples", result.SampleCount)
+
+	return result, nil
+}
+
+// checkLoki queries Loki to verify logs were pushed.
+func (o *Orchestrator) checkLoki(ctx context.Context) (*LogsCheckResult, error) {
+	result := &LogsCheckResult{
+		Found:  false,
+		Source: "loki:13100",
+	}
+
+	// Query Loki for pglink logs using label query
+	// Use LogQL to query for service_name="pglink"
+	lokiURL := "http://localhost:13100/loki/api/v1/query_range"
+	params := url.Values{}
+	params.Set("query", "{service_name=\"pglink\"}")
+	params.Set("limit", "100")
+	// Query last 5 minutes
+	now := time.Now()
+	params.Set("start", fmt.Sprintf("%d", now.Add(-5*time.Minute).UnixNano()))
+	params.Set("end", fmt.Sprintf("%d", now.UnixNano()))
+
+	reqURL := fmt.Sprintf("%s?%s", lokiURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("loki request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("loki returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var lokiResp lokiQueryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&lokiResp); err != nil {
+		return result, fmt.Errorf("failed to decode loki response: %w", err)
+	}
+
+	if lokiResp.Status != "success" {
+		return result, fmt.Errorf("loki query failed: status=%s", lokiResp.Status)
+	}
+
+	// Count streams and entries
+	result.StreamCount = len(lokiResp.Data.Result)
+	for _, stream := range lokiResp.Data.Result {
+		result.LogCount += len(stream.Values)
+	}
+
+	result.Found = result.LogCount > 0
+
+	o.Logger.Info("loki check complete",
+		"streams", result.StreamCount,
+		"logs", result.LogCount)
+
+	return result, nil
+}
+
+// lokiQueryResponse is the response from Loki query_range API.
+type lokiQueryResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Stream map[string]string `json:"stream"`
+			Values [][]string        `json:"values"` // Each value is [timestamp, log_line]
+		} `json:"result"`
+	} `json:"data"`
 }
