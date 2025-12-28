@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# Update docker-compose.yaml images to their latest versions
+#
+# Usage: bin/update-docker-compose [--dry-run]
+#
+# For each service in docker-compose.yaml, fetches the latest stable version
+# from Docker Hub or GitHub releases and updates the file.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+COMPOSE_FILE="$PROJECT_DIR/docker-compose.yaml"
+
+DRY_RUN=false
+if [[ "${1:-}" == "--dry-run" ]]; then
+    DRY_RUN=true
+fi
+
+# Check for required tools
+for cmd in curl jq; do
+    if ! command -v "$cmd" &> /dev/null; then
+        echo "Error: $cmd is required but not installed" >&2
+        exit 1
+    fi
+done
+
+# Get latest release tag from GitHub
+# Usage: get_github_latest <owner/repo> [strip_v_prefix]
+get_github_latest() {
+    local repo="$1"
+    local strip_v="${2:-false}"
+
+    local response
+    response=$(curl -s "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null)
+
+    if [[ -z "$response" ]] || ! echo "$response" | jq -e '.tag_name' > /dev/null 2>&1; then
+        echo "" >&2
+        return 1
+    fi
+
+    local tag
+    tag=$(echo "$response" | jq -r '.tag_name')
+
+    # Optionally strip 'v' prefix
+    if [[ "$strip_v" == "true" && "$tag" == v* ]]; then
+        tag="${tag:1}"
+    fi
+
+    echo "$tag"
+}
+
+# Fetch tags from Docker Hub
+# Usage: fetch_dockerhub_tags <image> [name_filter]
+fetch_dockerhub_tags() {
+    local image="$1"
+    local name_filter="${2:-}"
+    local api_url
+
+    if [[ "$image" == */* ]]; then
+        api_url="https://hub.docker.com/v2/repositories/${image}/tags"
+    else
+        api_url="https://hub.docker.com/v2/repositories/library/${image}/tags"
+    fi
+
+    local query="page_size=100"
+    if [[ -n "$name_filter" ]]; then
+        query="${query}&name=${name_filter}"
+    fi
+
+    curl -s "${api_url}?${query}" 2>/dev/null | jq -r '.results[].name' 2>/dev/null
+}
+
+# Get latest postgres major version (e.g., "18")
+get_latest_postgres() {
+    # Fetch tags and find the highest major version
+    local tags
+    tags=$(fetch_dockerhub_tags "postgres")
+    echo "$tags" | grep -E '^[0-9]+$' | sort -rn | head -1
+}
+
+# Get latest prometheus version from GitHub (e.g., "v3.8.1")
+get_latest_prometheus() {
+    get_github_latest "prometheus/prometheus"
+}
+
+# Get latest grafana/tempo version from GitHub (e.g., "2.9.0")
+get_latest_tempo() {
+    get_github_latest "grafana/tempo" "true"
+}
+
+# Get latest grafana/loki version from GitHub (e.g., "3.6.3")
+get_latest_loki() {
+    local tag
+    tag=$(get_github_latest "grafana/loki" "true")
+    # Loki uses tags like "v3.6.3" - strip the v
+    echo "$tag"
+}
+
+# Get latest grafana/grafana version from GitHub (e.g., "12.3.1")
+get_latest_grafana() {
+    local tag
+    tag=$(get_github_latest "grafana/grafana" "true")
+    echo "$tag"
+}
+
+# Update image tag in docker-compose.yaml
+# Usage: update_image <old_image> <new_image>
+update_image() {
+    local old_image="$1"
+    local new_image="$2"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  Would update: $old_image -> $new_image"
+    else
+        # Use sed to replace the image line
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "s|image: ${old_image}|image: ${new_image}|g" "$COMPOSE_FILE"
+        else
+            sed -i "s|image: ${old_image}|image: ${new_image}|g" "$COMPOSE_FILE"
+        fi
+        echo "  Updated: $old_image -> $new_image"
+    fi
+}
+
+echo "Checking for updates to docker-compose.yaml images..."
+echo ""
+
+# Track if any updates were made
+updates_made=false
+
+# PostgreSQL
+echo "postgres:"
+current=$(grep -m1 'image: postgres:' "$COMPOSE_FILE" | sed 's/.*image: postgres://' | tr -d ' ')
+latest=$(get_latest_postgres)
+if [[ -n "$latest" ]]; then
+    if [[ "$current" != "$latest" ]]; then
+        update_image "postgres:${current}" "postgres:${latest}"
+        updates_made=true
+    else
+        echo "  Already at latest: postgres:${current}"
+    fi
+else
+    echo "  Error: Could not determine latest version" >&2
+fi
+
+# Prometheus
+echo "prom/prometheus:"
+current=$(grep 'image: prom/prometheus:' "$COMPOSE_FILE" | sed 's/.*image: prom\/prometheus://' | tr -d ' ')
+latest=$(get_latest_prometheus)
+if [[ -n "$latest" ]]; then
+    if [[ "$current" != "$latest" ]]; then
+        update_image "prom/prometheus:${current}" "prom/prometheus:${latest}"
+        updates_made=true
+    else
+        echo "  Already at latest: prom/prometheus:${current}"
+    fi
+else
+    echo "  Error: Could not determine latest version" >&2
+fi
+
+# Tempo
+echo "grafana/tempo:"
+current=$(grep 'image: grafana/tempo:' "$COMPOSE_FILE" | sed 's/.*image: grafana\/tempo://' | tr -d ' ')
+latest=$(get_latest_tempo)
+if [[ -n "$latest" ]]; then
+    if [[ "$current" != "$latest" ]]; then
+        update_image "grafana/tempo:${current}" "grafana/tempo:${latest}"
+        updates_made=true
+    else
+        echo "  Already at latest: grafana/tempo:${current}"
+    fi
+else
+    echo "  Error: Could not determine latest version" >&2
+fi
+
+# Loki
+echo "grafana/loki:"
+current=$(grep 'image: grafana/loki:' "$COMPOSE_FILE" | sed 's/.*image: grafana\/loki://' | tr -d ' ')
+latest=$(get_latest_loki)
+if [[ -n "$latest" ]]; then
+    if [[ "$current" != "$latest" ]]; then
+        update_image "grafana/loki:${current}" "grafana/loki:${latest}"
+        updates_made=true
+    else
+        echo "  Already at latest: grafana/loki:${current}"
+    fi
+else
+    echo "  Error: Could not determine latest version" >&2
+fi
+
+# Grafana
+echo "grafana/grafana:"
+current=$(grep 'image: grafana/grafana:' "$COMPOSE_FILE" | sed 's/.*image: grafana\/grafana://' | tr -d ' ')
+latest=$(get_latest_grafana)
+if [[ -n "$latest" ]]; then
+    if [[ "$current" != "$latest" ]]; then
+        update_image "grafana/grafana:${current}" "grafana/grafana:${latest}"
+        updates_made=true
+    else
+        echo "  Already at latest: grafana/grafana:${current}"
+    fi
+else
+    echo "  Error: Could not determine latest version" >&2
+fi
+
+echo ""
+if [[ "$updates_made" == "true" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "Run without --dry-run to apply updates."
+    else
+        echo "Updates applied to $COMPOSE_FILE"
+        echo "Run 'docker compose pull && docker compose up -d' to apply changes."
+    fi
+else
+    echo "All images are already at their latest versions."
+fi

@@ -1,7 +1,7 @@
 services:
   # PostgreSQL instances for testing
   alpha:
-    image: postgres:16
+    image: postgres:18
     container_name: pglink-alpha
     environment:
       POSTGRES_USER: postgres
@@ -18,7 +18,7 @@ services:
       retries: 5
 
   bravo:
-    image: postgres:16
+    image: postgres:18
     container_name: pglink-bravo
     environment:
       POSTGRES_USER: postgres
@@ -35,7 +35,7 @@ services:
       retries: 5
 
   charlie:
-    image: postgres:16
+    image: postgres:18
     container_name: pglink-charlie
     environment:
       POSTGRES_USER: postgres
@@ -53,7 +53,7 @@ services:
 
   # Observability stack (ports +10000 to avoid conflicts)
   prometheus:
-    image: prom/prometheus:v2.48.0
+    image: prom/prometheus:v3.8.1
     container_name: pglink-prometheus
     ports:
       - "19090:9090"
@@ -69,7 +69,7 @@ services:
       - observability
 
   tempo:
-    image: grafana/tempo:2.3.1
+    image: grafana/tempo:2.9.0
     container_name: pglink-tempo
     ports:
       - "13200:3200"   # Query API
@@ -83,7 +83,7 @@ services:
       - observability
 
   loki:
-    image: grafana/loki:3.0.0
+    image: grafana/loki:3.6.3
     container_name: pglink-loki
     ports:
       - "13100:3100"   # Loki API
@@ -95,7 +95,7 @@ services:
       - observability
 
   grafana:
-    image: grafana/grafana:10.2.2
+    image: grafana/grafana:12.3.1
     container_name: pglink-grafana
     ports:
       - "13000:3000"
