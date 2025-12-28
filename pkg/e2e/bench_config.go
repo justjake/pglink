@@ -28,8 +28,9 @@ type BenchSuiteConfig struct {
 	Seed int64 // Random seed for workload generation (0 = time-based)
 
 	// Observability
-	Observable     bool // Enable observability integration
-	FlightRecorder bool // Enable flight recorder for pglink targets
+	Observable      bool // Enable observability integration
+	CheckObservable bool // Verify observability data was recorded after benchmark
+	FlightRecorder  bool // Enable flight recorder for pglink targets
 
 	// Pglink pool settings
 	PglinkPoolMaxConns int // Backend pool max connections (0 = use CPU setting)
@@ -196,20 +197,76 @@ type RunnerGitInfo struct {
 
 // BenchmarkResults is the top-level structure for results.json.
 type BenchmarkResults struct {
-	ExecutionID string           `json:"execution_id"`
-	Timestamp   time.Time        `json:"timestamp"`
-	Runner      RunnerGitInfo    `json:"runner"`
-	Config      BenchSuiteConfig `json:"config"`
-	Results     []TargetResult   `json:"results"`
+	ExecutionID        string                    `json:"execution_id"`
+	Timestamp          time.Time                 `json:"timestamp"`
+	Runner             RunnerGitInfo             `json:"runner"`
+	Config             BenchSuiteConfig          `json:"config"`
+	Results            []TargetResult            `json:"results"`
+	ObservabilityCheck *ObservabilityCheckResult `json:"observability_check,omitempty"`
 }
+
+// ObservabilityCheckResult contains results of observability verification.
+type ObservabilityCheckResult struct {
+	// Passed is true if all checks passed.
+	Passed bool `json:"passed"`
+	// Traces contains trace verification results.
+	Traces *TracesCheckResult `json:"traces,omitempty"`
+	// Metrics contains metrics verification results.
+	Metrics *MetricsCheckResult `json:"metrics,omitempty"`
+	// Logs contains log verification results.
+	Logs *LogsCheckResult `json:"logs,omitempty"`
+	// Errors contains any errors encountered during verification.
+	Errors []string `json:"errors,omitempty"`
+}
+
+// TracesCheckResult contains results from checking Tempo for traces.
+type TracesCheckResult struct {
+	// Found is true if traces were found.
+	Found bool `json:"found"`
+	// TraceCount is the number of traces found.
+	TraceCount int `json:"trace_count"`
+	// SpanCount is the total number of spans found.
+	SpanCount int `json:"span_count"`
+	// ServiceNames lists the service names found.
+	ServiceNames []string `json:"service_names,omitempty"`
+}
+
+// MetricsCheckResult contains results from checking metrics.
+type MetricsCheckResult struct {
+	// Found is true if metrics were found.
+	Found bool `json:"found"`
+	// MetricNames lists the pglink metrics found.
+	MetricNames []string `json:"metric_names,omitempty"`
+	// SampleCount is the number of metric samples found.
+	SampleCount int `json:"sample_count"`
+	// Source indicates where metrics were found (e.g., "prometheus:19090")
+	Source string `json:"source,omitempty"`
+}
+
+// LogsCheckResult contains results from checking Loki for logs.
+type LogsCheckResult struct {
+	// Found is true if logs were found.
+	Found bool `json:"found"`
+	// LogCount is the number of log entries found.
+	LogCount int `json:"log_count"`
+	// StreamCount is the number of log streams found.
+	StreamCount int `json:"stream_count"`
+	// Source indicates where logs were found (e.g., "loki:13100")
+	Source string `json:"source,omitempty"`
+}
+
+// ScrapedMetrics is an alias for MetricsCheckResult for backwards compatibility.
+// It holds metrics scraped directly from a pglink instance's /metrics endpoint.
+type ScrapedMetrics = MetricsCheckResult
 
 // TargetResult contains results for a single target.
 type TargetResult struct {
-	Target     string        `json:"target"`
-	Git        *GitMetadata  `json:"git,omitempty"`
-	BinaryPath string        `json:"binary_path,omitempty"`
-	Metrics    []BenchMetric `json:"metrics"`
-	Rounds     []RoundResult `json:"rounds"`
+	Target         string          `json:"target"`
+	Git            *GitMetadata    `json:"git,omitempty"`
+	BinaryPath     string          `json:"binary_path,omitempty"`
+	Metrics        []BenchMetric   `json:"metrics"`
+	Rounds         []RoundResult   `json:"rounds"`
+	ScrapedMetrics *ScrapedMetrics `json:"scraped_metrics,omitempty"`
 }
 
 // RoundResult contains results for a single round.

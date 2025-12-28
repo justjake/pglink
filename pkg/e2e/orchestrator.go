@@ -8,11 +8,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+
+	promapi "github.com/prometheus/client_golang/api"
+	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 
 	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/config/pgbouncer"
@@ -40,6 +46,7 @@ type Orchestrator struct {
 	outputDir        string
 	runnerGitInfo    *RunnerGitInfo
 	processes        map[string]*exec.Cmd // Running processes by target name
+	metricsPorts     map[string]int       // Metrics ports by target name (for observable mode)
 }
 
 // NewOrchestrator creates a new Orchestrator with the given configuration.
@@ -65,6 +72,7 @@ func NewOrchestrator(cfg BenchSuiteConfig, logger *slog.Logger) (*Orchestrator, 
 		currentWorktree:  currentWorktree,
 		portOffset:       portOffset,
 		processes:        make(map[string]*exec.Cmd),
+		metricsPorts:     make(map[string]int),
 	}, nil
 }
 
@@ -134,6 +142,16 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 		}
 	}
 
+	// Check observability if enabled
+	if o.Config.CheckObservable {
+		o.Logger.Info("checking observability data...")
+		checkResult, err := o.checkObservability(ctx, results)
+		if err != nil {
+			o.Logger.Error("observability check failed", "error", err)
+		}
+		results.ObservabilityCheck = checkResult
+	}
+
 	// Write results.json
 	if err := o.writeResults(results); err != nil {
 		o.Logger.Error("failed to write results", "error", err)
@@ -169,11 +187,12 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 	}
 
 	// Start target process (if not direct connection)
+	needsStop := false
 	if target.Type != TargetTypeDirect {
 		if err := o.startTargetProcess(ctx, &target); err != nil {
 			return nil, fmt.Errorf("failed to start %s: %w", target.Name, err)
 		}
-		defer o.stopTargetProcess(target.Name)
+		needsStop = true
 	}
 
 	// Build result structure
@@ -220,6 +239,10 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		runResult, err := o.Runner.Run(ctx, runCfg)
 		if err != nil {
 			o.Logger.Error("benchmark run failed", "target", target.Name, "round", round, "error", err)
+			// Send SIGUSR1 to dump ring buffer stats for debugging (pglink only)
+			if target.Type == TargetTypePglink {
+				o.signalTargetForDebugDump(target.Name)
+			}
 		}
 
 		roundResult := RoundResult{
@@ -243,6 +266,26 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		}
 
 		result.Rounds = append(result.Rounds, roundResult)
+	}
+
+	// Scrape metrics before stopping the target (if observable mode)
+	// Note: pglink uses prometheus client library for metrics, not OTEL metrics.
+	// Push metrics won't work until we migrate to OTEL. For now, scrape directly.
+	if needsStop && o.Config.Observable {
+		if scraped, err := o.scrapeMetricsEndpoint(ctx); err != nil {
+			o.Logger.Warn("failed to scrape metrics", "target", target.Name, "error", err)
+		} else {
+			result.ScrapedMetrics = scraped
+			o.Logger.Info("scraped metrics from target",
+				"target", target.Name,
+				"families", len(scraped.MetricNames),
+				"samples", scraped.SampleCount)
+		}
+	}
+
+	// Stop target process
+	if needsStop {
+		o.stopTargetProcess(target.Name)
 	}
 
 	return result, nil
@@ -298,6 +341,33 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 		args = append(args, "-message-buffer-bytes", target.MessageBufferBytes)
 	}
 
+	// Add observability flags if enabled
+	if o.Config.Observable {
+		// Enable OTEL with minimal mode (no SQL parsing)
+		args = append(args, "-otel", "minimal")
+		// Send traces to Tempo via OTLP gRPC (port 14317 mapped to container's 4317)
+		args = append(args, "-otel-endpoint", "localhost:14317")
+		// Add execution_id and target as OTEL attributes for filtering
+		args = append(args, "-otel-attrs", fmt.Sprintf("bench.execution_id=%s,bench.target=%s", o.executionID, target.Name))
+
+		// Push metrics to Prometheus via OTLP (port 19090)
+		args = append(args, "-prometheus-push", "localhost:19090")
+		args = append(args, "-prometheus-attrs", fmt.Sprintf("bench_execution_id=%s,bench_target=%s", o.executionID, target.Name))
+
+		// Push logs to Loki via OTLP (port 13100)
+		args = append(args, "-otel-logs")
+		args = append(args, "-otel-logs-endpoint", "localhost:13100")
+
+		// Also enable metrics scraping endpoint for backup verification
+		metricsPort := target.Port + 3000 // e.g., 16432 -> 19432
+		if target.MetricsPort != 0 {
+			metricsPort = target.MetricsPort
+		}
+		args = append(args, "-prometheus-listen", fmt.Sprintf(":%d", metricsPort))
+		// Record metrics port for backup scraping
+		o.metricsPorts[target.Name] = metricsPort
+	}
+
 	args = append(args, target.ExtraArgs...)
 
 	// Create log file - use "default" suffix for the default "pglink" target
@@ -318,6 +388,10 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 	env := os.Environ()
 	if target.GOMAXPROCS > 0 {
 		env = append(env, fmt.Sprintf("GOMAXPROCS=%d", target.GOMAXPROCS))
+	}
+	// For observability, enable insecure mode for local OTLP connection
+	if o.Config.Observable {
+		env = append(env, "OTEL_EXPORTER_OTLP_INSECURE=true")
 	}
 	env = append(env, target.ExtraEnv...)
 	cmd.Env = env
@@ -451,7 +525,28 @@ func (o *Orchestrator) startPgbouncer(ctx context.Context, target *TargetConfig)
 	return nil
 }
 
-// stopTargetProcess stops a running target process.
+// signalTargetForDebugDump sends SIGUSR1 to a running target process to trigger
+// ring buffer stats dump and flight recorder snapshot. This is useful for debugging
+// when a benchmark encounters an error.
+func (o *Orchestrator) signalTargetForDebugDump(name string) {
+	cmd, ok := o.processes[name]
+	if !ok || cmd.Process == nil {
+		return
+	}
+
+	o.Logger.Info("sending SIGUSR1 for debug dump", "target", name, "pid", cmd.Process.Pid)
+
+	if err := cmd.Process.Signal(syscall.SIGUSR1); err != nil {
+		o.Logger.Warn("failed to send SIGUSR1", "target", name, "error", err)
+		return
+	}
+
+	// Give the process a moment to dump state
+	time.Sleep(500 * time.Millisecond)
+}
+
+// stopTargetProcess stops a running target process gracefully.
+// It sends SIGTERM first to allow trace flushing, then SIGKILL if needed.
 func (o *Orchestrator) stopTargetProcess(name string) {
 	cmd, ok := o.processes[name]
 	if !ok {
@@ -460,9 +555,33 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 
 	o.Logger.Info("stopping process", "target", name)
 
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill() // Ignore error - process may have already exited
-		_ = cmd.Wait()         // Ignore error - we just want to clean up
+	if cmd.Process == nil {
+		delete(o.processes, name)
+		return
+	}
+
+	// Send SIGTERM for graceful shutdown (allows trace flushing)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		o.Logger.Warn("failed to send SIGTERM", "target", name, "error", err)
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		delete(o.processes, name)
+		return
+	}
+
+	// Wait for graceful shutdown with timeout
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-done:
+		o.Logger.Info("process stopped gracefully", "target", name)
+	case <-time.After(5 * time.Second):
+		o.Logger.Warn("process did not stop gracefully, sending SIGKILL", "target", name)
+		_ = cmd.Process.Kill()
+		<-done // Wait for kill to complete
 	}
 
 	delete(o.processes, name)
@@ -470,8 +589,15 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 
 // ensureDockerContainers ensures required docker containers are running.
 func (o *Orchestrator) ensureDockerContainers(ctx context.Context) error {
-	// Run docker compose up from main worktree
-	cmd := exec.CommandContext(ctx, "docker", "compose", "up", "-d")
+	// Build docker compose command
+	args := []string{"compose", "up", "-d"}
+
+	// Include observability profile if enabled
+	if o.Config.Observable {
+		args = []string{"compose", "--profile", "observability", "up", "-d", "--wait"}
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Dir = o.mainWorktreePath
 
 	output, err := cmd.CombinedOutput()
@@ -479,7 +605,9 @@ func (o *Orchestrator) ensureDockerContainers(ctx context.Context) error {
 		return fmt.Errorf("docker compose up failed: %w\nOutput: %s", err, string(output))
 	}
 
-	o.Logger.Info("docker containers running", "output", string(output))
+	o.Logger.Info("docker containers running",
+		"observable", o.Config.Observable,
+		"output", string(output))
 	return nil
 }
 
@@ -752,4 +880,361 @@ func describeOutputFile(filename string) string {
 	default:
 		return "Benchmark artifact"
 	}
+}
+
+// checkObservability verifies that observability data was recorded to the stack.
+// This is a STRICT check - it fails if traces, metrics, or logs are missing.
+func (o *Orchestrator) checkObservability(ctx context.Context, results *BenchmarkResults) (*ObservabilityCheckResult, error) {
+	result := &ObservabilityCheckResult{
+		Passed: true,
+		Errors: []string{},
+	}
+
+	// Give time for all data to be pushed/flushed
+	o.Logger.Info("waiting for observability data to flush...")
+	time.Sleep(5 * time.Second)
+
+	// 1. Check Tempo for traces - REQUIRED
+	tracesResult, err := o.checkTempo(ctx)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("tempo check failed: %v", err))
+		result.Passed = false
+	} else {
+		result.Traces = tracesResult
+		if !tracesResult.Found {
+			result.Errors = append(result.Errors, "no traces found in Tempo for service 'pglink'")
+			result.Passed = false
+		}
+	}
+
+	// 2. Check Prometheus for pushed metrics - REQUIRED
+	metricsResult, err := o.checkPrometheus(ctx)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("prometheus check failed: %v", err))
+		result.Passed = false
+	} else {
+		result.Metrics = metricsResult
+		if !metricsResult.Found {
+			result.Errors = append(result.Errors, "no pglink metrics found in Prometheus")
+			result.Passed = false
+		}
+	}
+
+	// 3. Check Loki for pushed logs - REQUIRED
+	logsResult, err := o.checkLoki(ctx)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("loki check failed: %v", err))
+		result.Passed = false
+	} else {
+		result.Logs = logsResult
+		if !logsResult.Found {
+			result.Errors = append(result.Errors, "no pglink logs found in Loki")
+			result.Passed = false
+		}
+	}
+
+	// Log summary
+	if result.Passed {
+		o.Logger.Info("observability check PASSED",
+			"traces", result.Traces.TraceCount,
+			"metrics", len(result.Metrics.MetricNames),
+			"logs", result.Logs.LogCount)
+	} else {
+		o.Logger.Error("observability check FAILED",
+			"errors", result.Errors,
+			"traces_found", result.Traces != nil && result.Traces.Found,
+			"metrics_found", result.Metrics != nil && result.Metrics.Found,
+			"logs_found", result.Logs != nil && result.Logs.Found)
+	}
+
+	return result, nil
+}
+
+// checkTempo queries Tempo to verify traces were recorded.
+func (o *Orchestrator) checkTempo(ctx context.Context) (*TracesCheckResult, error) {
+	result := &TracesCheckResult{
+		Found:        false,
+		ServiceNames: []string{},
+	}
+
+	// Tempo search API: GET /api/search?service.name=pglink&limit=10
+	tempoURL := "http://localhost:13200/api/search"
+	params := url.Values{}
+	params.Set("service.name", "pglink")
+	params.Set("limit", "100")
+
+	reqURL := fmt.Sprintf("%s?%s", tempoURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("tempo request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("tempo returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var searchResp tempoSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return result, fmt.Errorf("failed to decode tempo response: %w", err)
+	}
+
+	result.TraceCount = len(searchResp.Traces)
+
+	// Collect service names from traces
+	serviceSet := make(map[string]bool)
+	for _, trace := range searchResp.Traces {
+		if trace.RootServiceName != "" {
+			serviceSet[trace.RootServiceName] = true
+		}
+	}
+
+	for svc := range serviceSet {
+		result.ServiceNames = append(result.ServiceNames, svc)
+	}
+
+	// Use inspectedTraces as an approximation for total spans if available
+	if searchResp.Metrics != nil {
+		result.SpanCount = searchResp.Metrics.InspectedTraces
+	}
+
+	result.Found = result.TraceCount > 0
+
+	o.Logger.Info("tempo check complete",
+		"traces", result.TraceCount,
+		"inspected", result.SpanCount,
+		"services", result.ServiceNames)
+
+	return result, nil
+}
+
+// tempoSearchResponse is the response structure from Tempo's search API.
+type tempoSearchResponse struct {
+	Traces  []tempoTrace  `json:"traces"`
+	Metrics *tempoMetrics `json:"metrics,omitempty"`
+}
+
+type tempoTrace struct {
+	TraceID         string `json:"traceID"`
+	RootServiceName string `json:"rootServiceName"`
+	RootTraceName   string `json:"rootTraceName"`
+	DurationMs      int    `json:"durationMs,omitempty"`
+}
+
+type tempoMetrics struct {
+	InspectedTraces int `json:"inspectedTraces"`
+}
+
+// checkPrometheus queries Prometheus to verify metrics were pushed via remote write.
+// Uses the official prometheus client library for robust API interaction.
+func (o *Orchestrator) checkPrometheus(ctx context.Context) (*MetricsCheckResult, error) {
+	result := &MetricsCheckResult{
+		Found:       false,
+		MetricNames: []string{},
+		Source:      "prometheus:19090",
+	}
+
+	// Create Prometheus API client
+	promClient, err := promapi.NewClient(promapi.Config{
+		Address: "http://localhost:19090",
+	})
+	if err != nil {
+		return result, fmt.Errorf("failed to create prometheus client: %w", err)
+	}
+	api := promv1.NewAPI(promClient)
+
+	// Query for series with our execution_id label
+	// Use a wide time range since execution_id is unique
+	matches := []string{fmt.Sprintf("{bench_execution_id=\"%s\"}", o.executionID)}
+	startTime := time.Now().Add(-1 * time.Hour)
+	endTime := time.Now()
+
+	series, warnings, err := api.Series(ctx, matches, startTime, endTime)
+	if err != nil {
+		return result, fmt.Errorf("prometheus series query failed: %w", err)
+	}
+	if len(warnings) > 0 {
+		o.Logger.Warn("prometheus query warnings", "warnings", warnings)
+	}
+
+	// Collect unique metric names from returned label sets
+	metricSet := make(map[string]bool)
+	for _, labelSet := range series {
+		if name, ok := labelSet["__name__"]; ok {
+			metricSet[string(name)] = true
+		}
+	}
+
+	for name := range metricSet {
+		result.MetricNames = append(result.MetricNames, name)
+	}
+
+	result.SampleCount = len(series)
+	result.Found = len(result.MetricNames) > 0
+
+	o.Logger.Info("prometheus check complete",
+		"metrics", len(result.MetricNames),
+		"samples", result.SampleCount)
+
+	return result, nil
+}
+
+// scrapeMetricsEndpoint scrapes pglink's /metrics endpoint directly to verify metrics are being generated.
+// This is a fallback when Prometheus doesn't have pushed metrics (because pglink uses prometheus client lib).
+func (o *Orchestrator) scrapeMetricsEndpoint(ctx context.Context) (*MetricsCheckResult, error) {
+	result := &MetricsCheckResult{
+		Found:       false,
+		MetricNames: []string{},
+		Source:      "pglink:/metrics",
+	}
+
+	// Find a pglink target's metrics port
+	var metricsPort int
+	for _, t := range o.Config.Targets {
+		if t.Type == TargetTypePglink {
+			if port, ok := o.metricsPorts[t.Name]; ok {
+				metricsPort = port
+				break
+			}
+		}
+	}
+
+	if metricsPort == 0 {
+		return result, fmt.Errorf("no pglink metrics port found")
+	}
+
+	endpoint := fmt.Sprintf("http://localhost:%d/metrics", metricsPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("failed to scrape %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("metrics endpoint returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read and parse metrics text format
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return result, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Simple parsing: count lines starting with "pglink_"
+	lines := strings.Split(string(body), "\n")
+	metricSet := make(map[string]bool)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "pglink_") && !strings.HasPrefix(line, "#") {
+			// Extract metric name (up to first space or brace)
+			name := line
+			if idx := strings.IndexAny(name, " {"); idx > 0 {
+				name = name[:idx]
+			}
+			metricSet[name] = true
+			result.SampleCount++
+		}
+	}
+
+	for name := range metricSet {
+		result.MetricNames = append(result.MetricNames, name)
+	}
+
+	result.Found = len(result.MetricNames) > 0
+	result.Source = endpoint
+
+	o.Logger.Info("scraped metrics directly from pglink",
+		"endpoint", endpoint,
+		"metrics", len(result.MetricNames),
+		"samples", result.SampleCount)
+
+	return result, nil
+}
+
+// checkLoki queries Loki to verify logs were pushed.
+func (o *Orchestrator) checkLoki(ctx context.Context) (*LogsCheckResult, error) {
+	result := &LogsCheckResult{
+		Found:  false,
+		Source: "loki:13100",
+	}
+
+	// Query Loki for pglink logs using label query
+	// Use LogQL to query for service_name="pglink"
+	lokiURL := "http://localhost:13100/loki/api/v1/query_range"
+	params := url.Values{}
+	params.Set("query", "{service_name=\"pglink\"}")
+	params.Set("limit", "100")
+	// Query last 5 minutes
+	now := time.Now()
+	params.Set("start", fmt.Sprintf("%d", now.Add(-5*time.Minute).UnixNano()))
+	params.Set("end", fmt.Sprintf("%d", now.UnixNano()))
+
+	reqURL := fmt.Sprintf("%s?%s", lokiURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("loki request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("loki returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var lokiResp lokiQueryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&lokiResp); err != nil {
+		return result, fmt.Errorf("failed to decode loki response: %w", err)
+	}
+
+	if lokiResp.Status != "success" {
+		return result, fmt.Errorf("loki query failed: status=%s", lokiResp.Status)
+	}
+
+	// Count streams and entries
+	result.StreamCount = len(lokiResp.Data.Result)
+	for _, stream := range lokiResp.Data.Result {
+		result.LogCount += len(stream.Values)
+	}
+
+	result.Found = result.LogCount > 0
+
+	o.Logger.Info("loki check complete",
+		"streams", result.StreamCount,
+		"logs", result.LogCount)
+
+	return result, nil
+}
+
+// lokiQueryResponse is the response from Loki query_range API.
+type lokiQueryResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Stream map[string]string `json:"stream"`
+			Values [][]string        `json:"values"` // Each value is [timestamp, log_line]
+		} `json:"result"`
+	} `json:"data"`
 }

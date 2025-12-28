@@ -68,13 +68,9 @@ func NewTracerProvider(ctx context.Context, cfg *config.OpenTelemetryConfig) (*T
 	}
 
 	// Create resource with service name and extra attributes
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(semconv.SchemaURL, attrs...),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create resource: %w", err)
-	}
+	// Note: We create our own resource rather than merging with resource.Default()
+	// to avoid schema URL conflicts between semconv versions
+	res := resource.NewWithAttributes(semconv.SchemaURL, attrs...)
 
 	// Create sampler based on sampling rate
 	var sampler sdktrace.Sampler

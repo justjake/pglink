@@ -144,6 +144,15 @@ func (s *Service) acceptLoop(ln net.Listener) error {
 			continue
 		}
 
+		// Disable Nagle's algorithm for low-latency message delivery.
+		// This is critical for proxying PostgreSQL traffic, as small messages
+		// like CopyInResponse must be sent immediately without TCP batching.
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			if err := tcpConn.SetNoDelay(true); err != nil {
+				s.logger.Warn("failed to set TCP_NODELAY", "error", err)
+			}
+		}
+
 		// Check connection limit before processing
 		currentConns := s.activeConns.Load()
 		if currentConns >= maxConns {
@@ -268,6 +277,32 @@ func (s *Service) unregisterForCancel(sess *Session) {
 	s.cancelRegistryMu.Lock()
 	defer s.cancelRegistryMu.Unlock()
 	delete(s.cancelRegistry, sess.state.PID)
+}
+
+// DumpRingBufferStats logs ring buffer statistics for all active sessions.
+// This is called when SIGUSR1 is received, before taking a flight recorder snapshot.
+func (s *Service) DumpRingBufferStats() {
+	s.logger.Info("ring buffer stats dump (SIGUSR1)")
+
+	s.sessionsMu.Lock()
+	sessions := make([]*Session, 0, len(s.sessions))
+	for sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.sessionsMu.Unlock()
+
+	for _, sess := range sessions {
+		sess.LogRingBufferStats(s.logger)
+	}
+}
+
+// SetupFlightRecorderCallback registers the ring buffer dump callback with the flight recorder.
+// This should be called after creating the flight recorder service.
+func (s *Service) SetupFlightRecorderCallback(fr *observability.FlightRecorderService) {
+	if fr == nil {
+		return
+	}
+	fr.SetSignalCallback(s.DumpRingBufferStats)
 }
 
 // handleCancelRequest processes a cancel request from a client.

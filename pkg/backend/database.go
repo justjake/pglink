@@ -44,7 +44,7 @@ func NewDatabase(ctx context.Context, cfg *config.DatabaseConfig, secrets *confi
 		config:         cfg,
 		secrets:        secrets,
 		tracingEnabled: tracingEnabled,
-		stmtCache:      pgwire.NewPreparedStatementCache(cfg.Backend.GetPreparedStatementCacheSize()),
+		stmtCache:      pgwire.NewPreparedStatementCache(cfg.GetPreparedStatementCacheSize()),
 	}
 	db.logger = logger.With("backend", db.Name())
 

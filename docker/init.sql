@@ -17,6 +17,10 @@ GRANT CONNECT ON DATABASE dos TO app, admin, developer;
 CREATE SCHEMA schema1;
 CREATE SCHEMA schema2;
 
+-- Grant CREATE permission for benchmark table creation
+GRANT CREATE ON SCHEMA schema1 TO admin;
+GRANT CREATE ON SCHEMA schema2 TO admin;
+
 CREATE TABLE schema1.example (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -49,6 +53,10 @@ INSERT INTO schema2.example (name, value) VALUES ('alpha-uno-s2', 10), ('beta-un
 
 CREATE SCHEMA schema1;
 CREATE SCHEMA schema2;
+
+-- Grant CREATE permission for benchmark table creation
+GRANT CREATE ON SCHEMA schema1 TO admin;
+GRANT CREATE ON SCHEMA schema2 TO admin;
 
 CREATE TABLE schema1.example (
     id SERIAL PRIMARY KEY,

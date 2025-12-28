@@ -150,15 +150,19 @@ main() {
                 -duration 10s \
                 -warmup 3s \
                 -rounds 2 \
-                -cpu 100
+                -cpu 100 \
+                -pgbouncer
             ;;
         smoke)
-            log "Mode: smoke (duration=2s, warmup=1s, rounds=1)"
+            log "Mode: smoke (duration=2s, warmup=1s, rounds=1, observable)"
             ./out/bench \
                 -duration 2s \
                 -warmup 1s \
                 -rounds 1 \
-                -cpu 50
+                -cpu 50 \
+                -observable \
+                -check-observable \
+                -pgbouncer
             ;;
         quick)
             log "Mode: quick (duration=5s, warmup=2s, rounds=1)"
@@ -166,7 +170,8 @@ main() {
                 -duration 5s \
                 -warmup 2s \
                 -rounds 1 \
-                -cpu 100
+                -cpu 100 \
+                -pgbouncer
             ;;
         *)
             error "Unknown mode: $mode"

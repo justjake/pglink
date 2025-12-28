@@ -100,27 +100,45 @@ func BenchmarkCopyIn(b *testing.B) {
 					b.Fatal(op.Failed(err))
 				}
 
+				// Use a transaction to ensure all statements run on the same backend.
+				// This is required for transaction-mode poolers (pglink, pgbouncer) where
+				// temp tables are session-scoped but statements outside a tx can run on
+				// different backend sessions.
+				tx, err := conn.Begin(op.Ctx)
+				if err != nil {
+					conn.Release()
+					b.Fatal(op.Failed(fmt.Errorf("begin: %w", err)))
+				}
+
 				// Create temp table (needed for loop mode where each iteration has a new connection)
 				// Uses IF NOT EXISTS so it's a no-op for worker mode's persistent connection
-				_, err = conn.Exec(op.Ctx, `CREATE TEMP TABLE IF NOT EXISTS bench_copy_temp (id int, name text, value int)`)
+				_, err = tx.Exec(op.Ctx, `CREATE TEMP TABLE IF NOT EXISTS bench_copy_temp (id int, name text, value int)`)
 				if err != nil {
+					tx.Rollback(op.Ctx)
 					conn.Release()
 					b.Fatal(op.Failed(fmt.Errorf("create table: %w", err)))
 				}
 
 				// Truncate table (clear any data from previous iteration)
-				_, err = conn.Exec(op.Ctx, `TRUNCATE bench_copy_temp`)
+				_, err = tx.Exec(op.Ctx, `TRUNCATE bench_copy_temp`)
 				if err != nil {
+					tx.Rollback(op.Ctx)
 					conn.Release()
 					b.Fatal(op.Failed(fmt.Errorf("truncate: %w", err)))
 				}
 
 				// COPY data
 				reader := &repeatableReader{data: testData}
-				_, err = conn.PgConn().CopyFrom(op.Ctx, reader, `COPY bench_copy_temp (id, name, value) FROM STDIN`)
+				_, err = tx.Conn().PgConn().CopyFrom(op.Ctx, reader, `COPY bench_copy_temp (id, name, value) FROM STDIN`)
 				if err != nil {
+					tx.Rollback(op.Ctx)
 					conn.Release()
 					b.Fatal(op.Failed(err))
+				}
+
+				if err := tx.Commit(op.Ctx); err != nil {
+					conn.Release()
+					b.Fatal(op.Failed(fmt.Errorf("commit: %w", err)))
 				}
 
 				conn.Release()

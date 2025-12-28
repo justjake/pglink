@@ -243,16 +243,17 @@ func buildINI(cfg *config.Config, listenPort int, databases string, opts Options
 	// Collect pool settings from all databases (use max values since pgbouncer is global)
 	// We use the config package's public API to get parsed/defaulted values
 	var (
-		maxPoolConns      int32
-		minPoolSize       int32
-		queryWaitTimeout  time.Duration
-		serverConnTimeout time.Duration
-		serverLifetime    time.Duration
-		serverIdleTimeout time.Duration
-		hasMinPoolSize    bool
-		hasConnTimeout    bool
-		hasLifetime       bool
-		hasIdleTimeout    bool
+		maxPoolConns          int32
+		minPoolSize           int32
+		maxPreparedStatements int
+		queryWaitTimeout      time.Duration
+		serverConnTimeout     time.Duration
+		serverLifetime        time.Duration
+		serverIdleTimeout     time.Duration
+		hasMinPoolSize        bool
+		hasConnTimeout        bool
+		hasLifetime           bool
+		hasIdleTimeout        bool
 	)
 	for _, dbCfg := range cfg.Databases {
 		if dbCfg.Backend.PoolMaxConns > maxPoolConns {
@@ -271,6 +272,12 @@ func buildINI(cfg *config.Config, listenPort int, databases string, opts Options
 		timeout := dbCfg.PoolAcquireTimeout()
 		if timeout > queryWaitTimeout {
 			queryWaitTimeout = timeout
+		}
+
+		// Get prepared statement cache size
+		stmtCacheSize := dbCfg.GetPreparedStatementCacheSize()
+		if stmtCacheSize > maxPreparedStatements {
+			maxPreparedStatements = stmtCacheSize
 		}
 
 		// Use BackendConfig.PoolConfig() to get parsed pool durations
@@ -329,8 +336,9 @@ func buildINI(cfg *config.Config, listenPort int, databases string, opts Options
 		b.WriteString(fmt.Sprintf("server_idle_timeout = %.0f\n", serverIdleTimeout.Seconds()))
 	}
 
-	// Disable server-side prepared statements for transaction pooling compatibility
-	b.WriteString("max_prepared_statements = 0\n")
+	// Enable server-side prepared statement tracking for transaction pooling compatibility.
+	// This must match pglink's prepared_statement_cache_size to ensure equivalent behavior.
+	b.WriteString(fmt.Sprintf("max_prepared_statements = %d\n", maxPreparedStatements))
 
 	// TLS configuration
 	if opts.TLS != nil {

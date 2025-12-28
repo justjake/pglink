@@ -39,6 +39,7 @@ func main() {
 	cases := flag.String("cases", "", "comma-separated list of cases to run (empty = all)")
 	simpleQuery := flag.Bool("simple-query", false, "use simple query protocol instead of extended")
 	observable := flag.Bool("observable", false, "enable observability integration (traces/metrics)")
+	checkObservable := flag.Bool("check-observable", false, "verify traces and metrics were recorded (defaults to -observable value)")
 	seed := flag.Int64("seed", 0, "random seed for workload generation (0 = time-based)")
 	pglinkPoolMaxConns := flag.Int("pglink-pool-max-conns", 0, "backend pool max connections for pglink (0 = use -cpu value)")
 
@@ -59,7 +60,22 @@ func main() {
 	includeDirect := flag.Bool("direct", true, "include direct postgres benchmark")
 	includePgbouncer := flag.Bool("pgbouncer", false, "include pgbouncer benchmark")
 
+	// Debug flags
+	debug := flag.Bool("debug", false, "enable debug logging for spawned pglink processes")
+
 	flag.Parse()
+
+	// Default -check-observable to -observable if not explicitly set
+	checkObservableExplicit := false
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, "-check-observable") {
+			checkObservableExplicit = true
+			break
+		}
+	}
+	if !checkObservableExplicit && *observable {
+		*checkObservable = true
+	}
 
 	// Set up logger
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -76,6 +92,7 @@ func main() {
 		OutputDir:          *outputDir,
 		SimpleQueryMode:    *simpleQuery,
 		Observable:         *observable,
+		CheckObservable:    *checkObservable,
 		Seed:               *seed,
 		PglinkPoolMaxConns: *pglinkPoolMaxConns,
 	}
@@ -117,6 +134,9 @@ func main() {
 	if *aEnv != "" {
 		aTarget.ExtraEnv = strings.Split(*aEnv, ",")
 	}
+	if *debug {
+		aTarget.ExtraArgs = append(aTarget.ExtraArgs, "-log-level", "debug")
+	}
 	cfg.Targets = append(cfg.Targets, aTarget)
 
 	// Add pglink B variant if specified
@@ -135,6 +155,9 @@ func main() {
 		}
 		if *bEnv != "" {
 			bTarget.ExtraEnv = strings.Split(*bEnv, ",")
+		}
+		if *debug {
+			bTarget.ExtraArgs = append(bTarget.ExtraArgs, "-log-level", "debug")
 		}
 		cfg.Targets = append(cfg.Targets, bTarget)
 

@@ -4,8 +4,27 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"slices"
 )
+
+// CursorStats contains a snapshot of cursor statistics for observability.
+type CursorStats struct {
+	StartIdx int64 `json:"start_idx"` // Start of current batch
+	EndIdx   int64 `json:"end_idx"`   // End of current batch (exclusive)
+	MsgIdx   int64 `json:"msg_idx"`   // Current message being processed
+	Pending  int64 `json:"pending"`   // Messages remaining in batch (EndIdx - MsgIdx - 1)
+}
+
+// LogValue implements slog.LogValuer for structured logging.
+func (s CursorStats) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Int64("start_idx", s.StartIdx),
+		slog.Int64("end_idx", s.EndIdx),
+		slog.Int64("msg_idx", s.MsgIdx),
+		slog.Int64("pending", s.Pending),
+	)
+}
 
 // Cursor provides zero-allocation iteration over messages in a RingBuffer.
 // It implements RawMessageSource for the current message, enabling lazy parsing.
@@ -159,6 +178,20 @@ func (c *Cursor) AsServer() (ServerMessage, error) {
 
 func (c *Cursor) String() string {
 	return fmt.Sprintf("Cursor{%s %s}", &c.RingRange, &c.RingMsg)
+}
+
+// Stats returns a snapshot of cursor statistics for observability.
+func (c *Cursor) Stats() CursorStats {
+	pending := c.endIdx - c.msgIdx - 1
+	if pending < 0 {
+		pending = 0
+	}
+	return CursorStats{
+		StartIdx: c.startIdx,
+		EndIdx:   c.endIdx,
+		MsgIdx:   c.msgIdx,
+		Pending:  pending,
+	}
 }
 
 // Compile-time check that Cursor implements RawMessageSource

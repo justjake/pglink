@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -31,9 +32,84 @@ func BenchmarkMixed(b *testing.B) {
 			seed = 12345 // Default seed for consistency
 		}
 
+		// Unique table name per benchmark run to avoid collisions between worktrees
+		// Use schema1 where admin has CREATE permission
+		tableName := fmt.Sprintf("schema1.bench_mixed_%s", benchConfig.RunID)
+
+		// === SETUP (runs once before parallel workers) ===
+		// Use admin connection for DDL (app user doesn't have CREATE permission)
+		setupCtx, setupCancel := context.WithTimeout(benchCtx, 30*time.Second)
+		adminConn, err := connectAsAdmin(setupCtx)
+		if err != nil {
+			setupCancel()
+			b.Fatalf("failed to connect as admin: %v", err)
+		}
+
+		// Create and seed in a transaction
+		tx, err := adminConn.Begin(setupCtx)
+		if err != nil {
+			adminConn.Close(setupCtx)
+			setupCancel()
+			b.Fatalf("begin setup: %v", err)
+		}
+
+		_, err = tx.Exec(setupCtx, fmt.Sprintf(`
+			CREATE TABLE %s (
+				id SERIAL PRIMARY KEY,
+				name TEXT NOT NULL,
+				value INT NOT NULL,
+				created_at TIMESTAMP DEFAULT NOW()
+			)
+		`, tableName))
+		if err != nil {
+			tx.Rollback(setupCtx)
+			adminConn.Close(setupCtx)
+			setupCancel()
+			b.Fatalf("create table: %v", err)
+		}
+
+		// Grant permissions to app user
+		_, err = tx.Exec(setupCtx, fmt.Sprintf(`GRANT ALL ON %s TO app`, tableName))
+		if err != nil {
+			tx.Rollback(setupCtx)
+			adminConn.Close(setupCtx)
+			setupCancel()
+			b.Fatalf("grant permissions: %v", err)
+		}
+
+		// Grant sequence permissions for INSERT
+		_, err = tx.Exec(setupCtx, fmt.Sprintf(`GRANT USAGE, SELECT ON SEQUENCE %s_id_seq TO app`, tableName))
+		if err != nil {
+			tx.Rollback(setupCtx)
+			adminConn.Close(setupCtx)
+			setupCancel()
+			b.Fatalf("grant sequence permissions: %v", err)
+		}
+
+		for i := 0; i < 100; i++ {
+			_, err = tx.Exec(setupCtx,
+				fmt.Sprintf(`INSERT INTO %s (name, value) VALUES ($1, $2)`, tableName),
+				fmt.Sprintf("item_%d", i), i*10)
+			if err != nil {
+				tx.Rollback(setupCtx)
+				adminConn.Close(setupCtx)
+				setupCancel()
+				b.Fatalf("seed row %d: %v", i, err)
+			}
+		}
+
+		if err := tx.Commit(setupCtx); err != nil {
+			adminConn.Close(setupCtx)
+			setupCancel()
+			b.Fatalf("commit setup: %v", err)
+		}
+		adminConn.Close(setupCtx)
+		setupCancel()
+
 		// Track total queries across all workers
 		var totalQueries atomic.Int64
 
+		// === PARALLEL BENCHMARK ===
 		b.RunParallel(func(pb *testing.PB) {
 			// Each worker gets its own pool
 			pool, err := GetTestPool(b, benchCtx)
@@ -58,64 +134,35 @@ func BenchmarkMixed(b *testing.B) {
 					b.Fatal(op.Failed(err))
 				}
 
-				// Track queries for this iteration
-				var queries int64
-
-				// Ensure temp table exists (needed for loop mode with fresh connections)
-				_, err = conn.Exec(op.Ctx, `
-					CREATE TEMP TABLE IF NOT EXISTS bench_mixed (
-						id SERIAL PRIMARY KEY,
-						name TEXT NOT NULL,
-						value INT NOT NULL,
-						created_at TIMESTAMP DEFAULT NOW()
-					)
-				`)
-				if err != nil {
-					conn.Release()
-					b.Fatal(op.Failed(fmt.Errorf("create table: %w", err)))
-				}
-				queries++
-
-				// Ensure we have seed data (for fresh connections in loop mode)
-				var count int
-				if err := conn.QueryRow(op.Ctx, `SELECT COUNT(*) FROM bench_mixed`).Scan(&count); err != nil {
-					conn.Release()
-					b.Fatal(op.Failed(fmt.Errorf("count: %w", err)))
-				}
-				queries++
-
-				if count < 100 {
-					for j := count; j < 100; j++ {
-						_, err = conn.Exec(op.Ctx, `INSERT INTO bench_mixed (name, value) VALUES ($1, $2)`,
-							fmt.Sprintf("item_%d", j), j*10)
-						if err != nil {
-							conn.Release()
-							b.Fatal(op.Failed(fmt.Errorf("seed: %w", err)))
-						}
-						queries++
-					}
-				}
-
-				taskQueries, err := runMixedTask(op.Ctx, conn.Conn, rng)
+				taskQueries, err := runMixedTask(op.Ctx, conn.Conn, tableName, rng)
 				if err != nil {
 					conn.Release()
 					b.Fatal(op.Failed(err))
 				}
-				queries += taskQueries
 
 				conn.Release()
 				op.Done()
-				totalQueries.Add(queries)
+				totalQueries.Add(taskQueries)
 				i++
 			}
 		})
 		ReportThroughputWithQueries(b, totalQueries.Load())
+
+		// === CLEANUP (runs once after parallel workers) ===
+		// Use admin connection for DDL
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupConn, err := connectAsAdmin(cleanupCtx)
+		if err == nil {
+			_, _ = cleanupConn.Exec(cleanupCtx, fmt.Sprintf(`DROP TABLE IF EXISTS %s`, tableName))
+			cleanupConn.Close(cleanupCtx)
+		}
+		cleanupCancel()
 	})
 }
 
 // runMixedTask runs a single mixed workload task.
 // Returns the number of queries executed.
-func runMixedTask(ctx context.Context, conn *pgx.Conn, rng *rand.Rand) (int64, error) {
+func runMixedTask(ctx context.Context, conn *pgx.Conn, tableName string, rng *rand.Rand) (int64, error) {
 	var queries int64
 
 	// Mix of operations: 40% SELECT, 20% INSERT, 20% UPDATE, 10% DELETE, 10% Transaction
@@ -124,7 +171,7 @@ func runMixedTask(ctx context.Context, conn *pgx.Conn, rng *rand.Rand) (int64, e
 
 		switch {
 		case op < 40: // SELECT (1 query)
-			rows, err := conn.Query(ctx, `SELECT id, name, value FROM bench_mixed WHERE id = $1`, rng.Intn(100)+1)
+			rows, err := conn.Query(ctx, fmt.Sprintf(`SELECT id, name, value FROM %s WHERE id = $1`, tableName), rng.Intn(100)+1)
 			if err != nil {
 				return queries, fmt.Errorf("select: %w", err)
 			}
@@ -143,7 +190,7 @@ func runMixedTask(ctx context.Context, conn *pgx.Conn, rng *rand.Rand) (int64, e
 			queries++
 
 		case op < 60: // INSERT (1 query)
-			_, err := conn.Exec(ctx, `INSERT INTO bench_mixed (name, value) VALUES ($1, $2)`,
+			_, err := conn.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (name, value) VALUES ($1, $2)`, tableName),
 				fmt.Sprintf("new_%d", rng.Int()), rng.Intn(1000))
 			if err != nil {
 				return queries, fmt.Errorf("insert: %w", err)
@@ -151,7 +198,7 @@ func runMixedTask(ctx context.Context, conn *pgx.Conn, rng *rand.Rand) (int64, e
 			queries++
 
 		case op < 80: // UPDATE (1 query)
-			_, err := conn.Exec(ctx, `UPDATE bench_mixed SET value = $1 WHERE id = $2`,
+			_, err := conn.Exec(ctx, fmt.Sprintf(`UPDATE %s SET value = $1 WHERE id = $2`, tableName),
 				rng.Intn(1000), rng.Intn(100)+1)
 			if err != nil {
 				return queries, fmt.Errorf("update: %w", err)
@@ -159,7 +206,7 @@ func runMixedTask(ctx context.Context, conn *pgx.Conn, rng *rand.Rand) (int64, e
 			queries++
 
 		case op < 90: // DELETE (1 query)
-			_, _ = conn.Exec(ctx, `DELETE FROM bench_mixed WHERE id > 100 AND id = $1`, rng.Intn(1000)+100)
+			_, _ = conn.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE id > 100 AND id = $1`, tableName), rng.Intn(1000)+100)
 			queries++
 
 		default: // Transaction (4 queries: BEGIN, INSERT, UPDATE, COMMIT)
@@ -169,7 +216,7 @@ func runMixedTask(ctx context.Context, conn *pgx.Conn, rng *rand.Rand) (int64, e
 			}
 			queries++ // BEGIN
 
-			_, err = tx.Exec(ctx, `INSERT INTO bench_mixed (name, value) VALUES ($1, $2)`,
+			_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (name, value) VALUES ($1, $2)`, tableName),
 				fmt.Sprintf("tx_%d", rng.Int()), rng.Intn(1000))
 			if err != nil {
 				tx.Rollback(ctx)
@@ -178,7 +225,7 @@ func runMixedTask(ctx context.Context, conn *pgx.Conn, rng *rand.Rand) (int64, e
 			}
 			queries++ // INSERT
 
-			_, err = tx.Exec(ctx, `UPDATE bench_mixed SET value = value + 1 WHERE id = $1`, rng.Intn(100)+1)
+			_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET value = value + 1 WHERE id = $1`, tableName), rng.Intn(100)+1)
 			if err != nil {
 				tx.Rollback(ctx)
 				queries++ // ROLLBACK

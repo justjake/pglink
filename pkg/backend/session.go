@@ -159,9 +159,8 @@ func (s *Session) RingBuffer() *pgwire.RingBuffer {
 	return s.ringBuffer
 }
 
-func (s *Session) WriteRange(r *pgwire.RingRange) error {
-	_, err := io.Copy(s.Conn.Conn(), r.NewReader())
-	return err
+func (s *Session) WriteRange(r *pgwire.RingRange) (int64, error) {
+	return io.Copy(s.Conn.Conn(), r.NewReader())
 }
 
 func (s *Session) WriteMsg(msg pgproto3.FrontendMessage) error {

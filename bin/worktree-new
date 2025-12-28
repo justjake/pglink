@@ -45,6 +45,14 @@ git worktree add "$dir" "$branch"
 # Create worktree-specific build directory
 mkdir -p "$dir/out"
 
+# Initialize submodules in the new worktree
+echo "Initializing submodules..."
+git -C "$dir" submodule update --init 2>/dev/null || true
+
+# Populate vendor directory (needed for code navigation/reference)
+echo "Populating vendor directory..."
+(cd "$dir" && ./bin/go mod vendor 2>/dev/null) || true
+
 # Handle plan file
 plan_path=""
 if [[ -n "${2:-}" ]]; then
