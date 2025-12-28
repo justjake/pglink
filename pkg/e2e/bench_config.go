@@ -229,7 +229,7 @@ type TracesCheckResult struct {
 	ServiceNames []string `json:"service_names,omitempty"`
 }
 
-// MetricsCheckResult contains results from checking Prometheus for metrics.
+// MetricsCheckResult contains results from checking metrics.
 type MetricsCheckResult struct {
 	// Found is true if metrics were found.
 	Found bool `json:"found"`
@@ -237,15 +237,32 @@ type MetricsCheckResult struct {
 	MetricNames []string `json:"metric_names,omitempty"`
 	// SampleCount is the number of metric samples found.
 	SampleCount int `json:"sample_count"`
+	// ScrapedFrom indicates where metrics were scraped from (e.g., "pglink:19510/metrics")
+	ScrapedFrom string `json:"scraped_from,omitempty"`
+}
+
+// ScrapedMetrics holds metrics scraped directly from a pglink instance.
+type ScrapedMetrics struct {
+	// Target is the target name these metrics came from.
+	Target string `json:"target"`
+	// Endpoint is the endpoint that was scraped (e.g., "http://localhost:19510/metrics").
+	Endpoint string `json:"endpoint"`
+	// MetricFamilies is the count of metric families found.
+	MetricFamilies int `json:"metric_families"`
+	// SampleCount is the total number of samples.
+	SampleCount int `json:"sample_count"`
+	// MetricNames lists the metric names found.
+	MetricNames []string `json:"metric_names"`
 }
 
 // TargetResult contains results for a single target.
 type TargetResult struct {
-	Target     string        `json:"target"`
-	Git        *GitMetadata  `json:"git,omitempty"`
-	BinaryPath string        `json:"binary_path,omitempty"`
-	Metrics    []BenchMetric `json:"metrics"`
-	Rounds     []RoundResult `json:"rounds"`
+	Target         string          `json:"target"`
+	Git            *GitMetadata    `json:"git,omitempty"`
+	BinaryPath     string          `json:"binary_path,omitempty"`
+	Metrics        []BenchMetric   `json:"metrics"`
+	Rounds         []RoundResult   `json:"rounds"`
+	ScrapedMetrics *ScrapedMetrics `json:"scraped_metrics,omitempty"`
 }
 
 // RoundResult contains results for a single round.

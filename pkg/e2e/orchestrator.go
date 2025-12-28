@@ -14,7 +14,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/prometheus/common/expfmt"
 
 	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/config/pgbouncer"
@@ -42,6 +45,7 @@ type Orchestrator struct {
 	outputDir        string
 	runnerGitInfo    *RunnerGitInfo
 	processes        map[string]*exec.Cmd // Running processes by target name
+	metricsPorts     map[string]int       // Metrics ports by target name (for observable mode)
 }
 
 // NewOrchestrator creates a new Orchestrator with the given configuration.
@@ -67,6 +71,7 @@ func NewOrchestrator(cfg BenchSuiteConfig, logger *slog.Logger) (*Orchestrator, 
 		currentWorktree:  currentWorktree,
 		portOffset:       portOffset,
 		processes:        make(map[string]*exec.Cmd),
+		metricsPorts:     make(map[string]int),
 	}, nil
 }
 
@@ -139,7 +144,7 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 	// Check observability if enabled
 	if o.Config.CheckObservable {
 		o.Logger.Info("checking observability data...")
-		checkResult, err := o.checkObservability(ctx)
+		checkResult, err := o.checkObservability(ctx, results)
 		if err != nil {
 			o.Logger.Error("observability check failed", "error", err)
 		}
@@ -181,11 +186,12 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 	}
 
 	// Start target process (if not direct connection)
+	needsStop := false
 	if target.Type != TargetTypeDirect {
 		if err := o.startTargetProcess(ctx, &target); err != nil {
 			return nil, fmt.Errorf("failed to start %s: %w", target.Name, err)
 		}
-		defer o.stopTargetProcess(target.Name)
+		needsStop = true
 	}
 
 	// Build result structure
@@ -257,6 +263,24 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		result.Rounds = append(result.Rounds, roundResult)
 	}
 
+	// Scrape metrics before stopping the target (if observable mode)
+	if needsStop && o.Config.Observable {
+		if scraped, err := o.scrapeTargetMetrics(ctx, target.Name); err != nil {
+			o.Logger.Warn("failed to scrape metrics", "target", target.Name, "error", err)
+		} else {
+			result.ScrapedMetrics = scraped
+			o.Logger.Info("scraped metrics from target",
+				"target", target.Name,
+				"families", scraped.MetricFamilies,
+				"samples", scraped.SampleCount)
+		}
+	}
+
+	// Stop target process
+	if needsStop {
+		o.stopTargetProcess(target.Name)
+	}
+
 	return result, nil
 }
 
@@ -325,6 +349,8 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 		}
 		args = append(args, "-prometheus-listen", fmt.Sprintf(":%d", metricsPort))
 		args = append(args, "-prometheus-attrs", fmt.Sprintf("bench_execution_id=%s,bench_target=%s", o.executionID, target.Name))
+		// Record metrics port for scraping later
+		o.metricsPorts[target.Name] = metricsPort
 	}
 
 	args = append(args, target.ExtraArgs...)
@@ -484,7 +510,8 @@ func (o *Orchestrator) startPgbouncer(ctx context.Context, target *TargetConfig)
 	return nil
 }
 
-// stopTargetProcess stops a running target process.
+// stopTargetProcess stops a running target process gracefully.
+// It sends SIGTERM first to allow trace flushing, then SIGKILL if needed.
 func (o *Orchestrator) stopTargetProcess(name string) {
 	cmd, ok := o.processes[name]
 	if !ok {
@@ -493,12 +520,92 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 
 	o.Logger.Info("stopping process", "target", name)
 
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill() // Ignore error - process may have already exited
-		_ = cmd.Wait()         // Ignore error - we just want to clean up
+	if cmd.Process == nil {
+		delete(o.processes, name)
+		return
+	}
+
+	// Send SIGTERM for graceful shutdown (allows trace flushing)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		o.Logger.Warn("failed to send SIGTERM", "target", name, "error", err)
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		delete(o.processes, name)
+		return
+	}
+
+	// Wait for graceful shutdown with timeout
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-done:
+		o.Logger.Info("process stopped gracefully", "target", name)
+	case <-time.After(5 * time.Second):
+		o.Logger.Warn("process did not stop gracefully, sending SIGKILL", "target", name)
+		_ = cmd.Process.Kill()
+		<-done // Wait for kill to complete
 	}
 
 	delete(o.processes, name)
+}
+
+// scrapeTargetMetrics scrapes Prometheus metrics from a running pglink target.
+func (o *Orchestrator) scrapeTargetMetrics(ctx context.Context, targetName string) (*ScrapedMetrics, error) {
+	port, ok := o.metricsPorts[targetName]
+	if !ok {
+		return nil, fmt.Errorf("no metrics port recorded for target %s", targetName)
+	}
+
+	endpoint := fmt.Sprintf("http://localhost:%d/metrics", port)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scrape %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("metrics endpoint returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse metrics using prometheus expfmt
+	parser := expfmt.TextParser{}
+	metricFamilies, err := parser.TextToMetricFamilies(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse metrics: %w", err)
+	}
+
+	result := &ScrapedMetrics{
+		Target:      targetName,
+		Endpoint:    endpoint,
+		MetricNames: []string{},
+	}
+
+	// Count metric families and samples, collect names
+	for name, mf := range metricFamilies {
+		// Only count pglink_ metrics
+		if strings.HasPrefix(name, "pglink_") {
+			result.MetricFamilies++
+			result.MetricNames = append(result.MetricNames, name)
+			result.SampleCount += len(mf.GetMetric())
+		}
+	}
+
+	if result.MetricFamilies == 0 {
+		return nil, fmt.Errorf("no pglink_ metrics found at %s", endpoint)
+	}
+
+	return result, nil
 }
 
 // ensureDockerContainers ensures required docker containers are running.
@@ -797,46 +904,87 @@ func describeOutputFile(filename string) string {
 }
 
 // checkObservability verifies that observability data was recorded to the stack.
-func (o *Orchestrator) checkObservability(ctx context.Context) (*ObservabilityCheckResult, error) {
+// This is a STRICT check - it fails if traces or metrics are missing.
+func (o *Orchestrator) checkObservability(ctx context.Context, results *BenchmarkResults) (*ObservabilityCheckResult, error) {
 	result := &ObservabilityCheckResult{
 		Passed: true,
 		Errors: []string{},
 	}
 
-	// Give the observability stack a moment to flush data
+	// Give Tempo a moment to flush traces
 	time.Sleep(2 * time.Second)
 
-	// Check Tempo for traces
+	// 1. Check Tempo for traces - REQUIRED
 	tracesResult, err := o.checkTempo(ctx)
 	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("tempo check error: %v", err))
+		result.Errors = append(result.Errors, fmt.Sprintf("tempo check failed: %v", err))
 		result.Passed = false
 	} else {
 		result.Traces = tracesResult
 		if !tracesResult.Found {
+			result.Errors = append(result.Errors, "no traces found in Tempo for service 'pglink'")
 			result.Passed = false
 		}
 	}
 
-	// Check Prometheus for metrics
-	metricsResult, err := o.checkPrometheus(ctx)
-	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("prometheus check error: %v", err))
-		result.Passed = false
-	} else {
-		result.Metrics = metricsResult
-		if !metricsResult.Found {
-			result.Passed = false
+	// 2. Check scraped metrics from each pglink target - REQUIRED
+	// We scraped these directly from pglink before killing it, so they should exist
+	metricsResult := &MetricsCheckResult{
+		Found:       false,
+		MetricNames: []string{},
+	}
+
+	pglinkTargets := 0
+	targetsWithMetrics := 0
+	for _, tr := range results.Results {
+		// Find pglink targets
+		for _, cfg := range o.Config.Targets {
+			if cfg.Name == tr.Target && cfg.Type == TargetTypePglink {
+				pglinkTargets++
+				if tr.ScrapedMetrics != nil && tr.ScrapedMetrics.MetricFamilies > 0 {
+					targetsWithMetrics++
+					metricsResult.SampleCount += tr.ScrapedMetrics.SampleCount
+					metricsResult.ScrapedFrom = tr.ScrapedMetrics.Endpoint
+					// Collect unique metric names
+					for _, name := range tr.ScrapedMetrics.MetricNames {
+						found := false
+						for _, existing := range metricsResult.MetricNames {
+							if existing == name {
+								found = true
+								break
+							}
+						}
+						if !found {
+							metricsResult.MetricNames = append(metricsResult.MetricNames, name)
+						}
+					}
+				} else {
+					result.Errors = append(result.Errors,
+						fmt.Sprintf("target %q: no metrics scraped", tr.Target))
+					result.Passed = false
+				}
+				break
+			}
 		}
 	}
 
+	if pglinkTargets > 0 && targetsWithMetrics == pglinkTargets {
+		metricsResult.Found = true
+	}
+	result.Metrics = metricsResult
+
+	// Log summary
 	if result.Passed {
-		o.Logger.Info("observability check passed",
+		o.Logger.Info("observability check PASSED",
 			"traces", result.Traces.TraceCount,
-			"spans", result.Traces.SpanCount,
-			"metrics", len(result.Metrics.MetricNames))
+			"metrics_families", len(result.Metrics.MetricNames),
+			"metrics_samples", result.Metrics.SampleCount,
+			"pglink_targets", pglinkTargets)
 	} else {
-		o.Logger.Warn("observability check failed", "errors", result.Errors)
+		o.Logger.Error("observability check FAILED",
+			"errors", result.Errors,
+			"traces_found", result.Traces != nil && result.Traces.Found,
+			"metrics_found", result.Metrics != nil && result.Metrics.Found)
 	}
 
 	return result, nil
@@ -881,12 +1029,9 @@ func (o *Orchestrator) checkTempo(ctx context.Context) (*TracesCheckResult, erro
 
 	result.TraceCount = len(searchResp.Traces)
 
-	// Count spans and collect service names
+	// Collect service names from traces
 	serviceSet := make(map[string]bool)
 	for _, trace := range searchResp.Traces {
-		if len(trace.SpanSets) > 0 {
-			result.SpanCount += trace.SpanSets[0].Spans
-		}
 		if trace.RootServiceName != "" {
 			serviceSet[trace.RootServiceName] = true
 		}
@@ -896,11 +1041,16 @@ func (o *Orchestrator) checkTempo(ctx context.Context) (*TracesCheckResult, erro
 		result.ServiceNames = append(result.ServiceNames, svc)
 	}
 
+	// Use inspectedTraces as an approximation for total spans if available
+	if searchResp.Metrics != nil {
+		result.SpanCount = searchResp.Metrics.InspectedTraces
+	}
+
 	result.Found = result.TraceCount > 0
 
 	o.Logger.Info("tempo check complete",
 		"traces", result.TraceCount,
-		"spans", result.SpanCount,
+		"inspected", result.SpanCount,
 		"services", result.ServiceNames)
 
 	return result, nil
@@ -908,92 +1058,17 @@ func (o *Orchestrator) checkTempo(ctx context.Context) (*TracesCheckResult, erro
 
 // tempoSearchResponse is the response structure from Tempo's search API.
 type tempoSearchResponse struct {
-	Traces []tempoTrace `json:"traces"`
+	Traces  []tempoTrace  `json:"traces"`
+	Metrics *tempoMetrics `json:"metrics,omitempty"`
 }
 
 type tempoTrace struct {
-	TraceID         string         `json:"traceID"`
-	RootServiceName string         `json:"rootServiceName"`
-	RootTraceName   string         `json:"rootTraceName"`
-	SpanSets        []tempoSpanSet `json:"spanSets"`
+	TraceID         string `json:"traceID"`
+	RootServiceName string `json:"rootServiceName"`
+	RootTraceName   string `json:"rootTraceName"`
+	DurationMs      int    `json:"durationMs,omitempty"`
 }
 
-type tempoSpanSet struct {
-	Spans int `json:"spans"`
-}
-
-// checkPrometheus queries Prometheus to verify metrics were recorded.
-func (o *Orchestrator) checkPrometheus(ctx context.Context) (*MetricsCheckResult, error) {
-	result := &MetricsCheckResult{
-		Found:       false,
-		MetricNames: []string{},
-	}
-
-	// Query for any pglink metrics
-	promURL := "http://localhost:19090/api/v1/query"
-	// Use a regex to match all pglink_ metrics
-	params := url.Values{}
-	params.Set("query", "{__name__=~\"pglink_.*\"}")
-
-	reqURL := fmt.Sprintf("%s?%s", promURL, params.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return result, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return result, fmt.Errorf("prometheus request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return result, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var queryResp prometheusQueryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&queryResp); err != nil {
-		return result, fmt.Errorf("failed to decode prometheus response: %w", err)
-	}
-
-	if queryResp.Status != "success" {
-		return result, fmt.Errorf("prometheus query failed: %s", queryResp.Error)
-	}
-
-	// Collect metric names
-	metricSet := make(map[string]bool)
-	for _, sample := range queryResp.Data.Result {
-		if name, ok := sample.Metric["__name__"]; ok {
-			metricSet[name] = true
-		}
-	}
-
-	for name := range metricSet {
-		result.MetricNames = append(result.MetricNames, name)
-	}
-
-	result.SampleCount = len(queryResp.Data.Result)
-	result.Found = result.SampleCount > 0
-
-	o.Logger.Info("prometheus check complete",
-		"metrics", len(result.MetricNames),
-		"samples", result.SampleCount)
-
-	return result, nil
-}
-
-// prometheusQueryResponse is the response structure from Prometheus's query API.
-type prometheusQueryResponse struct {
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
-	Data   struct {
-		ResultType string `json:"resultType"`
-		Result     []struct {
-			Metric map[string]string `json:"metric"`
-			Value  []interface{}     `json:"value"`
-		} `json:"result"`
-	} `json:"data"`
+type tempoMetrics struct {
+	InspectedTraces int `json:"inspectedTraces"`
 }
