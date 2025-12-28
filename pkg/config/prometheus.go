@@ -26,6 +26,12 @@ type PrometheusConfig struct {
 	// Useful for tagging metrics with bench_id, git info, target, etc.
 	// Example: {"bench_id": "abc123", "git_sha": "d2169b0", "target": "pglink"}
 	ExtraLabels map[string]string `json:"extra_labels,omitzero"`
+
+	// PgbouncerExporterMetricNames controls the metric name prefix.
+	// When false (default), metrics use "pglink_" prefix (e.g., pglink_stats_queries_total).
+	// When true, metrics use "pgbouncer_" prefix (e.g., pgbouncer_stats_queries_total)
+	// for drop-in compatibility with existing pgbouncer_exporter dashboards.
+	PgbouncerExporterMetricNames bool `json:"pgbouncer_exporter_metric_names,omitzero"`
 }
 
 // PrometheusPushConfig configures push-based metrics export to Prometheus remote-write endpoint.
@@ -52,6 +58,15 @@ func (c *PrometheusConfig) GetPath() string {
 		return "/metrics"
 	}
 	return c.Path
+}
+
+// GetMetricPrefix returns the metric name prefix based on config.
+// Returns "pgbouncer" if PgbouncerExporterMetricNames is true, otherwise "pglink".
+func (c *PrometheusConfig) GetMetricPrefix() string {
+	if c != nil && c.PgbouncerExporterMetricNames {
+		return "pgbouncer"
+	}
+	return "pglink"
 }
 
 // Validate validates the Prometheus configuration.

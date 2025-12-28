@@ -25,6 +25,11 @@ import (
 //go:embed README.md
 var readmeMarkdown string
 
+// Version can be set via ldflags at build time:
+//
+//	go build -ldflags "-X main.version=1.0.0"
+var version = "dev"
+
 var bannerLines = []string{
 	`                  __ _         __   `,
 	`    ____   ____ _/ /(_)____   / /__ `,
@@ -496,7 +501,17 @@ func main() {
 	var metrics *observability.Metrics
 	var metricsServer *observability.MetricsServer
 	if cfg.Prometheus != nil {
-		metrics = observability.DefaultMetrics()
+		// Use configurable prefix: "pglink" by default, "pgbouncer" for compatibility mode
+		metricPrefix := cfg.Prometheus.GetMetricPrefix()
+		metrics = observability.NewMetrics(metricPrefix)
+
+		// Initialize static metrics (pgbouncer_exporter compatible)
+		metrics.InitVersionInfo(version)
+		metrics.SetDatabaseCount(len(cfg.Databases))
+		// Config limits: 0 means unlimited in pglink
+		metrics.SetConfigMaxClientConnections(0)
+		metrics.SetConfigMaxUserConnections(0)
+
 		metricsServer = observability.NewMetricsServer(cfg.Prometheus, logger)
 		if err := metricsServer.Start(); err != nil {
 			logger.Error("failed to start metrics server", "error", err)
@@ -504,7 +519,8 @@ func main() {
 		}
 		logger.Info("Prometheus metrics enabled",
 			"listen", cfg.Prometheus.GetListen(),
-			"path", cfg.Prometheus.GetPath())
+			"path", cfg.Prometheus.GetPath(),
+			"prefix", metricPrefix)
 		defer func() {
 			if err := metricsServer.Shutdown(context.Background()); err != nil {
 				logger.Error("failed to shutdown metrics server", "error", err)

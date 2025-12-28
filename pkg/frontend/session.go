@@ -277,6 +277,9 @@ func (s *Session) Run() {
 	// Start ring buffer reader now that startup is complete
 	s.frontend.StartRingBuffer(s.dbConfig.GetMessageBufferBytes())
 
+	// Configure metrics tracking for frontend (bytes sent to client)
+	s.frontend.SetMetrics(s.metrics, s.databaseName)
+
 	// Connect ring buffer debug logging to session logger.
 	// The ring buffer only logs when debugLog is non-nil (zero overhead check),
 	// and slog.Debug() returns early when log level is higher than debug.
@@ -374,7 +377,22 @@ func (s *Session) acquireBackend() (*slog.Logger, error) {
 	ctx, cancel := context.WithTimeout(s.ctx, s.dbConfig.PoolAcquireTimeout())
 	defer cancel()
 
+	// Track time waiting for backend (pgbouncer: wait_time)
+	acquireStart := time.Now()
 	be, err := s.database.Acquire(ctx, *s.userConfig)
+	acquireDuration := time.Since(acquireStart)
+
+	// Record metrics
+	if s.metrics != nil {
+		durationSeconds := acquireDuration.Seconds()
+		s.metrics.RecordBackendAcquire(s.databaseName, durationSeconds, err == nil)
+		if err == nil {
+			// pgbouncer-compatible: wait_time and server_assignment_count
+			s.metrics.AddClientWaitTime(s.databaseName, durationSeconds)
+			s.metrics.RecordServerAssignment(s.databaseName)
+		}
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to acquire backend: %w", err)
 	}
@@ -685,9 +703,20 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	}
 
 	handleFrontendBatch := func() (continueWithBackend bool, err error) {
-		s.logger.Debug("frontend batch", "start", frontendCursor.Start(), "end", frontendCursor.End())
-		toServer = frontendCursor.Slice(frontendCursor.Start(), frontendCursor.Start())
-		defer func() { toServer, err = flushRingRange(s.logger, "to-server", s.backend, toServer, err) }()
+		batchStart := frontendCursor.Start()
+		batchEnd := frontendCursor.End()
+		s.logger.Debug("frontend batch", "start", batchStart, "end", batchEnd)
+		toServer = frontendCursor.Slice(batchStart, batchStart)
+		defer func() {
+			toServer, err = flushRingRange(s.logger, "to-server", s.backend, toServer, err)
+			// pgbouncer-compatible: track bytes received from client (pgbouncer: client_bytes)
+			if s.metrics != nil && batchEnd > batchStart {
+				bytesReceived := frontendCursor.Slice(batchStart, batchEnd).Bytes()
+				if bytesReceived > 0 {
+					s.metrics.AddReceivedBytes(s.databaseName, bytesReceived)
+				}
+			}
+		}()
 
 		iteration := 0
 		for frontendCursor.NextMsg() {
@@ -894,6 +923,12 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.PreparedStatement,
 			})
+
+			// pgbouncer-compatible: count Bind messages
+			if s.metrics != nil {
+				s.metrics.RecordBind(s.databaseName)
+			}
+
 			return &pgproto3.Bind{
 				PreparedStatement:    serverName,
 				DestinationPortal:    s.clientToServerPortalName(parsed.DestinationPortal),
@@ -936,6 +971,11 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				s.metrics.RecordPreparedStatementCacheHit(s.databaseName)
 				s.metrics.RecordPreparedStatementParseSkipped(s.databaseName)
 
+				// pgbouncer-compatible: count client parse (no server parse since skipped)
+				if s.metrics != nil {
+					s.metrics.RecordClientParse(s.databaseName)
+				}
+
 				// Record span event for observability
 				if s.tracingEnabled {
 					_, span := otel.Tracer("pglink").Start(s.ctx, "pglink.stmt.parse_skipped",
@@ -966,6 +1006,13 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				Query:         parsed.Query,
 				QueryHash:     queryHash,
 			})
+
+			// pgbouncer-compatible: count client parse and server parse
+			if s.metrics != nil {
+				s.metrics.RecordClientParse(s.databaseName)
+				s.metrics.RecordServerParse(s.databaseName)
+			}
+
 			return &pgproto3.Parse{
 				Name:          serverName,
 				Query:         parsed.Query,
@@ -1528,6 +1575,13 @@ func (s *Session) setupFlowRecognizers() {
 				if s.metrics != nil {
 					duration := f.EndTime.Sub(f.StartTime).Seconds()
 					s.metrics.RecordQuery(s.databaseName, s.userName, pgwire.FlowTypeSimpleQuery.String(), duration, f.Err == nil)
+
+					// pgbouncer-compatible: query and transaction stats
+					// SimpleQuery is both a query and an implicit transaction (unless within explicit BEGIN/COMMIT)
+					s.metrics.RecordQueryPooled(s.databaseName)
+					s.metrics.AddQueryDuration(s.databaseName, duration)
+					s.metrics.RecordTransactionPooled(s.databaseName)
+					s.metrics.AddTransactionDuration(s.databaseName, duration)
 				}
 
 				// End span with attributes
@@ -1585,6 +1639,13 @@ func (s *Session) setupFlowRecognizers() {
 				if s.metrics != nil {
 					duration := f.EndTime.Sub(f.StartTime).Seconds()
 					s.metrics.RecordQuery(s.databaseName, s.userName, f.Type.String(), duration, f.Err == nil)
+
+					// pgbouncer-compatible: query and transaction stats
+					// ExtendedQuery cycle is both a query and an implicit transaction (unless within explicit BEGIN/COMMIT)
+					s.metrics.RecordQueryPooled(s.databaseName)
+					s.metrics.AddQueryDuration(s.databaseName, duration)
+					s.metrics.RecordTransactionPooled(s.databaseName)
+					s.metrics.AddTransactionDuration(s.databaseName, duration)
 				}
 
 				// End span with attributes

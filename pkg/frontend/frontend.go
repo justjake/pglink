@@ -8,6 +8,7 @@ import (
 	"net"
 
 	"github.com/jackc/pgx/v5/pgproto3"
+	"github.com/justjake/pglink/pkg/observability"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
@@ -20,6 +21,10 @@ type Frontend struct {
 	ringBuffer *pgwire.RingBuffer
 	cursor     *pgwire.Cursor
 	ctx        context.Context
+
+	// Metrics tracking (set via SetMetrics after session established)
+	metrics      *observability.Metrics
+	databaseName string
 }
 
 func NewFrontend(ctx context.Context, conn net.Conn) *Frontend {
@@ -83,8 +88,20 @@ func (f *Frontend) RingBuffer() *pgwire.RingBuffer {
 	return f.ringBuffer
 }
 
+// SetMetrics configures metrics tracking for this frontend connection.
+// Call after the session is established and database name is known.
+func (f *Frontend) SetMetrics(metrics *observability.Metrics, databaseName string) {
+	f.metrics = metrics
+	f.databaseName = databaseName
+}
+
 // WriteRange writes a range of messages to the client connection.
 // Returns the number of bytes written and any error.
 func (f *Frontend) WriteRange(r *pgwire.RingRange) (int64, error) {
-	return io.Copy(f.conn, r.NewReader())
+	n, err := io.Copy(f.conn, r.NewReader())
+	// pgbouncer-compatible: track bytes sent to client (pgbouncer: server_bytes)
+	if f.metrics != nil && n > 0 {
+		f.metrics.AddSentBytes(f.databaseName, n)
+	}
+	return n, err
 }

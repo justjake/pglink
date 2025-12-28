@@ -1,3 +1,6 @@
 [submodule "third_party/pgbouncer"]
 	path = third_party/pgbouncer
 	url = https://github.com/pgbouncer/pgbouncer.git
+[submodule "third_party/pgbouncer_exporter"]
+	path = third_party/pgbouncer_exporter
+	url = https://github.com/prometheus-community/pgbouncer_exporter

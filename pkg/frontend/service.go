@@ -10,6 +10,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -107,6 +108,9 @@ func (s *Service) Listen() error {
 	}
 	s.listener = ln
 	s.logger.Info("listening", "addr", addr.String())
+
+	// Start periodic pool stats collection for metrics
+	s.startPoolStatsCollection(s.ctx)
 
 	// Start a goroutine to close listener and cancel sessions when context is cancelled
 	go func() {
@@ -303,6 +307,76 @@ func (s *Service) SetupFlightRecorderCallback(fr *observability.FlightRecorderSe
 		return
 	}
 	fr.SetSignalCallback(s.DumpRingBufferStats)
+}
+
+// collectPoolStats updates pool metrics from all databases.
+// This is called periodically to update gauge metrics for pool state.
+func (s *Service) collectPoolStats() {
+	if s.metrics == nil {
+		return
+	}
+
+	poolCount := 0
+	for dbConfig, db := range s.databases {
+		dbName := dbConfig.Database
+		stats := db.Stats()
+
+		// Get backend port (default 5432)
+		backendPort := 5432
+		if dbConfig.Backend.Port != nil {
+			backendPort = int(*dbConfig.Backend.Port)
+		}
+
+		// Per-database stats
+		// Note: pglink uses transaction pooling mode
+		s.metrics.SetDatabaseConfig(
+			dbName,
+			dbConfig.Backend.Host,
+			fmt.Sprint(backendPort),
+			"transaction",         // pglink uses transaction pooling
+			int(stats.MaxConns),   // pool_size
+			int(stats.MaxConns),   // max_connections
+			int(stats.TotalConns), // current_connections
+		)
+
+		// Per-pool (database/user) stats
+		for userName, poolStats := range stats.Pools {
+			poolCount++
+			// Server connections
+			s.metrics.SetPoolServerActive(dbName, userName, int(poolStats.AcquiredConns))
+			s.metrics.SetPoolServerIdle(dbName, userName, int(poolStats.IdleConns))
+			s.metrics.SetPoolServerLogin(dbName, userName, 0) // pgxpool doesn't expose this
+
+			// Initialize pool stub metrics
+			s.metrics.InitPoolStubs(dbName, userName)
+		}
+	}
+
+	s.metrics.SetPoolCount(poolCount)
+
+	// Global counts
+	s.metrics.SetUsedClients(int(s.activeConns.Load()))
+	s.metrics.SetLoginClients(0) // Would need to track auth state
+}
+
+// startPoolStatsCollection starts a goroutine that periodically collects pool stats.
+func (s *Service) startPoolStatsCollection(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		// Collect once immediately
+		s.collectPoolStats()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.collectPoolStats()
+			}
+		}
+	}()
 }
 
 // handleCancelRequest processes a cancel request from a client.
