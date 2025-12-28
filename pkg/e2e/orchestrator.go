@@ -19,7 +19,6 @@ import (
 
 	promapi "github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	"github.com/prometheus/common/expfmt"
 
 	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/config/pgbouncer"
