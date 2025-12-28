@@ -220,5 +220,10 @@ func connectAsAdmin(ctx context.Context) (*pgx.Conn, error) {
 	cfg.User = "admin"
 	cfg.Password = "admin_password"
 
+	// Apply same protocol settings as regular connections
+	if benchConfig.Protocol == "simple" {
+		cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	}
+
 	return pgx.ConnectConfig(ctx, cfg)
 }
