@@ -94,36 +94,51 @@ func (s *ProtocolState) InTxOrQuery() bool {
 		s.Portals.Executing != nil
 }
 
-func (s *ProtocolState) Update(msg Message) {
+// Update updates protocol state for the given message.
+// For server messages, returns the popped request if one matched the response, nil otherwise.
+// For client messages, always returns nil.
+// Request flow ending happens automatically inside Update on ReadyForQuery.
+func (s *ProtocolState) Update(msg Message) *PendingRequest {
 	if m, ok := msg.(ClientMessage); ok {
-		s.UpdateForFrontentMessage(m)
+		s.updateForFrontendMessage(m)
+		return nil
 	} else if m, ok := msg.(ServerMessage); ok {
-		s.UpdateForServerMessage(m)
+		return s.updateForServerMessage(m)
 	} else {
 		panic(fmt.Sprintf("unexpected message: %T", msg))
 	}
 }
 
-func (s *ProtocolState) UpdateForFrontentMessage(msg ClientMessage) {
+func (s *ProtocolState) updateForFrontendMessage(msg ClientMessage) {
 	handlers := ClientMessageHandlers[struct{}]{
-		SimpleQuery:   wrapVoid(s.UpdateForSimpleQueryMessage),
-		ExtendedQuery: wrapVoid(s.UpdateForExtendedQueryMessage),
+		SimpleQuery:   wrapVoid(s.updateForSimpleQueryMessage),
+		ExtendedQuery: wrapVoid(s.updateForExtendedQueryMessage),
 	}
 
 	_, _ = handlers.HandleDefault(msg, func(msg ClientMessage) (struct{}, error) { return struct{}{}, nil })
 }
 
-func (s *ProtocolState) UpdateForServerMessage(msg ServerMessage) {
+func (s *ProtocolState) updateForServerMessage(msg ServerMessage) *PendingRequest {
+	var poppedRequest *PendingRequest
+
 	handlers := ServerMessageHandlers[struct{}]{
-		Async:         wrapVoid(s.UpdateForServerAsyncMessage),
-		Copy:          wrapVoid(s.UpdateForServerCopyMessage),
-		ExtendedQuery: wrapVoid(s.UpdateForServerExtendedQueryMessage),
-		Response:      wrapVoid(s.UpdateForServerResponseMessage),
+		Async: wrapVoid(s.updateForServerAsyncMessage),
+		Copy:  wrapVoid(s.updateForServerCopyMessage),
+		ExtendedQuery: func(msg ServerExtendedQuery) (struct{}, error) {
+			poppedRequest = s.updateForServerExtendedQueryMessage(msg)
+			return struct{}{}, nil
+		},
+		Response: func(msg ServerResponse) (struct{}, error) {
+			poppedRequest = s.updateForServerResponseMessage(msg)
+			return struct{}{}, nil
+		},
 	}
 	_, _ = handlers.HandleDefault(msg, func(msg ServerMessage) (struct{}, error) { return struct{}{}, nil })
+
+	return poppedRequest
 }
 
-func (s *ProtocolState) UpdateForSimpleQueryMessage(msg ClientSimpleQuery) {
+func (s *ProtocolState) updateForSimpleQueryMessage(msg ClientSimpleQuery) {
 	switch msg := msg.(type) {
 	case *ClientSimpleQueryQuery:
 		s.clearPendingExecute()
@@ -140,7 +155,7 @@ func (s *ProtocolState) UpdateForSimpleQueryMessage(msg ClientSimpleQuery) {
 	}
 }
 
-func (s *ProtocolState) UpdateForExtendedQueryMessage(msg ClientExtendedQuery) {
+func (s *ProtocolState) updateForExtendedQueryMessage(msg ClientExtendedQuery) {
 	switch msg := msg.(type) {
 	case *ClientExtendedQueryParse:
 		s.clearPendingExecute()
@@ -190,10 +205,13 @@ func (s *ProtocolState) UpdateForExtendedQueryMessage(msg ClientExtendedQuery) {
 	}
 }
 
-func (s *ProtocolState) UpdateForServerExtendedQueryMessage(msg ServerExtendedQuery) {
+// updateForServerExtendedQueryMessage updates state and pops the matching request.
+// Returns the popped request if one matched, nil otherwise.
+func (s *ProtocolState) updateForServerExtendedQueryMessage(msg ServerExtendedQuery) *PendingRequest {
 	s.ExtendedQueryMode = true
 
-	switch msg := msg.(type) {
+	// Update object state
+	switch msg.(type) {
 	case *ServerExtendedQueryParseComplete:
 		for name := range s.Statements.PendingCreate {
 			s.Statements.Alive[name] = true
@@ -213,17 +231,17 @@ func (s *ProtocolState) UpdateForServerExtendedQueryMessage(msg ServerExtendedQu
 			s.Portals.Alive[name] = true
 		}
 		clear(s.Portals.PendingCreate)
-	case *ServerExtendedQueryNoData:
-	case *ServerExtendedQueryParameterDescription:
-	case *ServerExtendedQueryPortalSuspended:
-	case *ServerExtendedQueryRowDescription:
-		return
-	default:
-		panic(fmt.Sprintf("unexpected pgwire.ServerExtendedQuery: %T", msg))
 	}
+
+	// Pop matching request for ALL extended query response types.
+	// This matches PgBouncer's behavior in server.c:pop_outstanding_request.
+	if req, ok := s.popForResponse(msg); ok {
+		return &req
+	}
+	return nil
 }
 
-func (s *ProtocolState) UpdateForServerCopyMessage(msg ServerCopy) {
+func (s *ProtocolState) updateForServerCopyMessage(msg ServerCopy) {
 	switch msg.(type) {
 	case *ServerCopyCopyInResponse:
 		s.CopyMode = CopyIn
@@ -241,7 +259,10 @@ func (s *ProtocolState) UpdateForServerCopyMessage(msg ServerCopy) {
 	}
 }
 
-func (s *ProtocolState) UpdateForServerResponseMessage(msg ServerResponse) {
+// updateForServerResponseMessage updates state and pops the matching request.
+// Returns the popped request if one matched, nil otherwise.
+// For ReadyForQuery, also ends the request flow if empty.
+func (s *ProtocolState) updateForServerResponseMessage(msg ServerResponse) *PendingRequest {
 	switch msg := msg.(type) {
 	case *ServerResponseReadyForQuery:
 		s.CopyMode = CopyNone
@@ -254,23 +275,46 @@ func (s *ProtocolState) UpdateForServerResponseMessage(msg ServerResponse) {
 		// Always clear pending execute state when ReadyForQuery is received.
 		// This handles flows like Parse+Describe+Sync where no Execute is sent.
 		s.clearPendingExecute()
-	case *ServerResponseCommandComplete:
+
+		// Pop the pending Sync/Query/FunctionCall request
+		var poppedReq *PendingRequest
+		if req, ok := s.popForResponse(msg); ok {
+			poppedReq = &req
+		}
+
+		// End the flow only if there are no more pending requests.
+		// This allows pipelining where multiple Sync messages are in flight.
+		s.endRequestFlowIfEmpty()
+
+		return poppedReq
+	case *ServerResponseCommandComplete, *ServerResponseEmptyQueryResponse:
+		// These complete Execute or Query requests
+		if req, ok := s.popForResponse(msg); ok {
+			return &req
+		}
 	case *ServerResponseDataRow:
-	case *ServerResponseEmptyQueryResponse:
-		s.clearPendingExecute()
+		// DataRow doesn't pop any request
 	case *ServerResponseFunctionCallResponse:
 		s.clearPendingExecute()
+		if req, ok := s.popForResponse(msg); ok {
+			return &req
+		}
 	case *ServerResponseErrorResponse:
 		s.clearPendingExecute()
 		if s.ExtendedQueryMode {
 			s.ServerIgnoringMessagesUntilSync = true
 		}
+		// ErrorResponse can match any request
+		if req, ok := s.popForResponse(msg); ok {
+			return &req
+		}
 	default:
 		panic(fmt.Sprintf("unexpected pgwire.ServerResponse: %T", msg))
 	}
+	return nil
 }
 
-func (s *ProtocolState) UpdateForServerAsyncMessage(msg ServerAsync) {
+func (s *ProtocolState) updateForServerAsyncMessage(msg ServerAsync) {
 	switch msg := msg.(type) {
 	case *ServerAsyncNoticeResponse:
 	case *ServerAsyncNotificationResponse:
@@ -371,13 +415,27 @@ func (s *ProtocolState) PushRequest(req PendingRequest) {
 	s.ActiveRequestFlow.Push(req)
 }
 
-// PopForResponse removes and returns the front request if it matches the response type.
+// popForResponse removes and returns the front request if it matches the response message.
 // Returns (request, true) if matched, (zero, false) if no match or no active flow.
-func (s *ProtocolState) PopForResponse(responseType byte) (PendingRequest, bool) {
+func (s *ProtocolState) popForResponse(msg ServerMessage) (PendingRequest, bool) {
 	if s.ActiveRequestFlow == nil {
 		return PendingRequest{}, false
 	}
-	return s.ActiveRequestFlow.PopForResponse(responseType)
+	return s.ActiveRequestFlow.popForResponse(msg)
+}
+
+// endRequestFlowIfEmpty ends the flow only if there are no pending requests.
+// Returns true if the flow was ended.
+func (s *ProtocolState) endRequestFlowIfEmpty() bool {
+	if s.ActiveRequestFlow == nil {
+		return false
+	}
+	if s.ActiveRequestFlow.Len() == 0 {
+		s.ActiveRequestFlow.Close()
+		s.ActiveRequestFlow = nil
+		return true
+	}
+	return false
 }
 
 // OutstandingRequestCount returns the number of pending requests in the active flow.

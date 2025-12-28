@@ -33,7 +33,27 @@ import (
 // handled successfully and the connection should be closed.
 var errCancelRequest = errors.New("cancel request handled")
 
-// Session represents a client's session with the Service.
+// Session represents a client connection to pglink.
+//
+// STATE TRACKING: This session tracks TWO separate protocol states:
+//
+//	s.state (ProtocolState) - CLIENT STATE
+//	  - Requests the client started with us
+//	  - Variables we sent to the client
+//	  - Uses CLIENT's names for prepared statements/portals
+//	  - In other words: what the CLIENT expects
+//
+//	Backend state (accessed via s.backend accessors) - BACKEND STATE
+//	  - Requests we started with the backend server
+//	  - Variables PostgreSQL sent to us (s.backend.ParameterStatuses())
+//	  - Uses SERVER's names for prepared statements/portals
+//	  - In other words: the ACTUAL state on the backend server
+//
+// These states do NOT always match:
+//   - Internal queries (varcache, health checks) create backend requests
+//     that the client is unaware of
+//   - Prepared statement names are rewritten between client and server
+//   - A pooled backend may have different session variables than the client expects
 type Session struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -395,6 +415,88 @@ func (s *Session) releaseBackend() {
 	// (PID + global counter).
 }
 
+// runInternalQuery sends a query to the backend and processes responses
+// without forwarding to the client. This is used for internal operations
+// like restoring session variables (varcache).
+//
+// PRECONDITION: Must only be called when no requests are pending on the
+// BACKEND (s.backend.OutstandingRequestCount() == 0). It's OK if the client
+// has sent us requests we haven't forwarded yet.
+// runInternalQuery sends a query to the backend and processes responses
+// without forwarding to the client.
+//
+// PRECONDITION: Must be called BEFORE the ring buffer is started. This is
+// critical because pgconn.Exec() reads directly from the connection, which
+// would conflict with the ring buffer's reader goroutine.
+//
+// The context controls timeout. All spans created during execution will
+// be children of any span in ctx.
+func (s *Session) runInternalQuery(ctx context.Context, query string) error {
+	// Precondition: no pending BACKEND requests (not client requests!)
+	if s.backend.OutstandingRequestCount() > 0 {
+		return fmt.Errorf("cannot run internal query: %d backend requests pending",
+			s.backend.OutstandingRequestCount())
+	}
+
+	// Create span for this internal query
+	ctx, span := otel.Tracer("pglink").Start(ctx, "pglink.internal_query",
+		trace.WithAttributes(attribute.String("db.statement", query)),
+	)
+	defer span.End()
+
+	// Use pgconn.Exec() which reads responses synchronously.
+	// This works because the ring buffer is not started yet.
+	pgConn := s.backend.PgConn()
+	result, err := pgConn.Exec(ctx, query).ReadAll()
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("internal query failed: %w", err)
+	}
+
+	// Check for errors in results
+	for _, r := range result {
+		if r.Err != nil {
+			span.RecordError(r.Err)
+			return fmt.Errorf("internal query failed: %w", r.Err)
+		}
+	}
+
+	// Sync backend session state from pgconn's internal tracking.
+	// pgconn.Exec() handles ParameterStatus messages internally, so we need
+	// to copy those updates to our Session.State.ParameterStatuses.
+	s.backend.SyncParameterStatusesFromPgConn()
+
+	return nil
+}
+
+// restoreVariables sends SET commands to the backend to restore the client's
+// expected session variables. This is called after acquiring a backend from the pool
+// to ensure the backend's session state matches what the client expects.
+//
+// This implements the "varcache" pattern from PgBouncer.
+func (s *Session) restoreVariables(ctx context.Context) error {
+	// Get backend's current parameter state
+	backendParams := s.backend.ParameterStatuses()
+
+	// Compute: what SETs do we need to make backend match client expectations?
+	// backend.DiffToTip(client) = operations to apply to backend to reach client state
+	diff := backendParams.DiffToTip(s.state.ParameterStatuses)
+
+	// Filter to only tracked parameters - these are the ones PostgreSQL sends
+	// via ParameterStatus and can be SET via SQL. Other parameters like "user"
+	// and "database" are connection-level and cannot be changed.
+	trackedParams := s.backend.TrackedParameters()
+	diff = diff.FilterKeys(trackedParams)
+
+	query := diff.BuildSetQuery()
+	if query == "" {
+		return nil // No changes needed
+	}
+
+	s.logger.Debug("restoring variables", "query", query)
+	return s.runInternalQuery(ctx, query)
+}
+
 // cancelBackendQuery sends a cancel request to the backend to cancel
 // the currently running query. This is called when the proxy receives
 // a cancel request from the client.
@@ -460,6 +562,21 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	s.logger = logger
 	defer func() { s.logger = oldLogger }()
 
+	// Restore client's expected session variables before starting the ring buffer.
+	// This must happen BEFORE StartRingBuffer() because runInternalQuery uses
+	// pgconn.Exec() which reads directly from the connection.
+	restoreCtx, restoreCancel := context.WithTimeout(s.ctx, 5*time.Second)
+	if err := s.restoreVariables(restoreCtx); err != nil {
+		restoreCancel()
+		s.backend.MarkForDestroy(err)
+		return fmt.Errorf("failed to restore variables: %w", err)
+	}
+	restoreCancel()
+
+	// Now start the ring buffer reader goroutine.
+	// This must happen AFTER any internal queries (varcache) are complete.
+	s.backend.StartRingBuffer()
+
 	// Welcome to the backend-acquired state.
 	//
 	// We have a ring buffer for each of the client (frontend) and server (backend).
@@ -509,7 +626,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 				if q, ok := msg.(*pgwire.ClientSimpleQueryQuery); ok {
 					parsed := q.Parse()
 					s.state.PushRequest(pgwire.PendingRequest{
-						RequestType: pgwire.MsgTypeQuery,
+						RequestType: pgwire.MsgClientQuery,
 						Action:      pgwire.ActionForward,
 						Query:       parsed.String,
 						QueryHash:   pgwire.HashQuery(parsed.String),
@@ -710,7 +827,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 
 						// Inject Parse before Bind - push ActionSkip since client doesn't expect ParseComplete
 						s.state.PushRequest(pgwire.PendingRequest{
-							RequestType:   pgwire.MsgTypeParse,
+							RequestType:   pgwire.MsgClientParse,
 							Action:        pgwire.ActionSkip, // Don't forward ParseComplete to client
 							StatementName: parsed.PreparedStatement,
 							Query:         cachedStmt.Query,
@@ -746,7 +863,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 
 			// Track pending request for Bind
 			s.state.PushRequest(pgwire.PendingRequest{
-				RequestType:   pgwire.MsgTypeBind,
+				RequestType:   pgwire.MsgClientBind,
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.PreparedStatement,
 			})
@@ -816,7 +933,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 
 			// Normal path: send Parse to backend
 			s.state.PushRequest(pgwire.PendingRequest{
-				RequestType:   pgwire.MsgTypeParse,
+				RequestType:   pgwire.MsgClientParse,
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.Name,
 				Query:         parsed.Query,
@@ -832,7 +949,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 			parsed := msg.Parse()
 			// Track pending request
 			s.state.PushRequest(pgwire.PendingRequest{
-				RequestType: pgwire.MsgTypeExecute,
+				RequestType: pgwire.MsgClientExecute,
 				Action:      pgwire.ActionForward,
 			})
 			return &pgproto3.Execute{
@@ -844,7 +961,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 			parsed := msg.Parse()
 			// Track pending request
 			s.state.PushRequest(pgwire.PendingRequest{
-				RequestType:   pgwire.MsgTypeDescribe,
+				RequestType:   pgwire.MsgClientDescribe,
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.Name,
 			})
@@ -857,7 +974,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 			parsed := msg.Parse()
 			// Track pending request
 			s.state.PushRequest(pgwire.PendingRequest{
-				RequestType:   pgwire.MsgTypeClose,
+				RequestType:   pgwire.MsgClientClose,
 				Action:        pgwire.ActionForward,
 				StatementName: parsed.Name,
 			})
@@ -869,7 +986,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		Sync: func(msg *pgwire.ClientExtendedQuerySync) (pgproto3.FrontendMessage, error) {
 			// Track pending request - Sync expects ReadyForQuery response
 			s.state.PushRequest(pgwire.PendingRequest{
-				RequestType: pgwire.MsgTypeSync,
+				RequestType: pgwire.MsgClientSync,
 				Action:      pgwire.ActionForward,
 			})
 			return &pgproto3.Sync{}, nil
@@ -917,54 +1034,43 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 }
 
 func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery, msgIdx int64, toClient **pgwire.RingRange) (bool, error) {
-	s.state.Update(msg)
+	// Update state and get the popped request (if any)
+	poppedReq := s.state.Update(msg)
 
-	// Default to forwarding
+	// Default to forwarding, use popped request's action if available
 	action := pgwire.ActionForward
+	if poppedReq != nil {
+		action = poppedReq.Action
+	}
 
-	// Handle extended query responses that consume pending requests
-	switch msg.(type) {
-	case *pgwire.ServerExtendedQueryParseComplete:
-		if req, ok := s.state.PopForResponse('1'); ok {
-			action = req.Action
-			// Populate cache on ParseComplete (for ActionForward and ActionSkip)
-			if req.Query != "" {
-				cache := s.database.StatementCache()
-				cache.Put(&pgwire.PreparedStatement{
-					Query:     req.Query,
-					QueryHash: req.QueryHash,
-					// ParameterOIDs and RowDescription filled in from Describe responses
-				})
-				// Update cache size metric
-				cacheSize := cache.Len()
-				s.metrics.UpdatePreparedStatementCacheSize(s.databaseName, cacheSize)
+	// Handle ParseComplete specially for caching
+	if _, ok := msg.(*pgwire.ServerExtendedQueryParseComplete); ok && poppedReq != nil && poppedReq.Query != "" {
+		cache := s.database.StatementCache()
+		cache.Put(&pgwire.PreparedStatement{
+			Query:     poppedReq.Query,
+			QueryHash: poppedReq.QueryHash,
+			// ParameterOIDs and RowDescription filled in from Describe responses
+		})
+		// Update cache size metric
+		cacheSize := cache.Len()
+		s.metrics.UpdatePreparedStatementCacheSize(s.databaseName, cacheSize)
 
-				// Record span event for observability
-				if s.tracingEnabled {
-					_, span := otel.Tracer("pglink").Start(s.ctx, "pglink.stmt.cached",
-						trace.WithAttributes(
-							attribute.String(observability.AttrStatementName, req.StatementName),
-							attribute.Int64("query_hash", int64(req.QueryHash)),
-							attribute.Int("cache_size", cacheSize),
-						),
-					)
-					span.End()
-				}
+		// Record span event for observability
+		if s.tracingEnabled {
+			_, span := otel.Tracer("pglink").Start(s.ctx, "pglink.stmt.cached",
+				trace.WithAttributes(
+					attribute.String(observability.AttrStatementName, poppedReq.StatementName),
+					attribute.Int64("query_hash", int64(poppedReq.QueryHash)),
+					attribute.Int("cache_size", cacheSize),
+				),
+			)
+			span.End()
+		}
 
-				s.logger.Debug("cached prepared statement",
-					"statementName", req.StatementName,
-					"queryHash", req.QueryHash,
-					"cacheSize", cacheSize)
-			}
-		}
-	case *pgwire.ServerExtendedQueryBindComplete:
-		if req, ok := s.state.PopForResponse('2'); ok {
-			action = req.Action
-		}
-	case *pgwire.ServerExtendedQueryCloseComplete:
-		if req, ok := s.state.PopForResponse('3'); ok {
-			action = req.Action
-		}
+		s.logger.Debug("cached prepared statement",
+			"statementName", poppedReq.StatementName,
+			"queryHash", poppedReq.QueryHash,
+			"cacheSize", cacheSize)
 	}
 
 	// Handle response based on action
@@ -985,6 +1091,7 @@ func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery, msgI
 }
 
 func (s *Session) handleServerResponse(msg pgwire.ServerResponse, msgIdx int64, toClient **pgwire.RingRange) (bool, error) {
+	// Update state - this handles all popping and flow ending internally
 	s.state.Update(msg)
 	continueWithBackend := true
 
@@ -992,14 +1099,6 @@ func (s *Session) handleServerResponse(msg pgwire.ServerResponse, msgIdx int64, 
 	(*toClient).SetEndInclusive(msgIdx)
 
 	if _, ok := msg.(*pgwire.ServerResponseReadyForQuery); ok {
-		// Pop the pending Sync/Query request
-		s.state.PopForResponse('Z')
-
-		// ReadyForQuery marks the end of a request/response flow.
-		// End the flow to clear any remaining request tracking state.
-		// This ensures we start fresh for the next flow.
-		s.state.EndRequestFlow()
-
 		// TODO: double-check and flush ParameterStatuses?
 		inTxOrQuery := s.state.InTxOrQuery()
 		s.logger.Debug("ReadyForQuery",

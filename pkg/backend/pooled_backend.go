@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -66,6 +67,44 @@ func (c *PooledBackend) Cursor() *pgwire.Cursor {
 	return c.cursor
 }
 
+// NewCursor creates a fresh cursor over the backend's ring buffer.
+// Use this when you need an independent cursor that won't interfere with
+// the main pooled cursor (e.g., for internal queries).
+func (c *PooledBackend) NewCursor() *pgwire.Cursor {
+	c.panicIfReleased()
+	return pgwire.NewServerCursor(c.session.RingBuffer())
+}
+
+// StartRingBuffer begins the ring buffer reader goroutine.
+// Must be called after acquiring the backend and before using the Cursor.
+// Any internal queries (like varcache SET statements) should be run
+// via PgConn() BEFORE calling this method.
+func (c *PooledBackend) StartRingBuffer() {
+	c.panicIfReleased()
+	c.session.StartRingBuffer()
+}
+
+// PauseRingBuffer stops the ring buffer reader goroutine, allowing direct
+// access to the connection via PgConn(). Must call ResumeRingBuffer() after.
+func (c *PooledBackend) PauseRingBuffer() error {
+	c.panicIfReleased()
+	ring := c.session.RingBuffer()
+	if ring != nil && ring.Running() {
+		return ring.StopNetConnReader()
+	}
+	return nil
+}
+
+// ResumeRingBuffer restarts the ring buffer reader goroutine after it was
+// paused with PauseRingBuffer().
+func (c *PooledBackend) ResumeRingBuffer() {
+	c.panicIfReleased()
+	ring := c.session.RingBuffer()
+	if ring != nil && !ring.Running() {
+		ring.StartNetConnReader(context.Background(), c.conn.Value().Conn().PgConn().Conn())
+	}
+}
+
 func (c *PooledBackend) WriteRange(r *pgwire.RingRange) error {
 	c.panicIfReleased()
 	err := c.session.WriteRange(r)
@@ -94,6 +133,28 @@ func (c *PooledBackend) ParameterStatusChanges(keys []string, since pgwire.Param
 func (c *PooledBackend) UpdateState(msg pgwire.Message) {
 	c.panicIfReleased()
 	c.session.State.Update(msg)
+}
+
+// OutstandingRequestCount returns the number of pending requests sent to the backend.
+// This is the BACKEND state (requests we sent), not CLIENT state (requests client sent us).
+func (c *PooledBackend) OutstandingRequestCount() int {
+	c.panicIfReleased()
+	return c.session.State.OutstandingRequestCount()
+}
+
+// ParameterStatuses returns the backend's current parameter statuses.
+// This is the BACKEND state (what postgres told us), not CLIENT state (what we told client).
+func (c *PooledBackend) ParameterStatuses() pgwire.ParameterStatuses {
+	c.panicIfReleased()
+	return c.session.State.ParameterStatuses
+}
+
+// SyncParameterStatusesFromPgConn updates the backend session's parameter statuses
+// from pgconn's internal tracking. Call this after using PgConn().Exec() directly
+// to keep the session state in sync.
+func (c *PooledBackend) SyncParameterStatusesFromPgConn() {
+	c.panicIfReleased()
+	c.session.SyncParameterStatusesFromPgConn()
 }
 
 // Release returns the connection to the pool.

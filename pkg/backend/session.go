@@ -96,6 +96,15 @@ func (s *Session) ParameterStatusChanges(keys []string, since pgwire.ParameterSt
 	return since.DiffToTip(s.updateParameterStatuses(keys))
 }
 
+// Acquire prepares the session for use. This updates the protocol state from
+// pgconn's tracked parameters but does NOT start the ring buffer.
+//
+// After acquiring, callers should:
+// 1. Run any internal queries (like varcache SET statements) using PgConn() directly
+// 2. Call StartRingBuffer() to begin reading from the connection
+//
+// This two-phase approach allows internal queries to be sent before the ring
+// buffer starts consuming connection data.
 func (s *Session) Acquire() error {
 	if s.ringBuffer != nil && s.ringBuffer.Running() {
 		return fmt.Errorf("session already acquired")
@@ -103,15 +112,27 @@ func (s *Session) Acquire() error {
 	s.updateParameterStatuses(s.TrackedParameters)
 	s.State.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
 
-	// Start ring buffer reader goroutine
+	// Prepare ring buffer but don't start it yet
 	if s.ringBuffer == nil {
 		s.ringBuffer = pgwire.NewRingBuffer(pgwire.RingBufferConfigForSize(s.DB.config.GetMessageBufferBytes()))
 	} else {
 		s.ringBuffer = s.ringBuffer.NewWithSameBuffers()
 	}
-	s.ringBuffer.StartNetConnReader(context.Background(), s.Conn.Conn())
+	// Note: StartNetConnReader is called separately via StartRingBuffer()
 
 	return nil
+}
+
+// StartRingBuffer begins the ring buffer reader goroutine.
+// Must be called after Acquire() and any internal queries are complete.
+func (s *Session) StartRingBuffer() {
+	if s.ringBuffer == nil {
+		panic("StartRingBuffer called before Acquire")
+	}
+	if s.ringBuffer.Running() {
+		return // Already running
+	}
+	s.ringBuffer.StartNetConnReader(context.Background(), s.Conn.Conn())
 }
 
 func (s *Session) Release() {
@@ -156,6 +177,13 @@ func (s *Session) updateParameterStatuses(keys []string) pgwire.ParameterStatuse
 		}
 	}
 	return parameterStatuses
+}
+
+// SyncParameterStatusesFromPgConn updates Session.State.ParameterStatuses from
+// pgconn's internal parameter tracking. Call this after using pgconn.Exec()
+// directly (e.g., for internal queries like varcache) to keep state in sync.
+func (s *Session) SyncParameterStatusesFromPgConn() {
+	s.updateParameterStatuses(s.TrackedParameters)
 }
 
 func (s *Session) updateState() {

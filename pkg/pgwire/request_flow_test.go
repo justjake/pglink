@@ -3,40 +3,91 @@ package pgwire
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestRequestFlow_PushPop(t *testing.T) {
-	flow := NewRequestFlow()
+// Helper to create server messages for testing
+func parseComplete() ServerMessage {
+	return (*ServerExtendedQueryParseComplete)(ServerParsed(&pgproto3.ParseComplete{}))
+}
+
+func bindComplete() ServerMessage {
+	return (*ServerExtendedQueryBindComplete)(ServerParsed(&pgproto3.BindComplete{}))
+}
+
+func closeComplete() ServerMessage {
+	return (*ServerExtendedQueryCloseComplete)(ServerParsed(&pgproto3.CloseComplete{}))
+}
+
+func noData() ServerMessage {
+	return (*ServerExtendedQueryNoData)(ServerParsed(&pgproto3.NoData{}))
+}
+
+func parameterDescription() ServerMessage {
+	return (*ServerExtendedQueryParameterDescription)(ServerParsed(&pgproto3.ParameterDescription{}))
+}
+
+func rowDescription() ServerMessage {
+	return (*ServerExtendedQueryRowDescription)(ServerParsed(&pgproto3.RowDescription{}))
+}
+
+func readyForQuery() ServerMessage {
+	return (*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))
+}
+
+func commandComplete() ServerMessage {
+	return (*ServerResponseCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")}))
+}
+
+func emptyQueryResponse() ServerMessage {
+	return (*ServerResponseEmptyQueryResponse)(ServerParsed(&pgproto3.EmptyQueryResponse{}))
+}
+
+func portalSuspended() ServerMessage {
+	return (*ServerExtendedQueryPortalSuspended)(ServerParsed(&pgproto3.PortalSuspended{}))
+}
+
+func errorResponse() ServerMessage {
+	return (*ServerResponseErrorResponse)(ServerParsed(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "42601"}))
+}
+
+func dataRow() ServerMessage {
+	return (*ServerResponseDataRow)(ServerParsed(&pgproto3.DataRow{}))
+}
+
+// Test request flow through ProtocolState.Update - the public API
+func TestProtocolState_PushAndUpdate(t *testing.T) {
+	state := NewProtocolState()
 
 	// Push a Parse request
-	flow.Push(PendingRequest{RequestType: MsgTypeParse, Action: ActionForward})
-	assert.Equal(t, 1, flow.Len())
+	state.PushRequest(PendingRequest{RequestType: MsgClientParse, Action: ActionForward})
+	assert.Equal(t, 1, state.OutstandingRequestCount())
 
-	// Pop with matching response type (ParseComplete = '1')
-	req, ok := flow.PopForResponse('1')
-	assert.True(t, ok)
-	assert.Equal(t, MsgTypeParse, req.RequestType)
+	// Update with matching response type (ParseComplete)
+	req := state.Update(parseComplete())
+	require.NotNil(t, req)
+	assert.Equal(t, MsgClientParse, req.RequestType)
 	assert.Equal(t, ActionForward, req.Action)
-	assert.Equal(t, 0, flow.Len())
+	assert.Equal(t, 0, state.OutstandingRequestCount())
 }
 
-func TestRequestFlow_PopMismatch(t *testing.T) {
-	flow := NewRequestFlow()
-	flow.Push(PendingRequest{RequestType: MsgTypeParse, Action: ActionForward})
+func TestProtocolState_UpdateMismatch(t *testing.T) {
+	state := NewProtocolState()
+	state.PushRequest(PendingRequest{RequestType: MsgClientParse, Action: ActionForward})
 
-	// Try to pop with wrong response type (BindComplete = '2')
-	_, ok := flow.PopForResponse('2')
-	assert.False(t, ok)
-	assert.Equal(t, 1, flow.Len()) // Request still in queue
+	// Update with wrong response type (BindComplete) - should not pop
+	req := state.Update(bindComplete())
+	assert.Nil(t, req)
+	assert.Equal(t, 1, state.OutstandingRequestCount()) // Request still in queue
 }
 
-func TestRequestFlow_PopEmpty(t *testing.T) {
-	flow := NewRequestFlow()
+func TestProtocolState_UpdateEmpty(t *testing.T) {
+	state := NewProtocolState()
 
-	_, ok := flow.PopForResponse('1')
-	assert.False(t, ok)
+	req := state.Update(parseComplete())
+	assert.Nil(t, req)
 }
 
 func TestRequestFlow_Peek(t *testing.T) {
@@ -47,22 +98,22 @@ func TestRequestFlow_Peek(t *testing.T) {
 	assert.False(t, ok)
 
 	// Push and peek
-	flow.Push(PendingRequest{RequestType: MsgTypeParse, Action: ActionSkip})
+	flow.Push(PendingRequest{RequestType: MsgClientParse, Action: ActionSkip})
 	req, ok := flow.Peek()
 	assert.True(t, ok)
-	assert.Equal(t, MsgTypeParse, req.RequestType)
+	assert.Equal(t, MsgClientParse, req.RequestType)
 	assert.Equal(t, ActionSkip, req.Action)
 	assert.Equal(t, 1, flow.Len()) // Still in queue
 }
 
 func TestRequestFlow_ClearUntilSync(t *testing.T) {
 	flow := NewRequestFlow()
-	flow.Push(PendingRequest{RequestType: MsgTypeParse})    // Parse
-	flow.Push(PendingRequest{RequestType: MsgTypeBind})     // Bind
-	flow.Push(PendingRequest{RequestType: MsgTypeExecute})  // Execute
-	flow.Push(PendingRequest{RequestType: MsgTypeSync})     // Sync
-	flow.Push(PendingRequest{RequestType: MsgTypeParse})    // Parse (next batch)
-	flow.Push(PendingRequest{RequestType: MsgTypeDescribe}) // Describe (next batch)
+	flow.Push(PendingRequest{RequestType: MsgClientParse})    // Parse
+	flow.Push(PendingRequest{RequestType: MsgClientBind})     // Bind
+	flow.Push(PendingRequest{RequestType: MsgClientExecute})  // Execute
+	flow.Push(PendingRequest{RequestType: MsgClientSync})     // Sync
+	flow.Push(PendingRequest{RequestType: MsgClientParse})    // Parse (next batch)
+	flow.Push(PendingRequest{RequestType: MsgClientDescribe}) // Describe (next batch)
 
 	assert.Equal(t, 6, flow.Len())
 
@@ -74,13 +125,13 @@ func TestRequestFlow_ClearUntilSync(t *testing.T) {
 	// Verify remaining requests
 	req, ok := flow.Peek()
 	assert.True(t, ok)
-	assert.Equal(t, MsgTypeParse, req.RequestType)
+	assert.Equal(t, MsgClientParse, req.RequestType)
 }
 
 func TestRequestFlow_ClearUntilSync_NoSync(t *testing.T) {
 	flow := NewRequestFlow()
-	flow.Push(PendingRequest{RequestType: MsgTypeParse})
-	flow.Push(PendingRequest{RequestType: MsgTypeBind})
+	flow.Push(PendingRequest{RequestType: MsgClientParse})
+	flow.Push(PendingRequest{RequestType: MsgClientBind})
 
 	flow.ClearUntilSync()
 
@@ -90,10 +141,10 @@ func TestRequestFlow_ClearUntilSync_NoSync(t *testing.T) {
 
 func TestRequestFlow_ClearUntilSync_MultipleSync(t *testing.T) {
 	flow := NewRequestFlow()
-	flow.Push(PendingRequest{RequestType: MsgTypeParse}) // Parse
-	flow.Push(PendingRequest{RequestType: MsgTypeSync})  // Sync 1
-	flow.Push(PendingRequest{RequestType: MsgTypeParse}) // Parse
-	flow.Push(PendingRequest{RequestType: MsgTypeSync})  // Sync 2
+	flow.Push(PendingRequest{RequestType: MsgClientParse}) // Parse
+	flow.Push(PendingRequest{RequestType: MsgClientSync})  // Sync 1
+	flow.Push(PendingRequest{RequestType: MsgClientParse}) // Parse
+	flow.Push(PendingRequest{RequestType: MsgClientSync})  // Sync 2
 
 	flow.ClearUntilSync()
 
@@ -104,96 +155,101 @@ func TestRequestFlow_ClearUntilSync_MultipleSync(t *testing.T) {
 func TestResponseMatchesRequest(t *testing.T) {
 	cases := []struct {
 		name     string
-		response byte
-		request  byte
+		response ServerMessage
+		request  MsgType
 		matches  bool
 	}{
-		{"ParseComplete <- Parse", '1', MsgTypeParse, true},
-		{"BindComplete <- Bind", '2', MsgTypeBind, true},
-		{"CloseComplete <- Close", '3', MsgTypeClose, true},
-		{"NoData <- Describe", 'n', MsgTypeDescribe, true},
-		{"ParameterDescription <- Describe", 't', MsgTypeDescribe, true},
-		{"RowDescription <- Describe", 'T', MsgTypeDescribe, true},
-		{"ReadyForQuery <- Sync", 'Z', MsgTypeSync, true},
-		{"ReadyForQuery <- Query", 'Z', MsgTypeQuery, true},
-		{"ErrorResponse <- any", 'E', MsgTypeParse, true},
-		{"ErrorResponse <- any", 'E', MsgTypeBind, true},
-		{"ErrorResponse <- any", 'E', MsgTypeExecute, true},
-		{"EmptyQueryResponse <- Query", 'I', MsgTypeQuery, true},
-		{"EmptyQueryResponse <- Execute", 'I', MsgTypeExecute, true},
-		{"CommandComplete <- Query", 'C', MsgTypeQuery, true},
-		{"CommandComplete <- Execute", 'C', MsgTypeExecute, true},
-		{"PortalSuspended <- Execute", 's', MsgTypeExecute, true},
-		{"ParseComplete !<- Bind", '1', MsgTypeBind, false},
-		{"BindComplete !<- Parse", '2', MsgTypeParse, false},
-		{"ReadyForQuery !<- Parse", 'Z', MsgTypeParse, false},
-		{"Unknown response", 'X', MsgTypeParse, false},
+		{"ParseComplete <- Parse", parseComplete(), MsgClientParse, true},
+		{"BindComplete <- Bind", bindComplete(), MsgClientBind, true},
+		{"CloseComplete <- Close", closeComplete(), MsgClientClose, true},
+		{"NoData <- Describe", noData(), MsgClientDescribe, true},
+		{"ParameterDescription <- Describe", parameterDescription(), MsgClientDescribe, true},
+		{"RowDescription <- Describe", rowDescription(), MsgClientDescribe, true},
+		{"ReadyForQuery <- Sync", readyForQuery(), MsgClientSync, true},
+		{"ReadyForQuery <- Query", readyForQuery(), MsgClientQuery, true},
+		{"ErrorResponse <- Parse", errorResponse(), MsgClientParse, true},
+		{"ErrorResponse <- Bind", errorResponse(), MsgClientBind, true},
+		{"ErrorResponse <- Execute", errorResponse(), MsgClientExecute, true},
+		{"EmptyQueryResponse <- Query", emptyQueryResponse(), MsgClientQuery, true},
+		{"EmptyQueryResponse <- Execute", emptyQueryResponse(), MsgClientExecute, true},
+		{"CommandComplete <- Query", commandComplete(), MsgClientQuery, true},
+		{"CommandComplete <- Execute", commandComplete(), MsgClientExecute, true},
+		{"PortalSuspended <- Execute", portalSuspended(), MsgClientExecute, true},
+		{"ParseComplete !<- Bind", parseComplete(), MsgClientBind, false},
+		{"BindComplete !<- Parse", bindComplete(), MsgClientParse, false},
+		{"ReadyForQuery !<- Parse", readyForQuery(), MsgClientParse, false},
+		{"DataRow !<- any", dataRow(), MsgClientParse, false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := responseMatchesRequest(tc.response, tc.request)
-			assert.Equal(t, tc.matches, got, "response=%c request=%c", tc.response, tc.request)
+			assert.Equal(t, tc.matches, got)
 		})
 	}
 }
 
-func TestRequestFlow_ExtendedQuerySequence(t *testing.T) {
-	flow := NewRequestFlow()
+func TestProtocolState_ExtendedQuerySequence(t *testing.T) {
+	state := NewProtocolState()
 
 	// Simulate Parse+Bind+Execute+Sync sequence
-	flow.Push(PendingRequest{RequestType: MsgTypeParse, Action: ActionForward, StatementName: "stmt1"})
-	flow.Push(PendingRequest{RequestType: MsgTypeBind, Action: ActionForward})
-	flow.Push(PendingRequest{RequestType: MsgTypeExecute, Action: ActionForward})
-	flow.Push(PendingRequest{RequestType: MsgTypeSync, Action: ActionForward})
+	state.PushRequest(PendingRequest{RequestType: MsgClientParse, Action: ActionForward, StatementName: "stmt1"})
+	state.PushRequest(PendingRequest{RequestType: MsgClientBind, Action: ActionForward})
+	state.PushRequest(PendingRequest{RequestType: MsgClientExecute, Action: ActionForward})
+	state.PushRequest(PendingRequest{RequestType: MsgClientSync, Action: ActionForward})
 
-	assert.Equal(t, 4, flow.Len())
+	assert.Equal(t, 4, state.OutstandingRequestCount())
 
 	// Simulate server responses
 
 	// ParseComplete
-	req, ok := flow.PopForResponse('1')
-	require.True(t, ok)
-	assert.Equal(t, MsgTypeParse, req.RequestType)
+	req := state.Update(parseComplete())
+	require.NotNil(t, req)
+	assert.Equal(t, MsgClientParse, req.RequestType)
 	assert.Equal(t, "stmt1", req.StatementName)
 
 	// BindComplete
-	req, ok = flow.PopForResponse('2')
-	require.True(t, ok)
-	assert.Equal(t, MsgTypeBind, req.RequestType)
+	req = state.Update(bindComplete())
+	require.NotNil(t, req)
+	assert.Equal(t, MsgClientBind, req.RequestType)
 
 	// DataRow (doesn't consume a request)
-	_, ok = flow.PopForResponse('D')
-	assert.False(t, ok)
+	req = state.Update(dataRow())
+	assert.Nil(t, req)
 
 	// CommandComplete (consumes Execute)
-	req, ok = flow.PopForResponse('C')
-	require.True(t, ok)
-	assert.Equal(t, MsgTypeExecute, req.RequestType)
+	req = state.Update(commandComplete())
+	require.NotNil(t, req)
+	assert.Equal(t, MsgClientExecute, req.RequestType)
 
-	// ReadyForQuery (consumes Sync)
-	req, ok = flow.PopForResponse('Z')
-	require.True(t, ok)
-	assert.Equal(t, MsgTypeSync, req.RequestType)
+	// ReadyForQuery (consumes Sync and ends flow)
+	req = state.Update(readyForQuery())
+	require.NotNil(t, req)
+	assert.Equal(t, MsgClientSync, req.RequestType)
 
-	assert.Equal(t, 0, flow.Len())
+	assert.Equal(t, 0, state.OutstandingRequestCount())
+	// Flow should be ended automatically
+	assert.Nil(t, state.ActiveRequestFlow)
 }
 
-func TestRequestFlow_WithActions(t *testing.T) {
-	flow := NewRequestFlow()
+func TestProtocolState_WithActions(t *testing.T) {
+	state := NewProtocolState()
 
 	// Mix of actions
-	flow.Push(PendingRequest{RequestType: MsgTypeParse, Action: ActionForward})
-	flow.Push(PendingRequest{RequestType: MsgTypeParse, Action: ActionSkip})
-	flow.Push(PendingRequest{RequestType: MsgTypeParse, Action: ActionFake})
+	state.PushRequest(PendingRequest{RequestType: MsgClientParse, Action: ActionForward})
+	state.PushRequest(PendingRequest{RequestType: MsgClientParse, Action: ActionSkip})
+	state.PushRequest(PendingRequest{RequestType: MsgClientParse, Action: ActionFake})
 
-	req, _ := flow.PopForResponse('1')
+	req := state.Update(parseComplete())
+	require.NotNil(t, req)
 	assert.Equal(t, ActionForward, req.Action)
 
-	req, _ = flow.PopForResponse('1')
+	req = state.Update(parseComplete())
+	require.NotNil(t, req)
 	assert.Equal(t, ActionSkip, req.Action)
 
-	req, _ = flow.PopForResponse('1')
+	req = state.Update(parseComplete())
+	require.NotNil(t, req)
 	assert.Equal(t, ActionFake, req.Action)
 }
 
@@ -222,18 +278,18 @@ func TestProtocolState_RequestFlow(t *testing.T) {
 	assert.Equal(t, 0, state.OutstandingRequestCount())
 
 	// Push creates flow lazily
-	state.PushRequest(PendingRequest{RequestType: MsgTypeParse})
+	state.PushRequest(PendingRequest{RequestType: MsgClientParse})
 	assert.NotNil(t, state.ActiveRequestFlow)
 	assert.Equal(t, 1, state.OutstandingRequestCount())
 
 	// Push more
-	state.PushRequest(PendingRequest{RequestType: MsgTypeBind})
+	state.PushRequest(PendingRequest{RequestType: MsgClientBind})
 	assert.Equal(t, 2, state.OutstandingRequestCount())
 
-	// Pop
-	req, ok := state.PopForResponse('1') // ParseComplete
-	assert.True(t, ok)
-	assert.Equal(t, MsgTypeParse, req.RequestType)
+	// Update with ParseComplete pops the Parse request
+	poppedReq := state.Update(parseComplete())
+	require.NotNil(t, poppedReq)
+	assert.Equal(t, MsgClientParse, poppedReq.RequestType)
 	assert.Equal(t, 1, state.OutstandingRequestCount())
 
 	// End flow
@@ -261,11 +317,12 @@ func TestProtocolState_EndRequestFlow_NoOp(t *testing.T) {
 	})
 }
 
-func TestProtocolState_PopForResponse_NoFlow(t *testing.T) {
+func TestProtocolState_Update_NoFlow(t *testing.T) {
 	state := NewProtocolState()
 
-	_, ok := state.PopForResponse('1')
-	assert.False(t, ok)
+	// Update with no flow should return nil
+	poppedReq := state.Update(parseComplete())
+	assert.Nil(t, poppedReq)
 }
 
 func TestResponseAction_String(t *testing.T) {

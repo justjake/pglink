@@ -109,33 +109,20 @@ func BenchmarkClientMessageHandlers_AllocPerCall(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// This is what ProtocolState.UpdateForFrontentMessage does
-		handlers := ClientMessageHandlers[struct{}]{
-			SimpleQuery:   wrapVoid(state.UpdateForSimpleQueryMessage),
-			ExtendedQuery: wrapVoid(state.UpdateForExtendedQueryMessage),
-		}
-		_, _ = handlers.HandleDefault(msg, func(msg ClientMessage) (struct{}, error) {
-			return struct{}{}, nil
-		})
+		// This benchmarks the Update path
+		state.Update(msg)
 	}
 }
 
 // BenchmarkClientMessageHandlers_ReuseHandlers measures dispatch with reused handlers
 func BenchmarkClientMessageHandlers_ReuseHandlers(b *testing.B) {
 	state := NewProtocolState()
-
-	// Pre-allocate handlers once
-	handlers := ClientMessageHandlers[struct{}]{
-		SimpleQuery:   wrapVoid(state.UpdateForSimpleQueryMessage),
-		ExtendedQuery: wrapVoid(state.UpdateForExtendedQueryMessage),
-	}
-	defaultHandler := func(msg ClientMessage) (struct{}, error) { return struct{}{}, nil }
-
 	msg := (*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = handlers.HandleDefault(msg, defaultHandler)
+		// This benchmarks the Update path
+		state.Update(msg)
 	}
 }
 
