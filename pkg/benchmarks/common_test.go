@@ -207,3 +207,18 @@ func (p *loopPool) Close() error {
 func getBenchName() string {
 	return benchConfig.BuildBenchPath()
 }
+
+// connectAsAdmin creates a connection using admin credentials for DDL operations.
+// This is used for setup/teardown that requires CREATE/DROP permissions.
+func connectAsAdmin(ctx context.Context) (*pgx.Conn, error) {
+	cfg, err := pgx.ParseConfig(benchConfig.ConnString)
+	if err != nil {
+		return nil, err
+	}
+
+	// Replace credentials with admin user
+	cfg.User = "admin"
+	cfg.Password = "admin_password"
+
+	return pgx.ConnectConfig(ctx, cfg)
+}
