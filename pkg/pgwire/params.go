@@ -1,6 +1,8 @@
 package pgwire
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -183,4 +185,46 @@ func quoteLiteral(s string) string {
 	// Replace ' with ''
 	escaped := strings.ReplaceAll(s, "'", "''")
 	return "'" + escaped + "'"
+}
+
+// optionRE matches -c key=value or --key=value with backslash escape support.
+// Pattern: (?:[^\\\s]|\\.)* means "non-backslash-non-space OR backslash-anything, repeated"
+var optionRE = regexp.MustCompile(`(?:-c\s*|--)((?:[^\\\s]|\\.)*)`)
+
+// ParseOptionsParameter parses the PostgreSQL "options" startup parameter.
+// It extracts session variables from formats like "-c key=value" and "--key=value".
+//
+// Escaping rules (per PostgreSQL libpq docs):
+//   - Spaces separate arguments unless escaped with backslash (\)
+//   - \\ represents a literal backslash
+//   - Example: "-c search_path=schema1\ schema2" -> search_path = "schema1 schema2"
+//
+// Reference: https://www.postgresql.org/docs/current/libpq-connect.html
+func ParseOptionsParameter(options string) (map[string]string, error) {
+	result := make(map[string]string)
+	for _, m := range optionRE.FindAllStringSubmatch(options, -1) {
+		kv := unescapeOption(m[1])
+		if eq := strings.Index(kv, "="); eq != -1 {
+			result[kv[:eq]] = kv[eq+1:]
+		} else {
+			return nil, fmt.Errorf("invalid option: expected key=value, got %q", m[1])
+		}
+	}
+	return result, nil
+}
+
+// unescapeOption removes backslash escapes from an option value.
+// \X becomes X for any character X.
+func unescapeOption(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s // Fast path: no escapes
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++ // Skip backslash, take next char literally
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

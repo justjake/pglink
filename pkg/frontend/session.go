@@ -1444,6 +1444,23 @@ func (s *Session) initSessionProcessState() {
 	s.state.ParameterStatuses = maps.Clone(pgwire.BaseParameterStatuses)
 	maps.Copy(s.state.ParameterStatuses, maps.Collect(s.dbConfig.Backend.DefaultStartupParameters.All()))
 	maps.Copy(s.state.ParameterStatuses, s.startupParameters)
+
+	// Parse "options" startup parameter to extract session variables like "-c search_path=schema1".
+	// These get applied to the backend via restoreVariables() when a connection is acquired.
+	if options, ok := s.startupParameters["options"]; ok && options != "" {
+		optionParams, err := pgwire.ParseOptionsParameter(options)
+		if err != nil {
+			s.logger.Warn("failed to parse options parameter", "options", options, "error", err)
+		} else {
+			for key, value := range optionParams {
+				s.state.ParameterStatuses[key] = value
+				s.logger.Debug("applied session variable from options", "key", key, "value", value)
+			}
+		}
+	}
+	// Remove raw "options" from ParameterStatuses - it's a startup parameter, not a session variable
+	delete(s.state.ParameterStatuses, "options")
+
 	s.state.TxStatus = pgwire.TxIdle
 	s.state.Statements = pgwire.NamedObjectState[bool]{
 		Alive:         make(map[string]bool),
