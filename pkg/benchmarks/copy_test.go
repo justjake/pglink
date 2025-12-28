@@ -62,6 +62,7 @@ func BenchmarkCopyOut(b *testing.B) {
 				i++
 			}
 		})
+		ReportThroughput(b, 1) // 1 COPY command per iteration
 	})
 }
 
@@ -128,6 +129,7 @@ func BenchmarkCopyIn(b *testing.B) {
 				i++
 			}
 		})
+		ReportThroughput(b, 3) // 3 queries per iteration: CREATE TABLE, TRUNCATE, COPY
 	})
 }
 

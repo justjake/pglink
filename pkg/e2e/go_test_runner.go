@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/justjake/pglink/pkg/benchmarks"
 )
 
 // GoTestRunner runs benchmarks using `go test -bench`.
@@ -81,28 +83,22 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 	// Set up environment
 	env := os.Environ()
 
-	// Add benchmark configuration via environment variables
-	env = append(env,
-		fmt.Sprintf("BENCH_CONN_STRING=%s", cfg.ConnString),
-		fmt.Sprintf("BENCH_TARGET=%s", cfg.Target.Name),
-		fmt.Sprintf("BENCH_DURATION=%s", cfg.Duration),
-		fmt.Sprintf("BENCH_WARMUP=%s", cfg.Warmup),
-	)
-
+	// Build benchmark config and serialize to environment variables
+	benchCfg := benchmarks.BenchConfig{
+		ConnString:  cfg.ConnString,
+		Target:      cfg.Target.Name,
+		Duration:    cfg.Duration,
+		Warmup:      cfg.Warmup,
+		Seed:        cfg.Seed,
+		RunID:       cfg.RunID,
+		Round:       cfg.Round,
+		TotalRounds: cfg.TotalRounds,
+	}
 	if cfg.SimpleQueryMode {
-		env = append(env, "BENCH_SIMPLE_QUERY=true")
+		benchCfg.Protocol = "simple"
 	}
 
-	if cfg.Seed != 0 {
-		env = append(env, fmt.Sprintf("BENCH_SEED=%d", cfg.Seed))
-	}
-
-	// Add run metadata
-	env = append(env,
-		fmt.Sprintf("BENCH_RUN_ID=%s", cfg.RunID),
-		fmt.Sprintf("BENCH_ROUND=%d", cfg.Round),
-		fmt.Sprintf("BENCH_TOTAL_ROUNDS=%d", cfg.TotalRounds),
-	)
+	env = append(env, benchCfg.ToEnv()...)
 
 	cmd.Env = env
 

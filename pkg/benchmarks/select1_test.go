@@ -46,6 +46,7 @@ func BenchmarkSelect1(b *testing.B) {
 				i++
 			}
 		})
+		ReportThroughput(b, 1) // 1 query per iteration
 	})
 }
 
@@ -83,5 +84,6 @@ func BenchmarkConnect(b *testing.B) {
 				i++
 			}
 		})
+		ReportThroughput(b, 1) // 1 query per iteration (SELECT 1)
 	})
 }

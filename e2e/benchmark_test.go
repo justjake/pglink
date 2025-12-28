@@ -16,6 +16,21 @@ import (
 	"github.com/justjake/pglink/pkg/config/pgbouncer"
 )
 
+// reportThroughput reports QPS and Ops/s custom metrics for benchmarks.
+// - queriesPerOp: number of PostgreSQL queries executed per benchmark iteration
+// Call this after b.StopTimer() or at the end of the benchmark loop.
+func reportThroughput(b *testing.B, queriesPerOp int) {
+	elapsed := b.Elapsed()
+	if elapsed <= 0 {
+		return
+	}
+	elapsedSec := elapsed.Seconds()
+	opsPerSec := float64(b.N) / elapsedSec
+	qps := float64(b.N*queriesPerOp) / elapsedSec
+	b.ReportMetric(opsPerSec, "ops/s")
+	b.ReportMetric(qps, "qps")
+}
+
 // BenchmarkTarget represents a connection target for benchmarking
 type BenchmarkTarget struct {
 	Name    string
@@ -106,6 +121,8 @@ func BenchmarkSelect1_Serial(b *testing.B) {
 					b.Fatalf("query failed: %v", err)
 				}
 			}
+			b.StopTimer()
+			reportThroughput(b, 1) // 1 query per iteration
 		})
 	}
 }
@@ -142,6 +159,8 @@ func BenchmarkSelect1_Parallel(b *testing.B) {
 						}
 					}
 				})
+				b.StopTimer()
+				reportThroughput(b, 1) // 1 query per iteration
 			})
 		}
 	}
@@ -189,6 +208,8 @@ func BenchmarkSelectRows_Serial(b *testing.B) {
 						b.Fatalf("expected %d rows, got %d", rows, count)
 					}
 				}
+				b.StopTimer()
+				reportThroughput(b, 1) // 1 query per iteration
 			})
 		}
 	}
@@ -222,6 +243,8 @@ func BenchmarkSelectRows_Parallel(b *testing.B) {
 					pgRows.Close()
 				}
 			})
+			b.StopTimer()
+			reportThroughput(b, 1) // 1 query per iteration
 		})
 	}
 }
@@ -255,6 +278,8 @@ func BenchmarkTransaction_Serial(b *testing.B) {
 					b.Fatalf("commit failed: %v", err)
 				}
 			}
+			b.StopTimer()
+			reportThroughput(b, 3) // 3 queries per iteration: BEGIN, SELECT 1, COMMIT
 		})
 	}
 }
@@ -293,6 +318,8 @@ func BenchmarkTransaction_Parallel(b *testing.B) {
 					}
 				}
 			})
+			b.StopTimer()
+			reportThroughput(b, 3) // 3 queries per iteration: BEGIN, SELECT 1, COMMIT
 		})
 	}
 }
@@ -327,6 +354,8 @@ func BenchmarkConnect(b *testing.B) {
 				}
 				conn.Close(ctx)
 			}
+			b.StopTimer()
+			reportThroughput(b, 0) // 0 queries - connection only
 		})
 	}
 }
@@ -363,6 +392,7 @@ func BenchmarkLatencyDistribution(b *testing.B) {
 			}
 
 			b.StopTimer()
+			reportThroughput(b, 1) // 1 query per iteration
 
 			// Report latency statistics
 			if len(latencies) > 0 {

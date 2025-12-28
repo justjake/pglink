@@ -8,7 +8,6 @@ You must take your time and think deeply when working on pglink. Do not be lazy.
 
 When you encounter a bug, take a step back and look at the structure of the project. You should fix the underlying issues to make the code correct by design, rather than adding a bandaid to fix the symptom. If you need to add a goroutine to solve a bug, you are probably making a bandaid fix rather than addressing the underlying issue.
 
-
 ## Test timeouts
 
 This project is highly asynchronous, so it's easy to write tests that hang
@@ -34,6 +33,10 @@ Supported log levels: `debug`, `info`, `warn`, `error`.
 - `pkg/backend`: Interactions between the proxy and backend PostgreSQL / Materialize servers. Pools connections to the backend.
 - `pkg/config`: Config loading and validation.
 - `cmd/pglink`: Main entry point.
+
+## Reference: pgx, pgconn, pgproto3
+
+Libraries for PostgreSQL. You can read their source in ./vendor.
 
 ## Reference: PgBouncer
 
@@ -138,6 +141,11 @@ func (c *Cache) ForEach(fn func(key, value string)) {
 
 When told to "work independently in a worktree", use git worktrees to work on a separate branch without affecting the main checkout.
 
+### Main worktree
+
+Claude shouldn't make commits or change git state in the main worktree.
+It's okay to make commits in worktrees created by Claude.
+
 ### Creating a worktree
 
 ```bash
@@ -145,6 +153,7 @@ bin/worktree-new <task-name> [path-to-claude-plan]
 ```
 
 This creates:
+
 - A worktree at `worktrees/<task-name>/`
 - A branch named `worktree/<task-name>`
 - A symlink to the Claude plan file (if provided)
