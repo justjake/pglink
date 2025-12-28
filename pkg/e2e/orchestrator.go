@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	promapi "github.com/prometheus/client_golang/api"
+	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/expfmt"
 
 	"github.com/justjake/pglink/pkg/config"
@@ -1009,6 +1011,7 @@ type tempoMetrics struct {
 }
 
 // checkPrometheus queries Prometheus to verify metrics were pushed via remote write.
+// Uses the official prometheus client library for robust API interaction.
 func (o *Orchestrator) checkPrometheus(ctx context.Context) (*MetricsCheckResult, error) {
 	result := &MetricsCheckResult{
 		Found:       false,
@@ -1016,47 +1019,34 @@ func (o *Orchestrator) checkPrometheus(ctx context.Context) (*MetricsCheckResult
 		Source:      "prometheus:19090",
 	}
 
-	// Query Prometheus for pglink metrics using the series API
-	// We look for any metrics with the bench_execution_id label matching our run
-	// Note: We don't use time constraints since the execution_id is unique enough
-	promURL := "http://localhost:19090/api/v1/series"
-	params := url.Values{}
-	// Match any metric with our execution_id label
-	params.Set("match[]", fmt.Sprintf("{bench_execution_id=\"%s\"}", o.executionID))
-
-	reqURL := fmt.Sprintf("%s?%s", promURL, params.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	// Create Prometheus API client
+	promClient, err := promapi.NewClient(promapi.Config{
+		Address: "http://localhost:19090",
+	})
 	if err != nil {
-		return result, fmt.Errorf("failed to create request: %w", err)
+		return result, fmt.Errorf("failed to create prometheus client: %w", err)
 	}
+	api := promv1.NewAPI(promClient)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	// Query for series with our execution_id label
+	// Use a wide time range since execution_id is unique
+	matches := []string{fmt.Sprintf("{bench_execution_id=\"%s\"}", o.executionID)}
+	startTime := time.Now().Add(-1 * time.Hour)
+	endTime := time.Now()
+
+	series, warnings, err := api.Series(ctx, matches, startTime, endTime)
 	if err != nil {
-		return result, fmt.Errorf("prometheus request failed: %w", err)
+		return result, fmt.Errorf("prometheus series query failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return result, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
+	if len(warnings) > 0 {
+		o.Logger.Warn("prometheus query warnings", "warnings", warnings)
 	}
 
-	// Parse response
-	var promResp prometheusSeriesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&promResp); err != nil {
-		return result, fmt.Errorf("failed to decode prometheus response: %w", err)
-	}
-
-	if promResp.Status != "success" {
-		return result, fmt.Errorf("prometheus query failed: status=%s", promResp.Status)
-	}
-
-	// Collect unique metric names
+	// Collect unique metric names from returned label sets
 	metricSet := make(map[string]bool)
-	for _, series := range promResp.Data {
-		if name, ok := series["__name__"]; ok {
-			metricSet[name] = true
+	for _, labelSet := range series {
+		if name, ok := labelSet["__name__"]; ok {
+			metricSet[string(name)] = true
 		}
 	}
 
@@ -1064,7 +1054,7 @@ func (o *Orchestrator) checkPrometheus(ctx context.Context) (*MetricsCheckResult
 		result.MetricNames = append(result.MetricNames, name)
 	}
 
-	result.SampleCount = len(promResp.Data)
+	result.SampleCount = len(series)
 	result.Found = len(result.MetricNames) > 0
 
 	o.Logger.Info("prometheus check complete",
@@ -1072,12 +1062,6 @@ func (o *Orchestrator) checkPrometheus(ctx context.Context) (*MetricsCheckResult
 		"samples", result.SampleCount)
 
 	return result, nil
-}
-
-// prometheusSeriesResponse is the response from Prometheus series API.
-type prometheusSeriesResponse struct {
-	Status string              `json:"status"`
-	Data   []map[string]string `json:"data"`
 }
 
 // scrapeMetricsEndpoint scrapes pglink's /metrics endpoint directly to verify metrics are being generated.
