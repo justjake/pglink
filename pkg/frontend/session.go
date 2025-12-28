@@ -803,6 +803,11 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	}
 
 	for {
+		// Check timeouts before processing any messages
+		if result := s.checkTimeouts(time.Now()); result != nil {
+			return s.handleTimeout(result)
+		}
+
 		// Check both sides without blocking
 		gotFrontend, errF := frontendCursor.TryNextBatch()
 		gotBackend, errB := backendCursor.TryNextBatch()
@@ -828,8 +833,18 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			}
 		}
 
-		// If nothing available, wait for either side
+		// If nothing available, wait for either side with timeout
 		if !gotFrontend && !gotBackend {
+			// Calculate timeout deadline for the select
+			var timeoutCh <-chan time.Time
+			if deadline := s.nextTimeoutDeadline(); !deadline.IsZero() {
+				duration := time.Until(deadline)
+				if duration > 0 {
+					timeoutCh = time.After(duration)
+				}
+				// If duration <= 0, timeout already passed, will be caught at top of next iteration
+			}
+
 			select {
 			case <-backendCursor.Ready():
 			case <-frontendCursor.Ready():
@@ -837,6 +852,8 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 				return backendCursor.Err()
 			case <-frontendCursor.Done():
 				return frontendCursor.Err()
+			case <-timeoutCh:
+				// Timeout fired, will be checked at top of next iteration
 			}
 		}
 	}

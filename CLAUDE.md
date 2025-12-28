@@ -85,7 +85,14 @@ This also triggers a flight recorder snapshot if enabled.
 - `pkg/frontend`: Interactions between clients and the proxy. Accepts incoming connections, authenticates clients, proxies client requests to the backend.
 - `pkg/backend`: Interactions between the proxy and backend PostgreSQL / Materialize servers. Pools connections to the backend.
 - `pkg/config`: Config loading and validation.
+- `pkg/config/pgbouncer`: Generates PgBouncer configuration files from pglink config (for benchmarking).
 - `cmd/pglink`: Main entry point.
+
+### PgBouncer Config Generator
+
+The `pkg/config/pgbouncer` package generates equivalent PgBouncer configuration from pglink config. This is used for benchmarking pglink against PgBouncer.
+
+**Important:** When adding new config options to `DatabaseConfig` that have PgBouncer equivalents (e.g., timeout settings, pool settings), you must also update `pkg/config/pgbouncer/pgbouncer.go` to pass through those settings. This ensures benchmark comparisons are fair.
 
 ## Reference: pgx, pgconn, pgproto3
 
