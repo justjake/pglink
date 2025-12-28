@@ -68,10 +68,10 @@ func main() {
 	profileDuration := flag.Duration("profile-duration", 30*time.Second, "duration for CPU profile collection")
 
 	// pgbench flags
-	pgbenchClients := flag.Int("pgbench-clients", 0, "pgbench number of clients (-c flag, default: use -cpu value)")
-	pgbenchThreads := flag.Int("pgbench-threads", 0, "pgbench number of threads (-j flag, default: clients)")
-	pgbenchScale := flag.Int("pgbench-scale", 10, "pgbench scale factor for initialization")
-	pgbenchProtocol := flag.String("pgbench-protocol", "extended", "pgbench protocol (simple, extended, prepared)")
+	pgbenchScale := flag.Int("pgbench-scale", 10,
+		"pgbench scale factor for table initialization (-s flag). "+
+			"Scale 1 = 100K rows (~16MB), 10 = 1M rows (~160MB), 100 = 10M rows (~1.6GB). "+
+			"Higher values increase lock contention on pgbench_branches/tellers tables.")
 
 	flag.Parse()
 
@@ -209,7 +209,7 @@ func main() {
 	}
 
 	// Set up runners based on requested cases
-	runners := buildRunners(cfg.Cases, *cpu, *pgbenchClients, *pgbenchThreads, *pgbenchScale, *pgbenchProtocol)
+	runners := buildRunners(cfg.Cases, *pgbenchScale)
 	orchestrator.SetRunners(runners)
 
 	// Set up context with signal handling
@@ -256,21 +256,17 @@ func main() {
 // buildRunners creates the appropriate benchmark runners based on the requested cases.
 // If no cases are specified (empty slice), returns just the Go runner which runs all Go cases.
 // If specific cases are specified, creates runners for each type that has matching cases.
-func buildRunners(cases []string, cpu, pgbenchClients, pgbenchThreads, pgbenchScale int, pgbenchProtocol string) []e2e.BenchRunner {
+//
+// Note: pgbench clients, threads, and protocol are derived from standard flags:
+//   - clients: from -cpu flag (via BenchRunConfig.CPU)
+//   - threads: from GOMAXPROCS (automatically detected)
+//   - protocol: from -simple-query flag (via BenchRunConfig.SimpleQueryMode)
+func buildRunners(cases []string, pgbenchScale int) []e2e.BenchRunner {
 	goRunner := e2e.NewGoTestRunner()
 	pgbenchRunner := e2e.NewPgbenchRunner()
 
-	// Configure pgbench runner
-	if pgbenchClients > 0 {
-		pgbenchRunner.Clients = pgbenchClients
-	} else {
-		pgbenchRunner.Clients = cpu
-	}
-	if pgbenchThreads > 0 {
-		pgbenchRunner.Threads = pgbenchThreads
-	}
+	// Configure pgbench-specific settings
 	pgbenchRunner.ScaleFactor = pgbenchScale
-	pgbenchRunner.Protocol = pgbenchProtocol
 	// Set backend connection string for pgbench init (must be direct to postgres with admin user)
 	pgbenchRunner.BackendConnString = "postgres://postgres:postgres@localhost:15432/uno?sslmode=disable"
 

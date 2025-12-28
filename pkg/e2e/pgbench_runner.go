@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,18 +23,8 @@ type PgbenchRunner struct {
 	// BinaryPath is the path to the pgbench binary. If empty, uses "pgbench" from PATH.
 	BinaryPath string
 
-	// Clients is the number of concurrent clients (-c flag). Default: 100.
-	Clients int
-
-	// Threads is the number of threads (-j flag). Default: min(Clients, NumCPU).
-	Threads int
-
 	// ScaleFactor is the scale factor for pgbench init (-s flag). Default: 10.
 	ScaleFactor int
-
-	// Protocol is the query protocol to use (-M flag): simple, extended, or prepared.
-	// Default: extended.
-	Protocol string
 
 	// Schema is the schema to use for pgbench tables. Default: schema1.
 	// This is set via search_path in the connection string.
@@ -50,10 +41,7 @@ type PgbenchRunner struct {
 // NewPgbenchRunner creates a new PgbenchRunner with default settings.
 func NewPgbenchRunner() *PgbenchRunner {
 	return &PgbenchRunner{
-		Clients:     100,
-		Threads:     0, // Will be set to min(Clients, NumCPU) at runtime
 		ScaleFactor: 10,
-		Protocol:    "extended",
 		Schema:      "schema1",
 	}
 }
@@ -90,6 +78,11 @@ func (r *PgbenchRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunR
 		return nil, fmt.Errorf("pgbench binary not found: %w", err)
 	}
 
+	// Create a timeout context to prevent hangs.
+	timeout := cfg.RunTimeout()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	// Ensure pgbench tables are initialized
 	if !r.initialized {
 		backendConn := r.BackendConnString
@@ -109,10 +102,16 @@ func (r *PgbenchRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunR
 	var allOutput bytes.Buffer
 	var totalDuration time.Duration
 
-	for _, caseName := range cfg.Cases {
+	for caseIndex, caseName := range cfg.Cases {
 		caseInfo, ok := pgbenchCaseInfo[strings.ToLower(caseName)]
 		if !ok {
 			continue // Skip unknown cases
+		}
+
+		// Open output files for this case
+		outputs, err := OpenProcessOutputs(cfg.OutputDir, "pgbench", cfg.Target.Name, caseIndex+1, caseName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open output files: %w", err)
 		}
 
 		startTime := time.Now()
@@ -124,15 +123,18 @@ func (r *PgbenchRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunR
 		// Set up pipes for streaming output
 		stdoutPipe, err := cmd.StdoutPipe()
 		if err != nil {
+			_ = outputs.Close()
 			return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 		}
 		stderrPipe, err := cmd.StderrPipe()
 		if err != nil {
+			_ = outputs.Close()
 			return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
 		}
 
 		// Start the command
 		if err := cmd.Start(); err != nil {
+			_ = outputs.Close()
 			return nil, fmt.Errorf("failed to start pgbench: %w", err)
 		}
 
@@ -141,26 +143,30 @@ func (r *PgbenchRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunR
 		var wg sync.WaitGroup
 		wg.Add(2)
 
-		// Stream stdout to stderr for visibility and capture
+		// Build writers for stdout: buffer (for parsing), os.Stderr (visibility), and file
+		stdoutWriters := []io.Writer{&stdout, os.Stderr}
+		if outputs.Stdout != nil {
+			stdoutWriters = append(stdoutWriters, outputs.Stdout)
+		}
+		stdoutWriter := io.MultiWriter(stdoutWriters...)
+
+		// Build writers for stderr: buffer (for error messages), os.Stderr (visibility), and file
+		stderrWriters := []io.Writer{&stderr, os.Stderr}
+		if outputs.Stderr != nil {
+			stderrWriters = append(stderrWriters, outputs.Stderr)
+		}
+		stderrWriter := io.MultiWriter(stderrWriters...)
+
+		// Stream stdout
 		go func() {
 			defer wg.Done()
-			buf := make([]byte, 1024)
-			for {
-				n, err := stdoutPipe.Read(buf)
-				if n > 0 {
-					_, _ = stdout.Write(buf[:n])
-					_, _ = os.Stderr.Write(buf[:n]) // Stream to stderr for real-time visibility
-				}
-				if err != nil {
-					break
-				}
-			}
+			_, _ = io.Copy(stdoutWriter, stdoutPipe)
 		}()
 
-		// Capture stderr
+		// Stream stderr
 		go func() {
 			defer wg.Done()
-			_, _ = io.Copy(&stderr, stderrPipe)
+			_, _ = io.Copy(stderrWriter, stderrPipe)
 		}()
 
 		// Wait for output streaming to complete
@@ -171,8 +177,19 @@ func (r *PgbenchRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunR
 		duration := time.Since(startTime)
 		totalDuration += duration
 
+		// Close output files
+		_ = outputs.Close()
+
 		if err != nil {
-			// Log the error but continue with other cases
+			// Check if this was a timeout - return partial results with error
+			if ctx.Err() != nil {
+				return &BenchRunResult{
+					Output:   allOutput.Bytes(),
+					Metrics:  allMetrics,
+					Duration: totalDuration,
+				}, fmt.Errorf("pgbench %s timed out after %v: %w", caseName, timeout, ctx.Err())
+			}
+			// Other errors: log and continue with other cases
 			fmt.Fprintf(&allOutput, "# pgbench %s failed: %v\n%s\n", caseName, err, stderr.String())
 			continue
 		}
@@ -196,24 +213,14 @@ func (r *PgbenchRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunR
 func (r *PgbenchRunner) buildArgs(cfg BenchRunConfig, caseFlag string) []string {
 	args := []string{}
 
-	// Number of clients
-	clients := r.Clients
-	if clients == 0 {
-		clients = cfg.CPU
-	}
-	if clients > 0 {
-		args = append(args, "-c", strconv.Itoa(clients))
+	// Number of clients from cfg.CPU
+	if cfg.CPU > 0 {
+		args = append(args, "-c", strconv.Itoa(cfg.CPU))
 	}
 
-	// Number of threads
-	threads := r.Threads
-	if threads == 0 && clients > 0 {
-		// Default to clients or runtime.NumCPU(), whichever is smaller
-		threads = clients
-	}
-	if threads > 0 {
-		args = append(args, "-j", strconv.Itoa(threads))
-	}
+	// Number of threads from GOMAXPROCS
+	threads := runtime.GOMAXPROCS(0)
+	args = append(args, "-j", strconv.Itoa(threads))
 
 	// Duration (in seconds)
 	duration := int(cfg.Duration.Seconds())
@@ -221,13 +228,16 @@ func (r *PgbenchRunner) buildArgs(cfg BenchRunConfig, caseFlag string) []string 
 		args = append(args, "-T", strconv.Itoa(duration))
 	}
 
-	// Protocol mode
-	protocol := r.Protocol
+	// Protocol mode from cfg.SimpleQueryMode
+	protocol := "extended"
 	if cfg.SimpleQueryMode {
 		protocol = "simple"
 	}
-	if protocol != "" {
-		args = append(args, "-M", protocol)
+	args = append(args, "-M", protocol)
+
+	// Random seed from cfg.Seed
+	if cfg.Seed != 0 {
+		args = append(args, "--random-seed", strconv.FormatInt(cfg.Seed, 10))
 	}
 
 	// Built-in script flag (e.g., "-b select-only")

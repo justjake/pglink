@@ -283,3 +283,14 @@ type RoundResult struct {
 	Duration time.Duration `json:"duration"`
 	Output   string        `json:"output,omitempty"` // Raw benchmark output
 }
+
+// RunTimeout calculates a timeout for a benchmark run based on duration and warmup.
+// Adds 20% buffer and ensures minimum 30s timeout.
+func (cfg BenchRunConfig) RunTimeout() time.Duration {
+	timeout := cfg.Duration + cfg.Warmup
+	timeout += timeout / 5 // 20% buffer
+	if timeout < 30*time.Second {
+		timeout = 30 * time.Second
+	}
+	return timeout
+}

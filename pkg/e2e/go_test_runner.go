@@ -45,6 +45,11 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 		goPath = "go"
 	}
 
+	// Create a timeout context to prevent hangs
+	timeout := cfg.RunTimeout()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	// Build the go test command
 	args := []string{
 		"test",
@@ -107,6 +112,17 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 
 	cmd.Env = env
 
+	// Open output files for this run
+	casesStr := strings.Join(cfg.Cases, ",")
+	if casesStr == "" {
+		casesStr = "all"
+	}
+	outputs, err := OpenProcessOutputs(cfg.OutputDir, "go-test", cfg.Target.Name, cfg.Round, casesStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open output files: %w", err)
+	}
+	defer func() { _ = outputs.Close() }()
+
 	// Set up pipes to stream output in real-time
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -128,26 +144,30 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Stream stdout (benchmark results) to stderr for visibility and capture
+	// Build writers for stdout: buffer (for parsing), os.Stderr (visibility), and file
+	stdoutWriters := []io.Writer{&stdout, os.Stderr}
+	if outputs.Stdout != nil {
+		stdoutWriters = append(stdoutWriters, outputs.Stdout)
+	}
+	stdoutWriter := io.MultiWriter(stdoutWriters...)
+
+	// Build writers for stderr: buffer (for error messages), os.Stderr (visibility), and file
+	stderrWriters := []io.Writer{&stderr, os.Stderr}
+	if outputs.Stderr != nil {
+		stderrWriters = append(stderrWriters, outputs.Stderr)
+	}
+	stderrWriter := io.MultiWriter(stderrWriters...)
+
+	// Stream stdout
 	go func() {
 		defer wg.Done()
-		buf := make([]byte, 1024)
-		for {
-			n, err := stdoutPipe.Read(buf)
-			if n > 0 {
-				_, _ = stdout.Write(buf[:n])
-				_, _ = os.Stderr.Write(buf[:n]) // Stream to stderr for real-time visibility
-			}
-			if err != nil {
-				break
-			}
-		}
+		_, _ = io.Copy(stdoutWriter, stdoutPipe)
 	}()
 
-	// Capture stderr
+	// Stream stderr
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(&stderr, stderrPipe)
+		_, _ = io.Copy(stderrWriter, stderrPipe)
 	}()
 
 	// Wait for output streaming to complete
@@ -169,6 +189,12 @@ func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunRe
 	}
 
 	if err != nil {
+		// Check if this was a timeout - return partial results with error
+		if ctx.Err() != nil {
+			result.Metrics = parseBenchmarkOutput(stdout.Bytes())
+			result.Error = fmt.Errorf("go test timed out after %v: %w", timeout, ctx.Err())
+			return result, result.Error
+		}
 		result.Error = fmt.Errorf("go test failed: %w\nstderr: %s", err, stderr.String())
 	}
 

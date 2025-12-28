@@ -48,8 +48,9 @@ type Orchestrator struct {
 	executionID      string
 	outputDir        string
 	runnerGitInfo    *RunnerGitInfo
-	processes        map[string]*exec.Cmd // Running processes by target name
-	metricsPorts     map[string]int       // Metrics ports by target name (for observable mode)
+	processes        map[string]*exec.Cmd       // Running processes by target name
+	processOutputs   map[string]*ProcessOutputs // Output files by target name
+	metricsPorts     map[string]int             // Metrics ports by target name (for observable mode)
 }
 
 // NewOrchestrator creates a new Orchestrator with the given configuration.
@@ -75,6 +76,7 @@ func NewOrchestrator(cfg BenchSuiteConfig, logger *slog.Logger) (*Orchestrator, 
 		currentWorktree:  currentWorktree,
 		portOffset:       portOffset,
 		processes:        make(map[string]*exec.Cmd),
+		processOutputs:   make(map[string]*ProcessOutputs),
 		metricsPorts:     make(map[string]int),
 	}, nil
 }
@@ -238,7 +240,6 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 				cpuProfileErr = o.collectCPUProfile(target)
 			}()
 		}
-
 
 		roundResult := RoundResult{
 			Round: round,
@@ -454,19 +455,25 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 
 	args = append(args, target.ExtraArgs...)
 
-	// Create log file - use "default" suffix for the default "pglink" target
-	logSuffix := target.Name
-	if target.Name == "pglink" {
-		logSuffix = "default"
-	}
-	logFile, err := os.Create(filepath.Join(o.outputDir, fmt.Sprintf("pglink.%s.log", logSuffix)))
+	// Create output files for pglink process
+	outputs, err := OpenProcessOutputs(o.outputDir, "pglink", target.Name, 1, "")
 	if err != nil {
-		return fmt.Errorf("failed to create log file: %w", err)
+		return fmt.Errorf("failed to create output files: %w", err)
 	}
+	o.processOutputs[target.Name] = outputs
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	// Use io.MultiWriter to send to both stdout file and os.Stderr for visibility
+	if outputs.Stdout != nil {
+		cmd.Stdout = io.MultiWriter(outputs.Stdout, os.Stderr)
+	} else {
+		cmd.Stdout = os.Stderr
+	}
+	if outputs.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(outputs.Stderr, os.Stderr)
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 
 	// Set up environment
 	env := os.Environ()
@@ -481,7 +488,8 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 	cmd.Env = env
 
 	if err := cmd.Start(); err != nil {
-		_ = logFile.Close()
+		_ = outputs.Close()
+		delete(o.processOutputs, target.Name)
 		return fmt.Errorf("failed to start pglink: %w", err)
 	}
 
@@ -582,21 +590,32 @@ func (o *Orchestrator) startPgbouncer(ctx context.Context, target *TargetConfig)
 
 	o.Logger.Info("generated pgbouncer config", "path", configDir, "pool_max_conns", cfg.Databases["alpha_uno"].Backend.PoolMaxConns)
 
-	// Create log file
-	logFile, err := os.Create(filepath.Join(o.outputDir, fmt.Sprintf("pgbouncer.%s.log", target.Name)))
+	// Create output files for pgbouncer process
+	outputs, err := OpenProcessOutputs(o.outputDir, "pgbouncer", target.Name, 1, "")
 	if err != nil {
-		return fmt.Errorf("failed to create log file: %w", err)
+		return fmt.Errorf("failed to create output files: %w", err)
 	}
+	o.processOutputs[target.Name] = outputs
 
 	// Start pgbouncer
 	configPath := filepath.Join(configDir, "pgbouncer.ini")
 	cmd := exec.CommandContext(ctx, "pgbouncer", configPath)
 	cmd.Dir = configDir // Run from config dir so relative paths work
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	// Use io.MultiWriter to send to both stdout file and os.Stderr for visibility
+	if outputs.Stdout != nil {
+		cmd.Stdout = io.MultiWriter(outputs.Stdout, os.Stderr)
+	} else {
+		cmd.Stdout = os.Stderr
+	}
+	if outputs.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(outputs.Stderr, os.Stderr)
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 
 	if err := cmd.Start(); err != nil {
-		_ = logFile.Close()
+		_ = outputs.Close()
+		delete(o.processOutputs, target.Name)
 		return fmt.Errorf("failed to start pgbouncer: %w", err)
 	}
 
@@ -641,6 +660,11 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 
 	if cmd.Process == nil {
 		delete(o.processes, name)
+		// Close output files
+		if outputs, ok := o.processOutputs[name]; ok {
+			_ = outputs.Close()
+			delete(o.processOutputs, name)
+		}
 		return
 	}
 
@@ -650,6 +674,11 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		delete(o.processes, name)
+		// Close output files
+		if outputs, ok := o.processOutputs[name]; ok {
+			_ = outputs.Close()
+			delete(o.processOutputs, name)
+		}
 		return
 	}
 
@@ -669,6 +698,11 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 	}
 
 	delete(o.processes, name)
+	// Close output files
+	if outputs, ok := o.processOutputs[name]; ok {
+		_ = outputs.Close()
+		delete(o.processOutputs, name)
+	}
 }
 
 // ensureDockerContainers ensures required docker containers are running.
