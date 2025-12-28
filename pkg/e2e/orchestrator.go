@@ -80,6 +80,11 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 		return nil, fmt.Errorf("failed to init output dir: %w", err)
 	}
 
+	// Update latest symlink immediately so users can monitor progress
+	if err := o.updateLatestSymlink(); err != nil {
+		o.Logger.Warn("failed to update latest symlink", "error", err)
+	}
+
 	// Capture runner git info
 	if err := o.captureRunnerGitInfo(); err != nil {
 		return nil, fmt.Errorf("failed to capture git info: %w", err)
@@ -134,11 +139,6 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 	// Generate BENCHMARK.md report
 	if err := o.generateBenchmarkReport(results); err != nil {
 		o.Logger.Warn("failed to generate benchmark report", "error", err)
-	}
-
-	// Update latest symlink
-	if err := o.updateLatestSymlink(); err != nil {
-		o.Logger.Warn("failed to update latest symlink", "error", err)
 	}
 
 	return results, nil
@@ -284,8 +284,12 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 
 	args = append(args, target.ExtraArgs...)
 
-	// Create log file
-	logFile, err := os.Create(filepath.Join(o.outputDir, fmt.Sprintf("pglink.%s.log", target.Name)))
+	// Create log file - use "default" suffix for the default "pglink" target
+	logSuffix := target.Name
+	if target.Name == "pglink" {
+		logSuffix = "default"
+	}
+	logFile, err := os.Create(filepath.Join(o.outputDir, fmt.Sprintf("pglink.%s.log", logSuffix)))
 	if err != nil {
 		return fmt.Errorf("failed to create log file: %w", err)
 	}

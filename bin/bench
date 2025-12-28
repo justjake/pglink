@@ -126,72 +126,6 @@ build_pglink() {
     log "Built out/pglink"
 }
 
-# Run benchmarks
-run_benchmarks() {
-    log "Running benchmarks..."
-
-    # Create output directory with timestamp
-    timestamp=$(date +%Y%m%d_%H%M%S)
-    output_dir="out/benchmark/${timestamp}"
-    mkdir -p "$output_dir"
-
-    # Default benchmark parameters
-    duration="${BENCH_DURATION:-10s}"
-    warmup="${BENCH_WARMUP:-3s}"
-    rounds="${BENCH_ROUNDS:-2}"
-    cpu="${BENCH_CPU:-100}"
-    full_targets="${BENCH_FULL_TARGETS:-false}"
-
-    log "Benchmark parameters:"
-    log "  Duration: $duration"
-    log "  Warmup: $warmup"
-    log "  Rounds: $rounds"
-    log "  CPU (parallelism): $cpu"
-    log "  Full targets: $full_targets"
-    log "  Output: $output_dir"
-
-    # Build args array
-    args=(
-        -duration "$duration"
-        -warmup "$warmup"
-        -rounds "$rounds"
-        -cpu "$cpu"
-        -output "$output_dir"
-    )
-
-    # Add full-targets flag if enabled
-    if [[ "$full_targets" == "true" ]]; then
-        args+=(-full-targets)
-    fi
-
-    # Run the benchmark
-    ./out/bench "${args[@]}" 2>&1 | tee "$output_dir/bench.log"
-
-    # Copy results to latest
-    ln -sfn "$timestamp" out/benchmark/latest
-
-    log "Results written to $output_dir"
-    log "Latest results linked at out/benchmark/latest"
-}
-
-# Quick smoke test mode
-smoke_test() {
-    log "Running smoke test (quick benchmark)..."
-
-    output_dir="out/benchmark/smoke"
-    mkdir -p "$output_dir"
-
-    ./out/bench \
-        -duration 2s \
-        -warmup 1s \
-        -rounds 1 \
-        -cpu 50 \
-        -output "$output_dir" \
-        2>&1 | tee "$output_dir/bench.log"
-
-    log "Smoke test complete. Results in $output_dir"
-}
-
 # Main
 main() {
     local mode="${1:-full}"
@@ -204,20 +138,35 @@ main() {
     build_pglink
     build_bench
 
+    log "Running benchmarks..."
+
+    # All directory creation is handled by cmd/bench
+    # Default output: out/benchmarks/<timestamp>-<execution_id>/
+    # Latest symlink: out/benchmarks/latest
     case "$mode" in
         full)
-            run_benchmarks
+            log "Mode: full (duration=10s, warmup=3s, rounds=2)"
+            ./out/bench \
+                -duration 10s \
+                -warmup 3s \
+                -rounds 2 \
+                -cpu 100
             ;;
         smoke)
-            smoke_test
+            log "Mode: smoke (duration=2s, warmup=1s, rounds=1)"
+            ./out/bench \
+                -duration 2s \
+                -warmup 1s \
+                -rounds 1 \
+                -cpu 50
             ;;
         quick)
-            # Quick test with reduced parameters
-            BENCH_DURATION=5s \
-            BENCH_WARMUP=2s \
-            BENCH_ROUNDS=1 \
-            BENCH_CPU=100 \
-            run_benchmarks
+            log "Mode: quick (duration=5s, warmup=2s, rounds=1)"
+            ./out/bench \
+                -duration 5s \
+                -warmup 2s \
+                -rounds 1 \
+                -cpu 100
             ;;
         *)
             error "Unknown mode: $mode"
@@ -227,8 +176,7 @@ main() {
     esac
 
     log "Benchmark complete!"
-    log "Results: out/benchmark/latest"
-    log "Report: BENCHMARKS.md"
+    log "Results: out/benchmarks/latest/BENCHMARK.md"
 }
 
 main "$@"

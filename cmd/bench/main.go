@@ -42,7 +42,7 @@ func main() {
 	seed := flag.Int64("seed", 0, "random seed for workload generation (0 = time-based)")
 
 	// A/B test flags
-	aLabel := flag.String("a-label", "current", "label for A variant")
+	aLabel := flag.String("a-label", "", "label for A variant (empty = 'pglink')")
 	aWorktree := flag.String("a-worktree", "", "path to worktree for A variant (empty = current)")
 	aArgs := flag.String("a-args", "", "extra CLI arguments for A variant pglink")
 	aEnv := flag.String("a-env", "", "extra environment variables for A variant (KEY=VAL,KEY2=VAL2)")
@@ -96,8 +96,12 @@ func main() {
 	}
 
 	// Add pglink A variant
+	aTargetName := "pglink"
+	if *aLabel != "" {
+		aTargetName = fmt.Sprintf("pglink-%s", *aLabel)
+	}
 	aTarget := e2e.TargetConfig{
-		Name:       fmt.Sprintf("pglink-%s", *aLabel),
+		Name:       aTargetName,
 		Type:       e2e.TargetTypePglink,
 		Port:       16432,
 		GOMAXPROCS: *aGOMAXPROCS,
