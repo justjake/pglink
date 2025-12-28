@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,6 +134,16 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 		if targetResult != nil {
 			results.Results = append(results.Results, *targetResult)
 		}
+	}
+
+	// Check observability if enabled
+	if o.Config.CheckObservable {
+		o.Logger.Info("checking observability data...")
+		checkResult, err := o.checkObservability(ctx)
+		if err != nil {
+			o.Logger.Error("observability check failed", "error", err)
+		}
+		results.ObservabilityCheck = checkResult
 	}
 
 	// Write results.json
@@ -298,6 +310,23 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 		args = append(args, "-message-buffer-bytes", target.MessageBufferBytes)
 	}
 
+	// Add observability flags if enabled
+	if o.Config.Observable {
+		// Enable OTEL with minimal mode (no SQL parsing)
+		args = append(args, "-otel", "minimal")
+		// Send traces to Tempo via OTLP gRPC (port 14317 mapped to container's 4317)
+		args = append(args, "-otel-endpoint", "localhost:14317")
+		// Add execution_id and target as OTEL attributes for filtering
+		args = append(args, "-otel-attrs", fmt.Sprintf("bench.execution_id=%s,bench.target=%s", o.executionID, target.Name))
+		// Enable Prometheus metrics on a unique port per target
+		metricsPort := target.Port + 3000 // e.g., 16432 -> 19432
+		if target.MetricsPort != 0 {
+			metricsPort = target.MetricsPort
+		}
+		args = append(args, "-prometheus-listen", fmt.Sprintf(":%d", metricsPort))
+		args = append(args, "-prometheus-attrs", fmt.Sprintf("bench_execution_id=%s,bench_target=%s", o.executionID, target.Name))
+	}
+
 	args = append(args, target.ExtraArgs...)
 
 	// Create log file - use "default" suffix for the default "pglink" target
@@ -318,6 +347,10 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 	env := os.Environ()
 	if target.GOMAXPROCS > 0 {
 		env = append(env, fmt.Sprintf("GOMAXPROCS=%d", target.GOMAXPROCS))
+	}
+	// For observability, enable insecure mode for local OTLP connection
+	if o.Config.Observable {
+		env = append(env, "OTEL_EXPORTER_OTLP_INSECURE=true")
 	}
 	env = append(env, target.ExtraEnv...)
 	cmd.Env = env
@@ -470,8 +503,15 @@ func (o *Orchestrator) stopTargetProcess(name string) {
 
 // ensureDockerContainers ensures required docker containers are running.
 func (o *Orchestrator) ensureDockerContainers(ctx context.Context) error {
-	// Run docker compose up from main worktree
-	cmd := exec.CommandContext(ctx, "docker", "compose", "up", "-d")
+	// Build docker compose command
+	args := []string{"compose", "up", "-d"}
+
+	// Include observability profile if enabled
+	if o.Config.Observable {
+		args = []string{"compose", "--profile", "observability", "up", "-d", "--wait"}
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Dir = o.mainWorktreePath
 
 	output, err := cmd.CombinedOutput()
@@ -479,7 +519,9 @@ func (o *Orchestrator) ensureDockerContainers(ctx context.Context) error {
 		return fmt.Errorf("docker compose up failed: %w\nOutput: %s", err, string(output))
 	}
 
-	o.Logger.Info("docker containers running", "output", string(output))
+	o.Logger.Info("docker containers running",
+		"observable", o.Config.Observable,
+		"output", string(output))
 	return nil
 }
 
@@ -752,4 +794,206 @@ func describeOutputFile(filename string) string {
 	default:
 		return "Benchmark artifact"
 	}
+}
+
+// checkObservability verifies that observability data was recorded to the stack.
+func (o *Orchestrator) checkObservability(ctx context.Context) (*ObservabilityCheckResult, error) {
+	result := &ObservabilityCheckResult{
+		Passed: true,
+		Errors: []string{},
+	}
+
+	// Give the observability stack a moment to flush data
+	time.Sleep(2 * time.Second)
+
+	// Check Tempo for traces
+	tracesResult, err := o.checkTempo(ctx)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("tempo check error: %v", err))
+		result.Passed = false
+	} else {
+		result.Traces = tracesResult
+		if !tracesResult.Found {
+			result.Passed = false
+		}
+	}
+
+	// Check Prometheus for metrics
+	metricsResult, err := o.checkPrometheus(ctx)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("prometheus check error: %v", err))
+		result.Passed = false
+	} else {
+		result.Metrics = metricsResult
+		if !metricsResult.Found {
+			result.Passed = false
+		}
+	}
+
+	if result.Passed {
+		o.Logger.Info("observability check passed",
+			"traces", result.Traces.TraceCount,
+			"spans", result.Traces.SpanCount,
+			"metrics", len(result.Metrics.MetricNames))
+	} else {
+		o.Logger.Warn("observability check failed", "errors", result.Errors)
+	}
+
+	return result, nil
+}
+
+// checkTempo queries Tempo to verify traces were recorded.
+func (o *Orchestrator) checkTempo(ctx context.Context) (*TracesCheckResult, error) {
+	result := &TracesCheckResult{
+		Found:        false,
+		ServiceNames: []string{},
+	}
+
+	// Tempo search API: GET /api/search?service.name=pglink&limit=10
+	tempoURL := "http://localhost:13200/api/search"
+	params := url.Values{}
+	params.Set("service.name", "pglink")
+	params.Set("limit", "100")
+
+	reqURL := fmt.Sprintf("%s?%s", tempoURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("tempo request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("tempo returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var searchResp tempoSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return result, fmt.Errorf("failed to decode tempo response: %w", err)
+	}
+
+	result.TraceCount = len(searchResp.Traces)
+
+	// Count spans and collect service names
+	serviceSet := make(map[string]bool)
+	for _, trace := range searchResp.Traces {
+		if len(trace.SpanSets) > 0 {
+			result.SpanCount += trace.SpanSets[0].Spans
+		}
+		if trace.RootServiceName != "" {
+			serviceSet[trace.RootServiceName] = true
+		}
+	}
+
+	for svc := range serviceSet {
+		result.ServiceNames = append(result.ServiceNames, svc)
+	}
+
+	result.Found = result.TraceCount > 0
+
+	o.Logger.Info("tempo check complete",
+		"traces", result.TraceCount,
+		"spans", result.SpanCount,
+		"services", result.ServiceNames)
+
+	return result, nil
+}
+
+// tempoSearchResponse is the response structure from Tempo's search API.
+type tempoSearchResponse struct {
+	Traces []tempoTrace `json:"traces"`
+}
+
+type tempoTrace struct {
+	TraceID         string         `json:"traceID"`
+	RootServiceName string         `json:"rootServiceName"`
+	RootTraceName   string         `json:"rootTraceName"`
+	SpanSets        []tempoSpanSet `json:"spanSets"`
+}
+
+type tempoSpanSet struct {
+	Spans int `json:"spans"`
+}
+
+// checkPrometheus queries Prometheus to verify metrics were recorded.
+func (o *Orchestrator) checkPrometheus(ctx context.Context) (*MetricsCheckResult, error) {
+	result := &MetricsCheckResult{
+		Found:       false,
+		MetricNames: []string{},
+	}
+
+	// Query for any pglink metrics
+	promURL := "http://localhost:19090/api/v1/query"
+	// Use a regex to match all pglink_ metrics
+	params := url.Values{}
+	params.Set("query", "{__name__=~\"pglink_.*\"}")
+
+	reqURL := fmt.Sprintf("%s?%s", promURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("prometheus request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var queryResp prometheusQueryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&queryResp); err != nil {
+		return result, fmt.Errorf("failed to decode prometheus response: %w", err)
+	}
+
+	if queryResp.Status != "success" {
+		return result, fmt.Errorf("prometheus query failed: %s", queryResp.Error)
+	}
+
+	// Collect metric names
+	metricSet := make(map[string]bool)
+	for _, sample := range queryResp.Data.Result {
+		if name, ok := sample.Metric["__name__"]; ok {
+			metricSet[name] = true
+		}
+	}
+
+	for name := range metricSet {
+		result.MetricNames = append(result.MetricNames, name)
+	}
+
+	result.SampleCount = len(queryResp.Data.Result)
+	result.Found = result.SampleCount > 0
+
+	o.Logger.Info("prometheus check complete",
+		"metrics", len(result.MetricNames),
+		"samples", result.SampleCount)
+
+	return result, nil
+}
+
+// prometheusQueryResponse is the response structure from Prometheus's query API.
+type prometheusQueryResponse struct {
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Metric map[string]string `json:"metric"`
+			Value  []interface{}     `json:"value"`
+		} `json:"result"`
+	} `json:"data"`
 }

@@ -28,8 +28,9 @@ type BenchSuiteConfig struct {
 	Seed int64 // Random seed for workload generation (0 = time-based)
 
 	// Observability
-	Observable     bool // Enable observability integration
-	FlightRecorder bool // Enable flight recorder for pglink targets
+	Observable      bool // Enable observability integration
+	CheckObservable bool // Verify observability data was recorded after benchmark
+	FlightRecorder  bool // Enable flight recorder for pglink targets
 
 	// Pglink pool settings
 	PglinkPoolMaxConns int // Backend pool max connections (0 = use CPU setting)
@@ -196,11 +197,46 @@ type RunnerGitInfo struct {
 
 // BenchmarkResults is the top-level structure for results.json.
 type BenchmarkResults struct {
-	ExecutionID string           `json:"execution_id"`
-	Timestamp   time.Time        `json:"timestamp"`
-	Runner      RunnerGitInfo    `json:"runner"`
-	Config      BenchSuiteConfig `json:"config"`
-	Results     []TargetResult   `json:"results"`
+	ExecutionID        string                    `json:"execution_id"`
+	Timestamp          time.Time                 `json:"timestamp"`
+	Runner             RunnerGitInfo             `json:"runner"`
+	Config             BenchSuiteConfig          `json:"config"`
+	Results            []TargetResult            `json:"results"`
+	ObservabilityCheck *ObservabilityCheckResult `json:"observability_check,omitempty"`
+}
+
+// ObservabilityCheckResult contains results of observability verification.
+type ObservabilityCheckResult struct {
+	// Passed is true if all checks passed.
+	Passed bool `json:"passed"`
+	// Traces contains trace verification results.
+	Traces *TracesCheckResult `json:"traces,omitempty"`
+	// Metrics contains metrics verification results.
+	Metrics *MetricsCheckResult `json:"metrics,omitempty"`
+	// Errors contains any errors encountered during verification.
+	Errors []string `json:"errors,omitempty"`
+}
+
+// TracesCheckResult contains results from checking Tempo for traces.
+type TracesCheckResult struct {
+	// Found is true if traces were found.
+	Found bool `json:"found"`
+	// TraceCount is the number of traces found.
+	TraceCount int `json:"trace_count"`
+	// SpanCount is the total number of spans found.
+	SpanCount int `json:"span_count"`
+	// ServiceNames lists the service names found.
+	ServiceNames []string `json:"service_names,omitempty"`
+}
+
+// MetricsCheckResult contains results from checking Prometheus for metrics.
+type MetricsCheckResult struct {
+	// Found is true if metrics were found.
+	Found bool `json:"found"`
+	// MetricNames lists the pglink metrics found.
+	MetricNames []string `json:"metric_names,omitempty"`
+	// SampleCount is the number of metric samples found.
+	SampleCount int `json:"sample_count"`
 }
 
 // TargetResult contains results for a single target.

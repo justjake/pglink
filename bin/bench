@@ -153,12 +153,14 @@ main() {
                 -cpu 100
             ;;
         smoke)
-            log "Mode: smoke (duration=2s, warmup=1s, rounds=1)"
+            log "Mode: smoke (duration=2s, warmup=1s, rounds=1, observable)"
             ./out/bench \
                 -duration 2s \
                 -warmup 1s \
                 -rounds 1 \
-                -cpu 50
+                -cpu 50 \
+                -observable \
+                -check-observable
             ;;
         quick)
             log "Mode: quick (duration=5s, warmup=2s, rounds=1)"
