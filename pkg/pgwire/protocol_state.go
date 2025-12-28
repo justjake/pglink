@@ -2,6 +2,7 @@ package pgwire
 
 import (
 	"fmt"
+	"time"
 )
 
 // NewProtocolState creates a new ProtocolState with all maps initialized.
@@ -66,6 +67,21 @@ type ProtocolState struct {
 	// ActiveRequestFlow tracks pending requests and their expected response actions.
 	// It is nil when the session is idle (no outstanding requests).
 	ActiveRequestFlow *RequestFlow
+
+	// TxStartTime is when the current transaction started (or potentially started).
+	// Set when a RequestFlow starts AND TxStartTime is zero. This captures "when did
+	// the first query in this transaction start" - we set it before knowing if the
+	// query will actually start a transaction.
+	// Cleared when ReadyForQuery arrives with TxStatus 'I' (transaction ended or never started).
+	// Kept through ReadyForQuery with 'T' or 'E' (we're now in a transaction).
+	// Used for transaction_timeout calculation.
+	TxStartTime time.Time
+
+	// LastReadyForQueryTime is when the last ReadyForQuery was received.
+	// Set on ALL ReadyForQuery messages (regardless of TxStatus).
+	// Used for idle_transaction_timeout calculation. The timeout check condition
+	// (TxStatus in {'T','E'} AND ActiveRequestFlow == nil) filters appropriately.
+	LastReadyForQueryTime time.Time
 
 	// TODO: do we have to track what portals are suspended?
 }
@@ -276,6 +292,17 @@ func (s *ProtocolState) updateForServerResponseMessage(msg ServerResponse) *Pend
 		// This handles flows like Parse+Describe+Sync where no Execute is sent.
 		s.clearPendingExecute()
 
+		// Update timeout tracking timestamps
+		// Set LastReadyForQueryTime on ALL ReadyForQuery messages (for idle_transaction_timeout).
+		s.LastReadyForQueryTime = time.Now()
+
+		// Clear TxStartTime when transaction ends (TxStatus 'I').
+		// Keep it when in transaction ('T' or 'E') for transaction_timeout tracking.
+		// This matches pgbouncer's behavior in server.c:596-599.
+		if s.TxStatus == TxIdle {
+			s.TxStartTime = time.Time{}
+		}
+
 		// Pop the pending Sync/Query/FunctionCall request
 		var poppedReq *PendingRequest
 		if req, ok := s.popForResponse(msg); ok {
@@ -408,9 +435,16 @@ func (s *ProtocolState) EndRequestFlow() {
 
 // PushRequest adds a pending request to the active flow.
 // If no flow is active, starts a new one automatically.
+// Also sets TxStartTime if it's zero (for transaction_timeout tracking).
 func (s *ProtocolState) PushRequest(req PendingRequest) {
 	if s.ActiveRequestFlow == nil {
 		s.StartRequestFlow()
+		// Set TxStartTime when starting a new request flow, if not already set.
+		// This matches pgbouncer's behavior where xact_start = query_start when
+		// query_start is set for the first time (client.c:1600-1602).
+		if s.TxStartTime.IsZero() {
+			s.TxStartTime = s.ActiveRequestFlow.StartTime
+		}
 	}
 	s.ActiveRequestFlow.Push(req)
 }

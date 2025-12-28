@@ -1,6 +1,8 @@
 package pgwire
 
 import (
+	"time"
+
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -61,15 +63,21 @@ type RequestFlow struct {
 	requests   []PendingRequest
 	isComplete bool
 
+	// StartTime is when the flow was created. Used for query_timeout calculation.
+	// For pipelined queries, this is when the first request was pushed to the flow.
+	StartTime time.Time
+
 	// Callbacks (set by the creator/recognizer)
 	OnResponse func(req PendingRequest, msg ServerMessage) ResponseAction
 	OnComplete func(flow *RequestFlow)
 	OnError    func(flow *RequestFlow, err *pgproto3.ErrorResponse)
 }
 
-// NewRequestFlow creates a new RequestFlow
+// NewRequestFlow creates a new RequestFlow with StartTime set to now.
 func NewRequestFlow() *RequestFlow {
-	return &RequestFlow{}
+	return &RequestFlow{
+		StartTime: time.Now(),
+	}
 }
 
 // UpdateHandlers implements the Flow interface.

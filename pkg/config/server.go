@@ -48,6 +48,107 @@ type DatabaseConfig struct {
 	// This enables transaction-mode pooling to work with extended query protocol.
 	// Set to 0 to disable caching. Defaults to 10.
 	PreparedStatementCacheSize *int32 `json:"prepared_statement_cache_size,omitempty"`
+
+	// QueryTimeout is the maximum time a query can execute before being terminated.
+	// Uses Go duration format: "30s", "5m", "500ms". Default: 0 (disabled).
+	//
+	// PgBouncer behavior (query_timeout):
+	//   - Timer starts: When client sends Query/Sync message (client.c:1594-1596)
+	//   - Timer resets: When server sends ReadyForQuery AND outstanding_requests==0 (server.c:579-585)
+	//   - Timeout check: Only when server not ready (!server->ready), using age = now - client->request_time
+	//   - Action: disconnect_server() - sends error to client, Terminate to backend, closes both
+	//   - COPY: NOT suspended - long COPY operations CAN timeout
+	//
+	// pglink behavior:
+	//   - Timer starts: When RequestFlow starts (PushRequest called for first request in flow)
+	//   - Timer resets: When ReadyForQuery received and ActiveRequestFlow becomes nil
+	//   - Timeout check: Only when ActiveRequestFlow != nil, using flow.StartTime
+	//   - Action: Configurable via TimeoutAction (terminate or request_cancel)
+	//   - COPY: NOT suspended (matches pgbouncer)
+	//   - Pipelining: Timeout covers entire pipeline from first request to final ReadyForQuery
+	QueryTimeout Duration `json:"query_timeout,omitzero"`
+
+	// IdleTransactionTimeout is the maximum time a session can be idle in a transaction.
+	// Uses Go duration format: "30s", "5m", "500ms". Default: 0 (disabled).
+	//
+	// PgBouncer behavior (idle_transaction_timeout):
+	//   - Timer starts: When server sends ReadyForQuery with 'T' or 'E' (idle_tx=true, server.c:396)
+	//   - Timer resets: When client sends next query (client->request_time updated)
+	//   - Timeout check: Only when server->idle_tx==true AND not ready, using age = now - server->request_time
+	//   - Action: disconnect_server()
+	//
+	// pglink behavior:
+	//   - Timer starts: When ReadyForQuery received (LastReadyForQueryTime set on ALL ReadyForQuery)
+	//   - Timer resets: When client sends query (ActiveRequestFlow becomes non-nil)
+	//   - Timeout check: Only when TxStatus in {'T','E'} AND ActiveRequestFlow==nil
+	//   - Action: Configurable via TimeoutAction
+	//   - Note: LastReadyForQueryTime set unconditionally; check condition filters by TxStatus
+	IdleTransactionTimeout Duration `json:"idle_transaction_timeout,omitzero"`
+
+	// TransactionTimeout is the maximum total time for a transaction.
+	// Uses Go duration format: "30s", "5m", "500ms". Default: 0 (disabled).
+	//
+	// PgBouncer behavior (transaction_timeout):
+	//   - Timer starts: When client sends first query (xact_start = query_start, client.c:1600-1602)
+	//   - Timer resets: When server sends ReadyForQuery with 'I' (xact_start=0, server.c:596-599)
+	//   - Timer persists: Through ReadyForQuery with 'T'/'E' - stays set during transaction
+	//   - Timeout check: When not ready, using age = now - client->xact_start
+	//   - Action: disconnect_server()
+	//
+	// pglink behavior:
+	//   - Timer starts: When RequestFlow starts AND TxStartTime is zero (first query of potential tx)
+	//   - Timer resets: When ReadyForQuery received with TxStatus 'I'
+	//   - Timer persists: Through ReadyForQuery with 'T'/'E' - TxStartTime kept
+	//   - Timeout check: When TxStartTime != zero
+	//   - Action: Configurable via TimeoutAction
+	TransactionTimeout Duration `json:"transaction_timeout,omitzero"`
+
+	// TimeoutAction specifies what to do when a timeout fires.
+	// Default: "terminate"
+	//
+	// "terminate": Send error to client, send Terminate to backend, close both connections.
+	//   Matches pgbouncer behavior exactly. Simple and works even if backend is unresponsive.
+	//   Backend may continue executing query until it notices connection closed.
+	//
+	// "request_cancel": Send PostgreSQL CancelRequest to backend first, wait up to CancelTimeout
+	//   for backend to respond with ErrorResponse + ReadyForQuery. If backend responds, the
+	//   connection may be reusable. Falls back to terminate if backend doesn't respond.
+	//   Backend stops work immediately on receiving cancel.
+	TimeoutAction TimeoutAction `json:"timeout_action,omitzero"`
+
+	// CancelTimeout is how long to wait for backend response after sending CancelRequest.
+	// Only used when TimeoutAction is "request_cancel".
+	// Uses Go duration format: "5s", "10s". Default: "5s"
+	CancelTimeout Duration `json:"cancel_timeout,omitzero"`
+}
+
+// TimeoutAction specifies the action to take when a timeout fires.
+type TimeoutAction string
+
+const (
+	// TimeoutActionTerminate sends error to client, Terminate to backend, closes both.
+	// This matches pgbouncer's behavior exactly.
+	TimeoutActionTerminate TimeoutAction = "terminate"
+
+	// TimeoutActionRequestCancel sends CancelRequest to backend first, waits for response.
+	// Falls back to terminate if backend doesn't respond within CancelTimeout.
+	TimeoutActionRequestCancel TimeoutAction = "request_cancel"
+)
+
+// GetTimeoutAction returns the timeout action, defaulting to terminate.
+func (c *DatabaseConfig) GetTimeoutAction() TimeoutAction {
+	if c.TimeoutAction == "" {
+		return TimeoutActionTerminate
+	}
+	return c.TimeoutAction
+}
+
+// GetCancelTimeout returns the cancel timeout, defaulting to 5 seconds.
+func (c *DatabaseConfig) GetCancelTimeout() time.Duration {
+	if c.CancelTimeout == 0 {
+		return 5 * time.Second
+	}
+	return c.CancelTimeout.Duration()
 }
 
 // Validate checks that the database configuration is valid.
@@ -82,6 +183,23 @@ func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) err
 	// Validate backend configuration
 	if err := c.Backend.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("backend: %w", err))
+	}
+
+	// Validate timeout configuration
+	if c.QueryTimeout < 0 {
+		errs = append(errs, fmt.Errorf("query_timeout must be non-negative"))
+	}
+	if c.IdleTransactionTimeout < 0 {
+		errs = append(errs, fmt.Errorf("idle_transaction_timeout must be non-negative"))
+	}
+	if c.TransactionTimeout < 0 {
+		errs = append(errs, fmt.Errorf("transaction_timeout must be non-negative"))
+	}
+	if c.CancelTimeout < 0 {
+		errs = append(errs, fmt.Errorf("cancel_timeout must be non-negative"))
+	}
+	if c.TimeoutAction != "" && c.TimeoutAction != TimeoutActionTerminate && c.TimeoutAction != TimeoutActionRequestCancel {
+		errs = append(errs, fmt.Errorf("timeout_action must be %q or %q, got %q", TimeoutActionTerminate, TimeoutActionRequestCancel, c.TimeoutAction))
 	}
 
 	// Check for duplicate usernames
