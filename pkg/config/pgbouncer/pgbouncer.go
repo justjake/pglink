@@ -356,6 +356,14 @@ func buildINI(cfg *config.Config, listenPort int, databases string, opts Options
 	// This must match pglink's prepared_statement_cache_size to ensure equivalent behavior.
 	b.WriteString(fmt.Sprintf("max_prepared_statements = %d\n", maxPreparedStatements))
 
+	// Track extra parameters that pglink tracks but pgbouncer doesn't by default.
+	// pglink tracks search_path by default (in BaseTrackedParameters), but pgbouncer doesn't.
+	// Also include any TrackExtraParameters from pglink config.
+	extraParams := collectExtraParameters(cfg)
+	if len(extraParams) > 0 {
+		b.WriteString(fmt.Sprintf("track_extra_parameters = %s\n", strings.Join(extraParams, ", ")))
+	}
+
 	// Timeout settings from pglink config (passed through for benchmarking equivalence)
 	if queryTimeout > 0 {
 		b.WriteString(fmt.Sprintf("query_timeout = %.1f\n", queryTimeout.Seconds()))
@@ -397,6 +405,31 @@ func md5Password(username, password string) string {
 	_, _ = io.WriteString(h, password)
 	_, _ = io.WriteString(h, username)
 	return fmt.Sprintf("md5%x", h.Sum(nil))
+}
+
+// collectExtraParameters returns parameters that pglink tracks which should be
+// added to pgbouncer's track_extra_parameters. This is the union of all
+// TrackedParameters() from all databases, which includes both the base
+// tracked parameters and any extra parameters from config.
+//
+// PgBouncer's track_extra_parameters adds to its default list, and pgbouncer
+// handles duplicates gracefully, so we can safely include all parameters
+// that pglink tracks to ensure equivalent behavior.
+func collectExtraParameters(cfg *config.Config) []string {
+	seen := make(map[string]bool)
+	var params []string
+
+	// Collect TrackedParameters from all databases
+	for _, dbCfg := range cfg.Databases {
+		for _, param := range dbCfg.TrackedParameters() {
+			if !seen[param] {
+				seen[param] = true
+				params = append(params, param)
+			}
+		}
+	}
+
+	return params
 }
 
 // splitHostPort splits an address into host and port, handling edge cases.

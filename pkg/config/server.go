@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // DatabaseConfig configures a single database that clients can connect to.
@@ -127,6 +128,19 @@ func (c *DatabaseConfig) GetTimeoutAction() TimeoutAction {
 		return TimeoutActionTerminate
 	}
 	return c.TimeoutAction
+}
+
+// TrackedParameters returns the list of PostgreSQL session parameters to track.
+// This includes the base tracked parameters (from pgwire.BaseTrackedParameters)
+// plus any additional parameters specified in TrackExtraParameters.
+func (c *DatabaseConfig) TrackedParameters() []string {
+	if len(c.TrackExtraParameters) == 0 {
+		return pgwire.BaseTrackedParameters
+	}
+	tracked := make([]string, 0, len(pgwire.BaseTrackedParameters)+len(c.TrackExtraParameters))
+	tracked = append(tracked, pgwire.BaseTrackedParameters...)
+	tracked = append(tracked, c.TrackExtraParameters...)
+	return tracked
 }
 
 // Validate checks that the database configuration is valid.

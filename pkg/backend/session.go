@@ -49,12 +49,7 @@ func GetOrCreateSession(conn *pgconn.PgConn, db *Database, user config.UserConfi
 		}
 	}
 
-	tracked := pgwire.BaseTrackedParameters
-	if len(db.config.TrackExtraParameters) > 0 {
-		tracked = make([]string, 0, len(pgwire.BaseTrackedParameters)+len(db.config.TrackExtraParameters))
-		tracked = append(tracked, pgwire.BaseTrackedParameters...)
-		tracked = append(tracked, db.config.TrackExtraParameters...)
-	}
+	tracked := db.config.TrackedParameters()
 
 	username := conn.ParameterStatus(pgwire.ParamUser)
 	if username == "" {
