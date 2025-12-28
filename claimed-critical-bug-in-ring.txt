@@ -1,0 +1,18 @@
+  ⎿  Added 5 lines, removed 2 lines
+      483      r.rawEnd = r.parsePos // Discard any buffered data
+      484      r.streaming.active = false
+      485
+      486 -    // BUG: Missing publishedBytes update - tests should fail
+          -without this
+      487 -    // atomic.StoreInt64(&r.publishedBytes, r.parsePos)
+      486 +    // CRITICAL: Update publishedBytes so that MessageEnd() returns
+          + the correct
+      487 +    // position for the streaming message. Without this,
+          +ReleaseThrough() would
+      488 +    // get the wrong end position and consumedBytes wouldn't
+          +advance far enough,
+      489 +    // causing the ring buffer to think it's over capacity.
+      490 +    atomic.StoreInt64(&r.publishedBytes, r.parsePos)
+      491
+      492      return nil
+      493    case <-r.done:

@@ -38,7 +38,7 @@ func main() {
 	outputDir := flag.String("output", "", "output directory for results (default: out/benchmarks/<timestamp>)")
 	cases := flag.String("cases", "", "comma-separated list of cases to run (empty = all)")
 	simpleQuery := flag.Bool("simple-query", false, "use simple query protocol instead of extended")
-	observable := flag.Bool("observable", false, "enable observability integration (traces/metrics)")
+	observable := flag.Bool("observable", true, "enable observability integration (traces/metrics)")
 	checkObservable := flag.Bool("check-observable", false, "verify traces and metrics were recorded (defaults to -observable value)")
 	seed := flag.Int64("seed", 0, "random seed for workload generation (0 = time-based)")
 	pglinkPoolMaxConns := flag.Int("pglink-pool-max-conns", 0, "backend pool max connections for pglink (0 = use -cpu value)")
@@ -58,7 +58,7 @@ func main() {
 
 	// Target flags
 	includeDirect := flag.Bool("direct", true, "include direct postgres benchmark")
-	includePgbouncer := flag.Bool("pgbouncer", false, "include pgbouncer benchmark")
+	includePgbouncer := flag.Bool("pgbouncer", true, "include pgbouncer benchmark")
 
 	// Debug flags
 	debug := flag.Bool("debug", false, "enable debug logging for spawned pglink processes")

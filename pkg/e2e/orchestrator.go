@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -726,16 +727,8 @@ func (o *Orchestrator) generateBenchmarkReport(results *BenchmarkResults) error 
 	}
 	b.WriteString("\n")
 
-	// Run benchstat comparison if we have multiple targets
-	if len(results.Results) >= 2 {
-		b.WriteString("## Benchstat Comparison\n\n")
-		benchstatOutput := o.runBenchstat()
-		if benchstatOutput != "" {
-			fmt.Fprintf(&b, "```\n%s```\n\n", benchstatOutput)
-		} else {
-			b.WriteString("_benchstat not available or failed to run_\n\n")
-		}
-	}
+	// Generate summary table comparing all targets
+	o.writeSummaryTable(&b, results)
 
 	// Write individual target results
 	b.WriteString("## Results by Target\n\n")
@@ -751,16 +744,28 @@ func (o *Orchestrator) generateBenchmarkReport(results *BenchmarkResults) error 
 
 		// Show key metrics if available
 		if len(tr.Metrics) > 0 {
-			b.WriteString("| Benchmark | Iterations | ns/op | MB/s |\n")
-			b.WriteString("|-----------|------------|-------|------|\n")
+			b.WriteString("| Benchmark | qps | ops/s | ns/op | MB/s |\n")
+			b.WriteString("|-----------|-----|-------|-------|------|\n")
 			for _, m := range tr.Metrics {
 				mbps := ""
 				if m.MBPerSec > 0 {
-					mbps = fmt.Sprintf("%.2f", m.MBPerSec)
+					mbps = fmt.Sprintf("%.1f", m.MBPerSec)
 				}
-				fmt.Fprintf(&b, "| %s | %d | %.0f | %s |\n", m.Name, m.Iterations, m.NsPerOp, mbps)
+				fmt.Fprintf(&b, "| %s | %.0f | %.0f | %.0f | %s |\n",
+					m.Name, m.QPS, m.OpsPerSec, m.NsPerOp, mbps)
 			}
 			b.WriteString("\n")
+		}
+	}
+
+	// Run benchstat comparison if we have multiple targets
+	if len(results.Results) >= 2 {
+		b.WriteString("## Benchstat Comparison\n\n")
+		benchstatOutput := o.runBenchstat()
+		if benchstatOutput != "" {
+			fmt.Fprintf(&b, "```\n%s```\n\n", benchstatOutput)
+		} else {
+			b.WriteString("_benchstat not available or failed to run_\n\n")
 		}
 	}
 
@@ -783,6 +788,178 @@ func (o *Orchestrator) generateBenchmarkReport(results *BenchmarkResults) error 
 
 	o.Logger.Info("generated benchmark report", "path", reportPath)
 	return nil
+}
+
+// writeSummaryTable generates a comparison table of all benchmarks across all targets.
+// Format: | Benchmark | target1 qps | ns/op | MB/s | target2 qps | ns/op | MB/s | ...
+func (o *Orchestrator) writeSummaryTable(b *strings.Builder, results *BenchmarkResults) {
+	if len(results.Results) == 0 {
+		return
+	}
+
+	// Collect all benchmark names and organize metrics by target
+	benchNames := make(map[string]bool)
+	targetMetrics := make(map[string]map[string]BenchMetric) // target -> benchName -> metric
+
+	for _, tr := range results.Results {
+		targetMetrics[tr.Target] = make(map[string]BenchMetric)
+		for _, m := range tr.Metrics {
+			// Extract short benchmark name (remove target-specific parts)
+			shortName := extractBenchmarkName(m.Name)
+			benchNames[shortName] = true
+			targetMetrics[tr.Target][shortName] = m
+		}
+	}
+
+	// Sort benchmark names for consistent ordering
+	sortedBenchNames := make([]string, 0, len(benchNames))
+	for name := range benchNames {
+		sortedBenchNames = append(sortedBenchNames, name)
+	}
+	sort.Strings(sortedBenchNames)
+
+	// Get target names in order
+	targetNames := make([]string, 0, len(results.Results))
+	for _, tr := range results.Results {
+		targetNames = append(targetNames, tr.Target)
+	}
+
+	// Find baseline target (prefer "direct", fall back to first)
+	baselineTarget := targetNames[0]
+	for _, name := range targetNames {
+		if name == "direct" {
+			baselineTarget = name
+			break
+		}
+	}
+
+	b.WriteString("## Summary\n\n")
+
+	// Build header row with sub-columns for each target
+	// | Benchmark | target1 | | | target2 | | | ...
+	b.WriteString("| Benchmark |")
+	for _, target := range targetNames {
+		fmt.Fprintf(b, " **%s** | | |", target)
+	}
+	b.WriteString("\n")
+
+	// Build sub-header row with metric names
+	// | | qps | ns/op | MB/s | qps | ns/op | MB/s | ...
+	b.WriteString("| |")
+	for range targetNames {
+		b.WriteString(" qps | ns/op | MB/s |")
+	}
+	b.WriteString("\n")
+
+	// Build separator
+	b.WriteString("|:---|")
+	for range targetNames {
+		b.WriteString("---:|---:|---:|")
+	}
+	b.WriteString("\n")
+
+	// Build data rows
+	for _, benchName := range sortedBenchNames {
+		fmt.Fprintf(b, "| %s |", benchName)
+
+		// Get baseline metric for percentage calculation
+		baselineMetric := targetMetrics[baselineTarget][benchName]
+
+		for _, target := range targetNames {
+			metric, ok := targetMetrics[target][benchName]
+			if !ok {
+				b.WriteString(" - | - | - |")
+				continue
+			}
+
+			isBaseline := target == baselineTarget
+
+			// QPS column
+			qpsStr := formatMetricWithDelta(metric.QPS, baselineMetric.QPS, isBaseline, "")
+			// ns/op column (lower is better)
+			nsStr := formatNsOpWithDelta(metric.NsPerOp, baselineMetric.NsPerOp, isBaseline)
+			// MB/s column
+			mbStr := "-"
+			if metric.MBPerSec > 0 {
+				mbStr = formatMetricWithDelta(metric.MBPerSec, baselineMetric.MBPerSec, isBaseline, "")
+			}
+
+			fmt.Fprintf(b, " %s | %s | %s |", qpsStr, nsStr, mbStr)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+}
+
+// extractBenchmarkName extracts a short benchmark name from the full name.
+// e.g., "BenchmarkSelect1/target=pglink/connect=per-worker-100" -> "Select1"
+func extractBenchmarkName(fullName string) string {
+	// Remove "Benchmark" prefix
+	name := strings.TrimPrefix(fullName, "Benchmark")
+
+	// Take only the first part before /target=
+	if idx := strings.Index(name, "/target="); idx != -1 {
+		name = name[:idx]
+	}
+
+	// For names like "CopyOut/rows=1000", include the parameter
+	return name
+}
+
+// formatMetricWithDelta formats a metric value with percentage delta from baseline.
+func formatMetricWithDelta(value, baseline float64, isBaseline bool, unit string) string {
+	if value == 0 {
+		return "-"
+	}
+
+	valueStr := formatNumber(value)
+	if unit != "" {
+		valueStr = fmt.Sprintf("%s %s", valueStr, unit)
+	}
+
+	if isBaseline || baseline == 0 {
+		return valueStr
+	}
+
+	// Calculate percentage difference (positive = better for throughput metrics)
+	pctDiff := ((value - baseline) / baseline) * 100
+
+	if pctDiff >= 0 {
+		return fmt.Sprintf("%s (+%.0f%%)", valueStr, pctDiff)
+	}
+	return fmt.Sprintf("%s (%.0f%%)", valueStr, pctDiff)
+}
+
+// formatNsOpWithDelta formats ns/op with delta (lower is better).
+func formatNsOpWithDelta(value, baseline float64, isBaseline bool) string {
+	if value == 0 {
+		return "-"
+	}
+
+	valueStr := formatNumber(value)
+
+	if isBaseline || baseline == 0 {
+		return valueStr
+	}
+
+	// For latency, lower is better, so invert the sign for display
+	pctDiff := ((value - baseline) / baseline) * 100
+
+	if pctDiff <= 0 {
+		return fmt.Sprintf("%s (%.0f%%)", valueStr, pctDiff)
+	}
+	return fmt.Sprintf("%s (+%.0f%%)", valueStr, pctDiff)
+}
+
+// formatNumber formats a number with k/M suffixes for readability.
+func formatNumber(n float64) string {
+	if n >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", n/1_000_000)
+	}
+	if n >= 1_000 {
+		return fmt.Sprintf("%.1fk", n/1_000)
+	}
+	return fmt.Sprintf("%.0f", n)
 }
 
 // runBenchstat runs benchstat to compare benchmark results.

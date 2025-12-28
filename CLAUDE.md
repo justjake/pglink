@@ -120,7 +120,7 @@ When adding or modifying scripts in `bin/`, update this list.
 
 | Script | Description |
 |--------|-------------|
-| `bin/bench` | Run full benchmark suite (builds and runs `cmd/bench`) |
+| `bin/bench` | Run benchmarks. Presets: `smoke` (2s, 1 round), `full` (10s, 3 rounds). Defaults: pgbouncer=true, observable=true |
 | `bin/bench-simple` | Run simple query protocol benchmarks (SELECT 1, COPY IN/OUT) |
 | `bin/build` | Build the pglink binary to `out/pglink` |
 | `bin/doc` | Generate README.md from README.in.md and config types |

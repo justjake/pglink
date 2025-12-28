@@ -206,8 +206,15 @@ func buildCasePattern(cases []string) string {
 
 // Regex patterns for parsing benchmark output
 var (
-	// Matches lines like: BenchmarkSelect1/target=pglink-16    50000    25000 ns/op    1234 B/op    12 allocs/op
-	benchLineRegex = regexp.MustCompile(`^(Benchmark\S+)\s+(\d+)\s+([\d.]+)\s+ns/op(?:\s+([\d.]+)\s+B/op)?(?:\s+(\d+)\s+allocs/op)?(?:\s+([\d.]+)\s+MB/s)?`)
+	// Matches the benchmark name and iterations at the start of the line
+	benchStartRegex = regexp.MustCompile(`^(Benchmark\S+)\s+(\d+)\s+`)
+	// Individual metric patterns
+	nsPerOpRegex     = regexp.MustCompile(`([\d.]+)\s+ns/op`)
+	mbPerSecRegex    = regexp.MustCompile(`([\d.]+)\s+MB/s`)
+	opsPerSecRegex   = regexp.MustCompile(`([\d.]+)\s+ops/s`)
+	qpsRegex         = regexp.MustCompile(`([\d.]+)\s+qps`)
+	bytesPerOpRegex  = regexp.MustCompile(`(\d+)\s+B/op`)
+	allocsPerOpRegex = regexp.MustCompile(`(\d+)\s+allocs/op`)
 )
 
 // parseBenchmarkOutput extracts BenchMetric from go test -bench output.
@@ -217,43 +224,61 @@ func parseBenchmarkOutput(output []byte) []BenchMetric {
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	for scanner.Scan() {
 		line := scanner.Text()
-		matches := benchLineRegex.FindStringSubmatch(line)
-		if matches == nil {
+
+		// Check if line starts with a benchmark name and iterations
+		startMatch := benchStartRegex.FindStringSubmatch(line)
+		if startMatch == nil {
 			continue
 		}
 
 		metric := BenchMetric{
-			Name: matches[1],
+			Name: startMatch[1],
 		}
 
 		// Parse iterations
-		if n, err := strconv.ParseInt(matches[2], 10, 64); err == nil {
+		if n, err := strconv.ParseInt(startMatch[2], 10, 64); err == nil {
 			metric.Iterations = n
 		}
 
 		// Parse ns/op
-		if ns, err := strconv.ParseFloat(matches[3], 64); err == nil {
-			metric.NsPerOp = ns
+		if m := nsPerOpRegex.FindStringSubmatch(line); m != nil {
+			if ns, err := strconv.ParseFloat(m[1], 64); err == nil {
+				metric.NsPerOp = ns
+			}
 		}
 
-		// Parse B/op (optional)
-		if len(matches) > 4 && matches[4] != "" {
-			if b, err := strconv.ParseInt(matches[4], 10, 64); err == nil {
+		// Parse MB/s (throughput)
+		if m := mbPerSecRegex.FindStringSubmatch(line); m != nil {
+			if mb, err := strconv.ParseFloat(m[1], 64); err == nil {
+				metric.MBPerSec = mb
+			}
+		}
+
+		// Parse ops/s (custom metric)
+		if m := opsPerSecRegex.FindStringSubmatch(line); m != nil {
+			if ops, err := strconv.ParseFloat(m[1], 64); err == nil {
+				metric.OpsPerSec = ops
+			}
+		}
+
+		// Parse qps (custom metric)
+		if m := qpsRegex.FindStringSubmatch(line); m != nil {
+			if qps, err := strconv.ParseFloat(m[1], 64); err == nil {
+				metric.QPS = qps
+			}
+		}
+
+		// Parse B/op
+		if m := bytesPerOpRegex.FindStringSubmatch(line); m != nil {
+			if b, err := strconv.ParseInt(m[1], 10, 64); err == nil {
 				metric.BytesPerOp = b
 			}
 		}
 
-		// Parse allocs/op (optional)
-		if len(matches) > 5 && matches[5] != "" {
-			if a, err := strconv.ParseInt(matches[5], 10, 64); err == nil {
+		// Parse allocs/op
+		if m := allocsPerOpRegex.FindStringSubmatch(line); m != nil {
+			if a, err := strconv.ParseInt(m[1], 10, 64); err == nil {
 				metric.AllocsPerOp = a
-			}
-		}
-
-		// Parse MB/s (optional, for throughput benchmarks)
-		if len(matches) > 6 && matches[6] != "" {
-			if mb, err := strconv.ParseFloat(matches[6], 64); err == nil {
-				metric.MBPerSec = mb
 			}
 		}
 

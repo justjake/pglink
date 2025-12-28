@@ -186,6 +186,10 @@ type BenchMetric struct {
 	AllocsPerOp int64
 	// MBPerSec is throughput for COPY benchmarks (0 if not applicable)
 	MBPerSec float64
+	// OpsPerSec is operations per second (custom metric from benchmarks)
+	OpsPerSec float64
+	// QPS is queries per second (custom metric from benchmarks)
+	QPS float64
 }
 
 // RunnerGitInfo captures git metadata for the benchmark runner itself.
