@@ -96,8 +96,7 @@ func (s *Session) ParameterStatusChanges(keys []string, since pgwire.ParameterSt
 	return since.DiffToTip(s.updateParameterStatuses(keys))
 }
 
-// Acquire prepares the session for use. This updates the protocol state from
-// pgconn's tracked parameters but does NOT start the ring buffer.
+// Acquire prepares the session for use but does NOT start the ring buffer.
 //
 // After acquiring, callers should:
 // 1. Run any internal queries (like varcache SET statements) using PgConn() directly
@@ -105,11 +104,19 @@ func (s *Session) ParameterStatusChanges(keys []string, since pgwire.ParameterSt
 //
 // This two-phase approach allows internal queries to be sent before the ring
 // buffer starts consuming connection data.
+//
+// Note: We do NOT sync parameter statuses from pgconn here because:
+//   - On first acquire, GetOrCreateSession() already initialized state from pgconn
+//   - On subsequent acquires, Session.State is kept up-to-date via UpdateState()
+//     during normal operation (zero-copy proxy traffic)
+//   - pgconn doesn't know about changes made through the proxy, only our tracking does
+//   - After internal queries, SyncParameterStatusesFromPgConn() is called explicitly
 func (s *Session) Acquire() error {
 	if s.ringBuffer != nil && s.ringBuffer.Running() {
 		return fmt.Errorf("session already acquired")
 	}
-	s.updateParameterStatuses(s.TrackedParameters)
+	// Don't sync ParameterStatuses from pgconn - our tracking is authoritative.
+	// Only sync TxStatus which pgconn tracks correctly.
 	s.State.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
 
 	// Prepare ring buffer but don't start it yet

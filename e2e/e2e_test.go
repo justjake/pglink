@@ -433,6 +433,215 @@ func TestSessionVariablesWithinTransaction(t *testing.T) {
 	// (though in transaction pooling the connection may change entirely)
 }
 
+// TestVarcache verifies that session variables are restored when a client
+// re-acquires a backend from the pool. This tests the "varcache" pattern.
+//
+// In transaction pooling mode:
+// 1. Client sets a session variable (TimeZone)
+// 2. Transaction commits -> backend released to pool
+// 3. Another operation may get a different backend (or same one, but reset)
+// 4. Client expects their TimeZone to be restored
+//
+// Note: Uses TimeZone because search_path is only reported via ParameterStatus
+// in PostgreSQL 18+. TimeZone has been reported since PostgreSQL 8.0+.
+//
+// This test should pass against PgBouncer (reference implementation).
+func TestVarcache(t *testing.T) {
+	h := getHarness(t)
+	ctx, cancel := testTimeout(t)
+	defer cancel()
+
+	conn, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
+	require.NoError(t, err)
+	defer conn.Close(context.Background())
+
+	// Get the default TimeZone first
+	var defaultTimeZone string
+	err = conn.QueryRow(ctx, "SHOW TimeZone").Scan(&defaultTimeZone)
+	require.NoError(t, err)
+	t.Logf("Default TimeZone: %q", defaultTimeZone)
+
+	// Set a custom TimeZone (using session-level SET, not LOCAL)
+	customTimeZone := "America/New_York"
+	_, err = conn.Exec(ctx, "SET TimeZone = '"+customTimeZone+"'")
+	require.NoError(t, err)
+
+	// Verify it's set
+	var currentTimeZone string
+	err = conn.QueryRow(ctx, "SHOW TimeZone").Scan(&currentTimeZone)
+	require.NoError(t, err)
+	assert.Equal(t, customTimeZone, currentTimeZone, "TimeZone should be set to custom value")
+	t.Logf("After SET: TimeZone = %q", currentTimeZone)
+
+	// Now do multiple transactions to potentially get different backends
+	// Each time, verify TimeZone is preserved
+	for i := 0; i < 5; i++ {
+		tx, err := conn.Begin(ctx)
+		require.NoError(t, err, "iteration %d: begin failed", i)
+
+		var timeZoneInTx string
+		err = tx.QueryRow(ctx, "SHOW TimeZone").Scan(&timeZoneInTx)
+		require.NoError(t, err, "iteration %d: show failed", i)
+
+		// Get backend PID for debugging
+		var pid int32
+		err = tx.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+		require.NoError(t, err, "iteration %d: pid query failed", i)
+
+		t.Logf("Iteration %d: backend PID=%d, TimeZone=%q", i, pid, timeZoneInTx)
+
+		err = tx.Commit(ctx)
+		require.NoError(t, err, "iteration %d: commit failed", i)
+
+		// Verify TimeZone was preserved
+		assert.Equal(t, customTimeZone, timeZoneInTx,
+			"iteration %d: TimeZone should be restored to custom value", i)
+	}
+}
+
+// TestVarcacheDirect tests that PostgreSQL actually sends ParameterStatus
+// messages when TimeZone changes. This runs directly against postgres
+// to verify the baseline behavior that varcache relies on.
+//
+// Note: search_path is only reported via ParameterStatus in PostgreSQL 18+.
+// TimeZone has been reported since PostgreSQL 8.0+.
+func TestVarcacheDirect(t *testing.T) {
+	h := getHarness(t)
+	ctx, cancel := testTimeout(t)
+	defer cancel()
+
+	// Connect directly to postgres (bypass pglink)
+	alphaDB := TestDatabase{Name: "alpha_uno", BackendHost: "localhost", BackendPort: 15432, BackendDB: "uno"}
+	conn, err := h.ConnectDirect(ctx, alphaDB)
+	require.NoError(t, err)
+	defer conn.Close(context.Background())
+
+	// Check initial TimeZone via SHOW
+	var initialTimeZone string
+	err = conn.QueryRow(ctx, "SHOW TimeZone").Scan(&initialTimeZone)
+	require.NoError(t, err)
+	t.Logf("Initial TimeZone (SHOW): %q", initialTimeZone)
+
+	// Check pgx's internal tracking BEFORE SET
+	pgxTrackedBefore := conn.PgConn().ParameterStatus("TimeZone")
+	t.Logf("Initial TimeZone (pgx tracking): %q", pgxTrackedBefore)
+
+	// Set TimeZone to a different value
+	customTimeZone := "America/New_York"
+	_, err = conn.Exec(ctx, "SET TimeZone = '"+customTimeZone+"'")
+	require.NoError(t, err)
+
+	// Check pgx's internal tracking AFTER SET
+	// This tells us if PostgreSQL sent ParameterStatus and pgx received it
+	pgxTrackedAfter := conn.PgConn().ParameterStatus("TimeZone")
+	t.Logf("After SET TimeZone (pgx tracking): %q", pgxTrackedAfter)
+
+	// Verify via SHOW
+	var newTimeZone string
+	err = conn.QueryRow(ctx, "SHOW TimeZone").Scan(&newTimeZone)
+	require.NoError(t, err)
+	t.Logf("After SET TimeZone (SHOW): %q", newTimeZone)
+
+	assert.Equal(t, customTimeZone, newTimeZone, "SHOW should return new value")
+	assert.Equal(t, customTimeZone, pgxTrackedAfter,
+		"pgx should track the new value (proves PostgreSQL sent ParameterStatus)")
+}
+
+// TestVarcacheWithInterference tests varcache when another client uses the
+// same backend and changes variables. This is the harder case.
+//
+// 1. Client A sets TimeZone to "America/New_York"
+// 2. Client A releases backend (commits transaction)
+// 3. Client B acquires same backend, sets TimeZone to "Europe/London"
+// 4. Client B releases backend
+// 5. Client A acquires backend again
+// 6. Client A's TimeZone should be restored to "America/New_York"
+//
+// Note: Uses TimeZone because search_path is only reported via ParameterStatus
+// in PostgreSQL 18+. TimeZone has been reported since PostgreSQL 8.0+.
+func TestVarcacheWithInterference(t *testing.T) {
+	h := getHarness(t)
+	ctx, cancel := testTimeout(t)
+	defer cancel()
+
+	// We need to ensure both clients hit the same backend.
+	// Use a database with pool_size=1 if available, otherwise this test
+	// is probabilistic (may pass even without varcache if backends differ).
+
+	connA, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
+	require.NoError(t, err)
+	defer connA.Close(context.Background())
+
+	connB, err := h.ConnectSingle(ctx, "alpha_uno", PredefinedUsers.App)
+	require.NoError(t, err)
+	defer connB.Close(context.Background())
+
+	// Client A: Set custom TimeZone
+	customTimeZoneA := "America/New_York"
+	_, err = connA.Exec(ctx, "SET TimeZone = '"+customTimeZoneA+"'")
+	require.NoError(t, err)
+
+	// Verify A's TimeZone
+	var timeZoneA string
+	err = connA.QueryRow(ctx, "SHOW TimeZone").Scan(&timeZoneA)
+	require.NoError(t, err)
+	assert.Equal(t, customTimeZoneA, timeZoneA)
+	t.Logf("Client A TimeZone: %q", timeZoneA)
+
+	// Client A: Start and commit a transaction (releases backend)
+	txA1, err := connA.Begin(ctx)
+	require.NoError(t, err)
+	var pidA1 int32
+	err = txA1.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pidA1)
+	require.NoError(t, err)
+	t.Logf("Client A first transaction: backend PID=%d", pidA1)
+	err = txA1.Commit(ctx)
+	require.NoError(t, err)
+
+	// Client B: Set a DIFFERENT TimeZone
+	customTimeZoneB := "Europe/London"
+	_, err = connB.Exec(ctx, "SET TimeZone = '"+customTimeZoneB+"'")
+	require.NoError(t, err)
+
+	// Client B: Do a transaction
+	txB, err := connB.Begin(ctx)
+	require.NoError(t, err)
+	var pidB int32
+	err = txB.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pidB)
+	require.NoError(t, err)
+	t.Logf("Client B transaction: backend PID=%d", pidB)
+	err = txB.Commit(ctx)
+	require.NoError(t, err)
+
+	// Client A: Do another transaction
+	txA2, err := connA.Begin(ctx)
+	require.NoError(t, err)
+
+	var pidA2 int32
+	err = txA2.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pidA2)
+	require.NoError(t, err)
+
+	var timeZoneA2 string
+	err = txA2.QueryRow(ctx, "SHOW TimeZone").Scan(&timeZoneA2)
+	require.NoError(t, err)
+	t.Logf("Client A second transaction: backend PID=%d, TimeZone=%q", pidA2, timeZoneA2)
+
+	err = txA2.Commit(ctx)
+	require.NoError(t, err)
+
+	// The key assertion: Client A's TimeZone should be restored
+	// even if they got the same backend that Client B used
+	assert.Equal(t, customTimeZoneA, timeZoneA2,
+		"Client A's TimeZone should be restored after Client B interfered")
+
+	// Log whether backends were actually shared (informational)
+	if pidA1 == pidB || pidA2 == pidB {
+		t.Logf("Backends were shared (good - this tests varcache)")
+	} else {
+		t.Logf("Backends were NOT shared (test passed but didn't exercise varcache)")
+	}
+}
+
 // =============================================================================
 // Concurrent Access Tests
 // =============================================================================
