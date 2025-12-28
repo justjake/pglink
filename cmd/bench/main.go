@@ -271,8 +271,8 @@ func buildRunners(cases []string, cpu, pgbenchClients, pgbenchThreads, pgbenchSc
 	}
 	pgbenchRunner.ScaleFactor = pgbenchScale
 	pgbenchRunner.Protocol = pgbenchProtocol
-	// Set backend connection string for pgbench init (must be direct to postgres)
-	pgbenchRunner.BackendConnString = "postgres://app:app_password@localhost:15432/uno?sslmode=disable"
+	// Set backend connection string for pgbench init (must be direct to postgres with admin user)
+	pgbenchRunner.BackendConnString = "postgres://postgres:postgres@localhost:15432/uno?sslmode=disable"
 
 	// If no cases specified, just use Go runner (default behavior)
 	if len(cases) == 0 {

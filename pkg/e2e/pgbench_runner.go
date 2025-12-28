@@ -35,6 +35,10 @@ type PgbenchRunner struct {
 	// Default: extended.
 	Protocol string
 
+	// Schema is the schema to use for pgbench tables. Default: schema1.
+	// This is set via search_path in the connection string.
+	Schema string
+
 	// BackendConnString is the connection string for direct backend access.
 	// Used for pgbench initialization (must connect directly, not through proxy).
 	BackendConnString string
@@ -50,6 +54,7 @@ func NewPgbenchRunner() *PgbenchRunner {
 		Threads:     0, // Will be set to min(Clients, NumCPU) at runtime
 		ScaleFactor: 10,
 		Protocol:    "extended",
+		Schema:      "schema1",
 	}
 }
 
@@ -238,16 +243,39 @@ func (r *PgbenchRunner) buildArgs(cfg BenchRunConfig, caseFlag string) []string 
 	// Report latency statistics
 	args = append(args, "-r")
 
-	// Connection string (pgbench uses libpq-style connection)
-	args = append(args, cfg.ConnString)
+	// Connection string with search_path set to use the configured schema
+	connString := r.addSearchPath(cfg.ConnString)
+	args = append(args, connString)
 
 	return args
 }
 
+// addSearchPath appends search_path option to a connection string.
+func (r *PgbenchRunner) addSearchPath(connString string) string {
+	if r.Schema == "" {
+		return connString
+	}
+
+	// For URL-style connection strings, add options parameter
+	if strings.HasPrefix(connString, "postgres://") || strings.HasPrefix(connString, "postgresql://") {
+		sep := "?"
+		if strings.Contains(connString, "?") {
+			sep = "&"
+		}
+		return connString + sep + "options=-csearch_path%3D" + r.Schema
+	}
+
+	// For libpq key=value style, append options
+	return connString + " options='-csearch_path=" + r.Schema + "'"
+}
+
 // ensurePgbenchTables initializes pgbench tables if they don't exist.
 func (r *PgbenchRunner) ensurePgbenchTables(ctx context.Context, pgbenchPath, connString string) error {
+	// Add search_path to connection string for schema support
+	connStringWithSchema := r.addSearchPath(connString)
+
 	// Check if tables already exist by trying to connect and query
-	conn, err := pgconn.Connect(ctx, connString)
+	conn, err := pgconn.Connect(ctx, connStringWithSchema)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -255,13 +283,19 @@ func (r *PgbenchRunner) ensurePgbenchTables(ctx context.Context, pgbenchPath, co
 		_ = conn.Close(ctx)
 	}()
 
-	// Check for pgbench_accounts table
-	results, err := conn.Exec(ctx, `
+	// Check for pgbench_accounts table in the configured schema
+	schema := r.Schema
+	if schema == "" {
+		schema = "public"
+	}
+	query := fmt.Sprintf(`
 		SELECT EXISTS (
 			SELECT FROM information_schema.tables
-			WHERE table_name = 'pgbench_accounts'
+			WHERE table_schema = '%s' AND table_name = 'pgbench_accounts'
 		)
-	`).ReadAll()
+	`, schema)
+
+	results, err := conn.Exec(ctx, query).ReadAll()
 	if err != nil {
 		return fmt.Errorf("failed to check for pgbench tables: %w", err)
 	}
@@ -284,13 +318,13 @@ func (r *PgbenchRunner) ensurePgbenchTables(ctx context.Context, pgbenchPath, co
 	}
 
 	// Initialize pgbench tables
-	fmt.Fprintf(os.Stderr, "Initializing pgbench tables (scale factor: %d)...\n", r.ScaleFactor)
+	fmt.Fprintf(os.Stderr, "Initializing pgbench tables in schema %s (scale factor: %d)...\n", schema, r.ScaleFactor)
 
 	args := []string{
 		"-i",                              // Initialize
 		"-s", strconv.Itoa(r.ScaleFactor), // Scale factor
-		"-q", // Quiet mode
-		connString,
+		"-q",                 // Quiet mode
+		connStringWithSchema, // Connection with search_path
 	}
 
 	cmd := exec.CommandContext(ctx, pgbenchPath, args...)
@@ -301,7 +335,7 @@ func (r *PgbenchRunner) ensurePgbenchTables(ctx context.Context, pgbenchPath, co
 		return fmt.Errorf("pgbench init failed: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "pgbench tables initialized successfully\n")
+	fmt.Fprintf(os.Stderr, "pgbench tables initialized successfully in schema %s\n", schema)
 	return nil
 }
 

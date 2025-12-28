@@ -21,6 +21,12 @@ CREATE SCHEMA schema2;
 GRANT CREATE ON SCHEMA schema1 TO admin;
 GRANT CREATE ON SCHEMA schema2 TO admin;
 
+-- Grant app CREATE on schema1 for pgbench table creation
+-- pgbench will use schema1 via search_path in connection string
+GRANT CREATE ON SCHEMA schema1 TO app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA schema1 GRANT ALL ON TABLES TO app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA schema1 GRANT ALL ON SEQUENCES TO app;
+
 CREATE TABLE schema1.example (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
