@@ -67,6 +67,12 @@ func main() {
 	pprof := flag.Bool("pprof", false, "collect CPU and memory profiles from pglink targets")
 	profileDuration := flag.Duration("profile-duration", 30*time.Second, "duration for CPU profile collection")
 
+	// pgbench flags
+	pgbenchClients := flag.Int("pgbench-clients", 0, "pgbench number of clients (-c flag, default: use -cpu value)")
+	pgbenchThreads := flag.Int("pgbench-threads", 0, "pgbench number of threads (-j flag, default: clients)")
+	pgbenchScale := flag.Int("pgbench-scale", 10, "pgbench scale factor for initialization")
+	pgbenchProtocol := flag.String("pgbench-protocol", "extended", "pgbench protocol (simple, extended, prepared)")
+
 	flag.Parse()
 
 	// Default -check-observable to -observable if not explicitly set
@@ -202,6 +208,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set up runners based on requested cases
+	runners := buildRunners(cfg.Cases, *cpu, *pgbenchClients, *pgbenchThreads, *pgbenchScale, *pgbenchProtocol)
+	orchestrator.SetRunners(runners)
+
 	// Set up context with signal handling
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -241,4 +251,49 @@ func main() {
 
 	fmt.Printf("\nResults written to: %s\n", orchestrator.OutputDir())
 	fmt.Printf("Use 'benchstat %s/bench.*.txt' to analyze results\n", orchestrator.OutputDir())
+}
+
+// buildRunners creates the appropriate benchmark runners based on the requested cases.
+// If no cases are specified (empty slice), returns just the Go runner which runs all Go cases.
+// If specific cases are specified, creates runners for each type that has matching cases.
+func buildRunners(cases []string, cpu, pgbenchClients, pgbenchThreads, pgbenchScale int, pgbenchProtocol string) []e2e.BenchRunner {
+	goRunner := e2e.NewGoTestRunner()
+	pgbenchRunner := e2e.NewPgbenchRunner()
+
+	// Configure pgbench runner
+	if pgbenchClients > 0 {
+		pgbenchRunner.Clients = pgbenchClients
+	} else {
+		pgbenchRunner.Clients = cpu
+	}
+	if pgbenchThreads > 0 {
+		pgbenchRunner.Threads = pgbenchThreads
+	}
+	pgbenchRunner.ScaleFactor = pgbenchScale
+	pgbenchRunner.Protocol = pgbenchProtocol
+	// Set backend connection string for pgbench init (must be direct to postgres)
+	pgbenchRunner.BackendConnString = "postgres://app:app_password@localhost:15432/uno?sslmode=disable"
+
+	// If no cases specified, just use Go runner (default behavior)
+	if len(cases) == 0 {
+		return []e2e.BenchRunner{goRunner}
+	}
+
+	// Check which runners have matching cases
+	var runners []e2e.BenchRunner
+
+	if e2e.HasCasesForRunner(cases, goRunner) {
+		runners = append(runners, goRunner)
+	}
+
+	if e2e.HasCasesForRunner(cases, pgbenchRunner) {
+		runners = append(runners, pgbenchRunner)
+	}
+
+	// If no cases matched any runner, return Go runner as fallback
+	if len(runners) == 0 {
+		return []e2e.BenchRunner{goRunner}
+	}
+
+	return runners
 }

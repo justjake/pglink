@@ -33,6 +33,11 @@ func (r *GoTestRunner) Name() string {
 	return "go-test"
 }
 
+// SupportedCases returns the benchmark cases supported by the Go test runner.
+func (r *GoTestRunner) SupportedCases() []string {
+	return []string{"select1", "copy_in", "copy_out", "mixed"}
+}
+
 // Run executes benchmarks using go test -bench.
 func (r *GoTestRunner) Run(ctx context.Context, cfg BenchRunConfig) (*BenchRunResult, error) {
 	goPath := r.GoPath

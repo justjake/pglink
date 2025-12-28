@@ -34,8 +34,9 @@ type Orchestrator struct {
 	// Config is the benchmark suite configuration.
 	Config BenchSuiteConfig
 
-	// Runner is the benchmark execution backend.
-	Runner BenchRunner
+	// Runners are the benchmark execution backends.
+	// Multiple runners can be used to run different types of benchmarks (e.g., go test, pgbench).
+	Runners []BenchRunner
 
 	// Logger for orchestrator messages.
 	Logger *slog.Logger
@@ -68,7 +69,7 @@ func NewOrchestrator(cfg BenchSuiteConfig, logger *slog.Logger) (*Orchestrator, 
 
 	return &Orchestrator{
 		Config:           cfg,
-		Runner:           DefaultBenchRunner(),
+		Runners:          []BenchRunner{DefaultBenchRunner()},
 		Logger:           logger,
 		mainWorktreePath: mainWorktree,
 		currentWorktree:  currentWorktree,
@@ -76,6 +77,11 @@ func NewOrchestrator(cfg BenchSuiteConfig, logger *slog.Logger) (*Orchestrator, 
 		processes:        make(map[string]*exec.Cmd),
 		metricsPorts:     make(map[string]int),
 	}, nil
+}
+
+// SetRunners sets the benchmark runners. This replaces any existing runners.
+func (o *Orchestrator) SetRunners(runners []BenchRunner) {
+	o.Runners = runners
 }
 
 // Run executes the benchmark suite.
@@ -233,51 +239,88 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 			}()
 		}
 
-		runCfg := BenchRunConfig{
-			Duration:        o.Config.Duration,
-			Warmup:          o.Config.Warmup,
-			CPU:             o.Config.CPU,
-			SimpleQueryMode: o.Config.SimpleQueryMode,
-			Seed:            o.Config.Seed,
-			Cases:           o.Config.Cases,
-			Target:          target,
-			ConnString:      target.ConnString,
-			RunID:           o.executionID,
-			Round:           round,
-			TotalRounds:     o.Config.Rounds,
-			Timestamp:       time.Now(),
-			Count:           o.Config.Count,
-			Timeout:         o.Config.Duration + 5*time.Minute, // Add buffer for warmup and teardown
-			OutputDir:       o.outputDir,
-		}
-
-		runResult, err := o.Runner.Run(ctx, runCfg)
-		if err != nil {
-			o.Logger.Error("benchmark run failed", "target", target.Name, "round", round, "error", err)
-			// Send SIGUSR1 to dump ring buffer stats for debugging (pglink only)
-			if target.Type == TargetTypePglink {
-				o.signalTargetForDebugDump(target.Name)
-			}
-		}
 
 		roundResult := RoundResult{
 			Round: round,
 		}
+		var roundOutputs [][]byte
+		var totalDuration time.Duration
 
-		if runResult != nil {
-			roundResult.Duration = runResult.Duration
-			roundResult.Output = string(runResult.Output)
+		// Run each runner with its supported cases
+		for _, runner := range o.Runners {
+			// Filter cases for this runner
+			runnerCases := FilterCasesForRunner(o.Config.Cases, runner)
+			if len(runnerCases) == 0 {
+				continue
+			}
 
-			// Append to bench file
-			if _, err := benchFile.Write(runResult.Output); err != nil {
+			o.Logger.Info("running benchmark runner",
+				"runner", runner.Name(),
+				"target", target.Name,
+				"round", round,
+				"cases", runnerCases,
+			)
+
+			runCfg := BenchRunConfig{
+				Duration:        o.Config.Duration,
+				Warmup:          o.Config.Warmup,
+				CPU:             o.Config.CPU,
+				SimpleQueryMode: o.Config.SimpleQueryMode,
+				Seed:            o.Config.Seed,
+				Cases:           runnerCases,
+				Target:          target,
+				ConnString:      target.ConnString,
+				RunID:           o.executionID,
+				Round:           round,
+				TotalRounds:     o.Config.Rounds,
+				Timestamp:       time.Now(),
+				Count:           o.Config.Count,
+				Timeout:         o.Config.Duration + 5*time.Minute, // Add buffer for warmup and teardown
+				OutputDir:       o.outputDir,
+			}
+
+			runResult, err := runner.Run(ctx, runCfg)
+			if err != nil {
+				o.Logger.Error("benchmark run failed",
+					"runner", runner.Name(),
+					"target", target.Name,
+					"round", round,
+					"error", err,
+				)
+				// Send SIGUSR1 to dump ring buffer stats for debugging (pglink only)
+				if target.Type == TargetTypePglink {
+					o.signalTargetForDebugDump(target.Name)
+				}
+			}
+
+			if runResult != nil {
+				totalDuration += runResult.Duration
+				roundOutputs = append(roundOutputs, runResult.Output)
+
+				// Collect metrics
+				result.Metrics = append(result.Metrics, runResult.Metrics...)
+			}
+		}
+
+		// Combine outputs from all runners
+		roundResult.Duration = totalDuration
+		combinedOutput := strings.Join(func() []string {
+			strs := make([]string, len(roundOutputs))
+			for i, b := range roundOutputs {
+				strs[i] = string(b)
+			}
+			return strs
+		}(), "\n")
+		roundResult.Output = combinedOutput
+
+		// Append combined output to bench file
+		if len(combinedOutput) > 0 {
+			if _, err := benchFile.WriteString(combinedOutput); err != nil {
 				o.Logger.Warn("failed to write benchmark output", "error", err)
 			}
 			if _, err := benchFile.WriteString("\n"); err != nil {
 				o.Logger.Warn("failed to write newline", "error", err)
 			}
-
-			// Collect metrics
-			result.Metrics = append(result.Metrics, runResult.Metrics...)
 		}
 
 		result.Rounds = append(result.Rounds, roundResult)
