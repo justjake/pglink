@@ -279,6 +279,32 @@ func (s *Service) unregisterForCancel(sess *Session) {
 	delete(s.cancelRegistry, sess.state.PID)
 }
 
+// DumpRingBufferStats logs ring buffer statistics for all active sessions.
+// This is called when SIGUSR1 is received, before taking a flight recorder snapshot.
+func (s *Service) DumpRingBufferStats() {
+	s.logger.Info("ring buffer stats dump (SIGUSR1)")
+
+	s.sessionsMu.Lock()
+	sessions := make([]*Session, 0, len(s.sessions))
+	for sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.sessionsMu.Unlock()
+
+	for _, sess := range sessions {
+		sess.LogRingBufferStats(s.logger)
+	}
+}
+
+// SetupFlightRecorderCallback registers the ring buffer dump callback with the flight recorder.
+// This should be called after creating the flight recorder service.
+func (s *Service) SetupFlightRecorderCallback(fr *observability.FlightRecorderService) {
+	if fr == nil {
+		return
+	}
+	fr.SetSignalCallback(s.DumpRingBufferStats)
+}
+
 // handleCancelRequest processes a cancel request from a client.
 // It looks up the target session by PID, validates the secret key,
 // and forwards the cancel to the backend if valid.

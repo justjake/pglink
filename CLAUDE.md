@@ -27,6 +27,59 @@ PGLINK_LOG_LEVEL=debug bin/test ./e2e -run TestBasicQuery
 
 Supported log levels: `debug`, `info`, `warn`, `error`.
 
+## Debugging Benchmarks
+
+### Quick iteration
+
+Use shorter duration for faster feedback when debugging benchmark issues:
+
+```bash
+bin/bench -cases copy_in -duration 10s -rounds 1
+```
+
+### Enable debug logging
+
+Use the `-debug` flag to enable debug-level logging for spawned pglink processes:
+
+```bash
+bin/bench -cases copy_in -debug
+```
+
+Or manually pass arguments:
+
+```bash
+bin/bench -a-args "-log-level debug"
+```
+
+### View pglink logs
+
+Benchmark logs are written to the output directory:
+
+```bash
+cat out/benchmarks/*/pglink.*.log
+```
+
+### Compare variants (A/B testing)
+
+Use A/B flags to compare different worktrees or configurations:
+
+```bash
+bin/bench -a-label "main" -a-worktree ../pglink \
+          -b-label "fix" -b-worktree ./worktrees/my-fix
+```
+
+### Dump ring buffer state
+
+Send SIGUSR1 to a running pglink process to dump ring buffer state for all sessions:
+
+```bash
+kill -USR1 $(pgrep pglink)
+```
+
+This also triggers a flight recorder snapshot if enabled.
+
+**Note:** `bin/bench` automatically sends SIGUSR1 when a benchmark run fails, so ring buffer stats will be in the pglink logs.
+
 ## Structure
 
 - `pkg/frontend`: Interactions between clients and the proxy. Accepts incoming connections, authenticates clients, proxies client requests to the backend.

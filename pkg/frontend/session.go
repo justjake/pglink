@@ -1733,6 +1733,32 @@ func (s *Session) startSessionSpan() {
 	s.ctx = ctx
 }
 
+// LogRingBufferStats logs the current ring buffer statistics for debugging.
+// Called by Service when SIGUSR1 is received.
+func (s *Session) LogRingBufferStats(logger *slog.Logger) {
+	// Frontend ring buffer
+	if rb := s.frontend.RingBuffer(); rb != nil {
+		logger.Info("frontend ring buffer",
+			"pid", s.state.PID,
+			"database", s.databaseName,
+			"user", s.userName,
+			"stats", rb.Stats(),
+		)
+	}
+
+	// Backend ring buffer (if acquired)
+	if s.backend != nil {
+		if rb := s.backend.RingBuffer(); rb != nil {
+			logger.Info("backend ring buffer",
+				"pid", s.state.PID,
+				"database", s.databaseName,
+				"user", s.userName,
+				"stats", rb.Stats(),
+			)
+		}
+	}
+}
+
 func flushRingRange(logger *slog.Logger, direction string, dst interface {
 	WriteRange(*pgwire.RingRange) (int64, error)
 }, src *pgwire.RingRange, joinErr error) (newSrc *pgwire.RingRange, newJoinErr error) {

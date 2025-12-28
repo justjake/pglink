@@ -29,6 +29,12 @@ type Metrics struct {
 	// Histograms
 	QueryDuration          *prometheus.HistogramVec
 	BackendAcquireDuration *prometheus.HistogramVec
+
+	// Ring buffer metrics
+	RingBufferMessagesTotal   *prometheus.CounterVec
+	RingBufferBytesTotal      *prometheus.CounterVec
+	RingBufferUtilization     *prometheus.GaugeVec
+	RingBufferSessionsByState *prometheus.GaugeVec
 }
 
 // DefaultMetrics creates a new Metrics instance with all metrics registered.
@@ -148,6 +154,36 @@ func DefaultMetrics() *Metrics {
 			},
 			[]string{"database"},
 		),
+
+		// Ring buffer metrics
+		RingBufferMessagesTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "pglink_ringbuffer_messages_total",
+				Help: "Total messages processed by ring buffers",
+			},
+			[]string{"direction"}, // "frontend" or "backend"
+		),
+		RingBufferBytesTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "pglink_ringbuffer_bytes_total",
+				Help: "Total bytes processed by ring buffers",
+			},
+			[]string{"direction"},
+		),
+		RingBufferUtilization: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "pglink_ringbuffer_utilization_ratio",
+				Help: "Current ring buffer utilization (0-1)",
+			},
+			[]string{"direction"},
+		),
+		RingBufferSessionsByState: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "pglink_ringbuffer_sessions_by_state",
+				Help: "Number of sessions in each ring buffer state",
+			},
+			[]string{"direction", "state"},
+		),
 	}
 }
 
@@ -258,4 +294,36 @@ func (m *Metrics) UpdatePreparedStatementCacheSize(database string, size int) {
 		return
 	}
 	m.PreparedStatementCacheSize.WithLabelValues(database).Set(float64(size))
+}
+
+// AddRingBufferMessages adds to the total messages counter.
+func (m *Metrics) AddRingBufferMessages(direction string, count int64) {
+	if m == nil {
+		return
+	}
+	m.RingBufferMessagesTotal.WithLabelValues(direction).Add(float64(count))
+}
+
+// AddRingBufferBytes adds to the total bytes counter.
+func (m *Metrics) AddRingBufferBytes(direction string, count int64) {
+	if m == nil {
+		return
+	}
+	m.RingBufferBytesTotal.WithLabelValues(direction).Add(float64(count))
+}
+
+// SetRingBufferUtilization sets the utilization gauge.
+func (m *Metrics) SetRingBufferUtilization(direction string, ratio float64) {
+	if m == nil {
+		return
+	}
+	m.RingBufferUtilization.WithLabelValues(direction).Set(ratio)
+}
+
+// SetRingBufferSessionsByState sets the count of sessions in a given state.
+func (m *Metrics) SetRingBufferSessionsByState(direction, state string, count int) {
+	if m == nil {
+		return
+	}
+	m.RingBufferSessionsByState.WithLabelValues(direction, state).Set(float64(count))
 }

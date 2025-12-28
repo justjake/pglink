@@ -60,6 +60,9 @@ func main() {
 	includeDirect := flag.Bool("direct", true, "include direct postgres benchmark")
 	includePgbouncer := flag.Bool("pgbouncer", false, "include pgbouncer benchmark")
 
+	// Debug flags
+	debug := flag.Bool("debug", false, "enable debug logging for spawned pglink processes")
+
 	flag.Parse()
 
 	// Default -check-observable to -observable if not explicitly set
@@ -131,6 +134,9 @@ func main() {
 	if *aEnv != "" {
 		aTarget.ExtraEnv = strings.Split(*aEnv, ",")
 	}
+	if *debug {
+		aTarget.ExtraArgs = append(aTarget.ExtraArgs, "-log-level", "debug")
+	}
 	cfg.Targets = append(cfg.Targets, aTarget)
 
 	// Add pglink B variant if specified
@@ -149,6 +155,9 @@ func main() {
 		}
 		if *bEnv != "" {
 			bTarget.ExtraEnv = strings.Split(*bEnv, ",")
+		}
+		if *debug {
+			bTarget.ExtraArgs = append(bTarget.ExtraArgs, "-log-level", "debug")
 		}
 		cfg.Targets = append(cfg.Targets, bTarget)
 

@@ -105,6 +105,12 @@ func (c *PooledBackend) ResumeRingBuffer() {
 	}
 }
 
+// RingBuffer returns the ring buffer for this backend connection.
+func (c *PooledBackend) RingBuffer() *pgwire.RingBuffer {
+	c.panicIfReleased()
+	return c.session.RingBuffer()
+}
+
 func (c *PooledBackend) WriteRange(r *pgwire.RingRange) (int64, error) {
 	c.panicIfReleased()
 	n, err := c.session.WriteRange(r)

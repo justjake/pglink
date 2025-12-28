@@ -90,6 +90,9 @@ type FlightRecorderService struct {
 
 	// Channel to signal shutdown to goroutines
 	done chan struct{}
+
+	// Optional callback invoked on SIGUSR1 before taking snapshot
+	onSignal func()
 }
 
 // FlightRecorderStatus represents the current status of the flight recorder.
@@ -364,6 +367,15 @@ func (s *FlightRecorderService) OnError(err error) {
 	}
 }
 
+// SetSignalCallback sets a callback to be invoked on SIGUSR1 before taking a snapshot.
+// This can be used to dump additional state (e.g., ring buffer stats) when debugging.
+func (s *FlightRecorderService) SetSignalCallback(fn func()) {
+	if s == nil {
+		return
+	}
+	s.onSignal = fn
+}
+
 // SetupSignalHandler sets up a handler for SIGUSR1 to trigger snapshots.
 // The handler runs in a separate goroutine and stops when Stop() is called.
 func (s *FlightRecorderService) SetupSignalHandler(ctx context.Context) {
@@ -388,6 +400,11 @@ func (s *FlightRecorderService) SetupSignalHandler(ctx context.Context) {
 				signal.Stop(sigCh)
 				return
 			case <-sigCh:
+				// Call the signal callback first (e.g., to dump ring buffer stats)
+				if s.onSignal != nil {
+					s.onSignal()
+				}
+
 				// Signal handler bypasses cooldown
 				path, err := s.TakeSnapshot("signal")
 				if err != nil {

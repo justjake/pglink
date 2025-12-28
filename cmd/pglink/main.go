@@ -547,6 +547,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Wire up flight recorder callback to dump ring buffer stats on SIGUSR1
+	svc.SetupFlightRecorderCallback(flightRecorder)
+
 	// Handle shutdown signal in goroutine
 	go func() {
 		sig := <-sigChan

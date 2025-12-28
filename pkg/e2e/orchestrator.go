@@ -239,6 +239,10 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		runResult, err := o.Runner.Run(ctx, runCfg)
 		if err != nil {
 			o.Logger.Error("benchmark run failed", "target", target.Name, "round", round, "error", err)
+			// Send SIGUSR1 to dump ring buffer stats for debugging (pglink only)
+			if target.Type == TargetTypePglink {
+				o.signalTargetForDebugDump(target.Name)
+			}
 		}
 
 		roundResult := RoundResult{
@@ -519,6 +523,26 @@ func (o *Orchestrator) startPgbouncer(ctx context.Context, target *TargetConfig)
 	time.Sleep(2 * time.Second)
 
 	return nil
+}
+
+// signalTargetForDebugDump sends SIGUSR1 to a running target process to trigger
+// ring buffer stats dump and flight recorder snapshot. This is useful for debugging
+// when a benchmark encounters an error.
+func (o *Orchestrator) signalTargetForDebugDump(name string) {
+	cmd, ok := o.processes[name]
+	if !ok || cmd.Process == nil {
+		return
+	}
+
+	o.Logger.Info("sending SIGUSR1 for debug dump", "target", name, "pid", cmd.Process.Pid)
+
+	if err := cmd.Process.Signal(syscall.SIGUSR1); err != nil {
+		o.Logger.Warn("failed to send SIGUSR1", "target", name, "error", err)
+		return
+	}
+
+	// Give the process a moment to dump state
+	time.Sleep(500 * time.Millisecond)
 }
 
 // stopTargetProcess stops a running target process gracefully.
