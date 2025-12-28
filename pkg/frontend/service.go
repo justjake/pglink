@@ -144,6 +144,15 @@ func (s *Service) acceptLoop(ln net.Listener) error {
 			continue
 		}
 
+		// Disable Nagle's algorithm for low-latency message delivery.
+		// This is critical for proxying PostgreSQL traffic, as small messages
+		// like CopyInResponse must be sent immediately without TCP batching.
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			if err := tcpConn.SetNoDelay(true); err != nil {
+				s.logger.Warn("failed to set TCP_NODELAY", "error", err)
+			}
+		}
+
 		// Check connection limit before processing
 		currentConns := s.activeConns.Load()
 		if currentConns >= maxConns {

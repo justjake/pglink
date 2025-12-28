@@ -77,8 +77,14 @@ func (f *Frontend) Cursor() *pgwire.Cursor {
 	return f.cursor
 }
 
+// RingBuffer returns the underlying ring buffer.
+// Only valid after StartRingBuffer() has been called.
+func (f *Frontend) RingBuffer() *pgwire.RingBuffer {
+	return f.ringBuffer
+}
+
 // WriteRange writes a range of messages to the client connection.
-func (f *Frontend) WriteRange(r *pgwire.RingRange) error {
-	_, err := io.Copy(f.conn, r.NewReader())
-	return err
+// Returns the number of bytes written and any error.
+func (f *Frontend) WriteRange(r *pgwire.RingRange) (int64, error) {
+	return io.Copy(f.conn, r.NewReader())
 }

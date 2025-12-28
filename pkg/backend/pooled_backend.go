@@ -105,13 +105,13 @@ func (c *PooledBackend) ResumeRingBuffer() {
 	}
 }
 
-func (c *PooledBackend) WriteRange(r *pgwire.RingRange) error {
+func (c *PooledBackend) WriteRange(r *pgwire.RingRange) (int64, error) {
 	c.panicIfReleased()
-	err := c.session.WriteRange(r)
+	n, err := c.session.WriteRange(r)
 	if err != nil {
 		c.MarkForDestroy(fmt.Errorf("failed to write message batch %s: %w", r.String(), err))
 	}
-	return err
+	return n, err
 }
 
 func (c *PooledBackend) WriteMsg(msg pgproto3.FrontendMessage) error {

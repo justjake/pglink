@@ -277,6 +277,14 @@ func (s *Session) Run() {
 	// Start ring buffer reader now that startup is complete
 	s.frontend.StartRingBuffer(s.dbConfig.GetMessageBufferBytes())
 
+	// Connect ring buffer debug logging to session logger.
+	// The ring buffer only logs when debugLog is non-nil (zero overhead check),
+	// and slog.Debug() returns early when log level is higher than debug.
+	// This enables detailed ring buffer tracing via PGLINK_LOG_LEVEL=debug.
+	s.frontend.RingBuffer().SetDebugLog(func(msg string, args ...any) {
+		s.logger.Debug(msg, args...)
+	})
+
 	// Idle client state.
 	// When true, transition to backend connected state to handle the query.
 	// When false, close the client connection.
@@ -635,7 +643,10 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 				// Fall through to default handler (proxy to server)
 				return s.proxyClientToServer(msg, frontendCursor.MsgIdx(), &toServer)
 			},
-			Copy: nil,
+			Copy: func(msg pgwire.ClientCopy) (bool, error) {
+				s.logger.Debug("client copy message", "type", fmt.Sprintf("%T", msg), "copyMode", s.state.CopyMode)
+				return s.proxyClientToServer(msg, frontendCursor.MsgIdx(), &toServer)
+			},
 
 			ExtendedQuery: func(msg pgwire.ClientExtendedQuery) (bool, error) {
 				return s.rewriteAndFlushExtendedQueryToBackend(msg, frontendCursor.MsgIdx(), &toServer)
@@ -655,7 +666,10 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		},
 		Server: pgwire.ServerMessageHandlers[bool]{
 			Async: nil,
-			Copy:  nil,
+			Copy: func(msg pgwire.ServerCopy) (bool, error) {
+				s.logger.Debug("server copy message", "type", fmt.Sprintf("%T", msg), "copyMode", s.state.CopyMode)
+				return s.proxyServerToClient(msg, backendCursor.MsgIdx(), &toClient)
+			},
 			ExtendedQuery: func(msg pgwire.ServerExtendedQuery) (bool, error) {
 				return s.handleServerExtendedQuery(msg, backendCursor.MsgIdx(), &toClient)
 			},
@@ -673,12 +687,20 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 	handleFrontendBatch := func() (continueWithBackend bool, err error) {
 		s.logger.Debug("frontend batch", "start", frontendCursor.Start(), "end", frontendCursor.End())
 		toServer = frontendCursor.Slice(frontendCursor.Start(), frontendCursor.Start())
-		defer func() { toServer, err = flushRingRange(s.backend, toServer, err) }()
+		defer func() { toServer, err = flushRingRange(s.logger, "to-server", s.backend, toServer, err) }()
 
+		iteration := 0
 		for frontendCursor.NextMsg() {
+			iteration++
+			s.logger.Debug("frontend batch iteration",
+				"iteration", iteration,
+				"msgIdx", frontendCursor.MsgIdx(),
+				"msgType", frontendCursor.MessageType())
+
 			var msg pgwire.ClientMessage
 			msg, err = frontendCursor.AsClient()
 			if err != nil {
+				s.logger.Debug("frontend batch AsClient error", "iteration", iteration, "err", err)
 				return false, pgwire.NewProtocolViolation(err, nil)
 			}
 
@@ -689,10 +711,16 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 				return s.proxyClientToServer(msg, frontendCursor.MsgIdx(), &toServer)
 			})
 
+			s.logger.Debug("frontend batch handler result",
+				"iteration", iteration,
+				"continueWithBackend", continueWithBackend,
+				"err", err)
+
 			if !continueWithBackend || err != nil {
 				return
 			}
 		}
+		s.logger.Debug("frontend batch loop done", "iterations", iteration)
 
 		// Flush any pending fake responses (e.g., ParseComplete for skipped Parse)
 		if len(s.pendingFakeResponses) > 0 {
@@ -713,8 +741,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		s.logger.Debug("backend batch", "start", backendCursor.Start(), "end", backendCursor.End())
 		toClient = backendCursor.Slice(backendCursor.Start(), backendCursor.Start())
 		defer func() {
-			s.logger.Debug("backend batch flush", "msgs", toClient.Len())
-			toClient, err = flushRingRange(s.frontend, toClient, err)
+			toClient, err = flushRingRange(s.logger, "to-client", s.frontend, toClient, err)
 		}()
 
 		for backendCursor.NextMsg() {
@@ -1019,7 +1046,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 		s.backend.UpdateState(rewrittenMsg)
 
 		// Flush pending toServer messages.
-		*toServer, err = flushRingRange(s.backend, *toServer, err)
+		*toServer, err = flushRingRange(s.logger, "to-server", s.backend, *toServer, err)
 		if err != nil {
 			return false, err
 		}
@@ -1706,11 +1733,15 @@ func (s *Session) startSessionSpan() {
 	s.ctx = ctx
 }
 
-func flushRingRange(dst interface{ WriteRange(*pgwire.RingRange) error }, src *pgwire.RingRange, joinErr error) (newSrc *pgwire.RingRange, newJoinErr error) {
+func flushRingRange(logger *slog.Logger, direction string, dst interface {
+	WriteRange(*pgwire.RingRange) (int64, error)
+}, src *pgwire.RingRange, joinErr error) (newSrc *pgwire.RingRange, newJoinErr error) {
 	if src.Len() == 0 {
 		return src, joinErr
 	}
-	if flushErr := dst.WriteRange(src); flushErr != nil {
+	n, flushErr := dst.WriteRange(src)
+	logger.Debug("flush ring range", "direction", direction, "msgs", src.Len(), "bytes", n, "err", flushErr)
+	if flushErr != nil {
 		return src, errors.Join(joinErr, flushErr)
 	}
 	return src.Slice(src.End(), src.End()), joinErr

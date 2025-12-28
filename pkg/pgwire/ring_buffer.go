@@ -51,7 +51,7 @@ func DefaultRingBufferConfig() RingBufferConfig {
 	return RingBufferConfig{
 		MessageBytes:  DefaultMessageBytes,
 		MessageCount:  DefaultMessageCount,
-		HeadroomBytes: 0,
+		HeadroomBytes: 0, // Disabled by default - headroom is confusing and reduces usable buffer space
 	}
 }
 
@@ -143,6 +143,9 @@ type RingBuffer struct {
 	// Set by StartNetConnReader
 	conn       net.Conn
 	readerDone chan struct{}
+
+	// Optional debug logging function
+	debugLog func(msg string, args ...any)
 }
 
 func (r *RingBuffer) initChannels() {
@@ -163,9 +166,7 @@ func NewRingBuffer(cfg RingBufferConfig) *RingBuffer {
 	if cfg.MessageCount == 0 {
 		cfg.MessageCount = DefaultMessageCount
 	}
-	if cfg.HeadroomBytes == 0 {
-		cfg.HeadroomBytes = DefaultHeadroomBytes
-	}
+	// HeadroomBytes defaults to 0 (disabled) - don't apply default
 
 	// Validate
 	if cfg.MessageBytes <= 0 || cfg.MessageBytes&(cfg.MessageBytes-1) != 0 {
@@ -191,6 +192,11 @@ func NewRingBuffer(cfg RingBufferConfig) *RingBuffer {
 // maxBufferableSize returns the maximum message size that can be fully buffered.
 func (r *RingBuffer) maxBufferableSize() int64 {
 	return int64(len(r.data)) - r.HeadroomBytes
+}
+
+// SetDebugLog sets a debug logging function for tracing ring buffer operations.
+func (r *RingBuffer) SetDebugLog(fn func(msg string, args ...any)) {
+	r.debugLog = fn
 }
 
 // === Writer methods ===
@@ -274,6 +280,13 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 
 			if available <= 0 {
 				// Actually need to wait for space
+				if r.debugLog != nil {
+					r.debugLog("ring: waiting for data space",
+						"used", used,
+						"available", available,
+						"rawEnd", r.rawEnd,
+						"consumedBytes", r.cachedConsumedBytes)
+				}
 				if err := r.waitForSpace(ctx); err != nil {
 					return err
 				}
@@ -293,6 +306,12 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 			if usedMeta >= int64(len(r.offsets)) {
 				// We have unparsed data but no metadata space.
 				// Wait for metadata space instead of blocking on Read().
+				if r.debugLog != nil {
+					r.debugLog("ring: waiting for metadata space",
+						"usedMeta", usedMeta,
+						"maxMeta", len(r.offsets),
+						"unparsedData", unparsedData)
+				}
 				if err := r.waitForSpace(ctx); err != nil {
 					return err
 				}
@@ -327,6 +346,13 @@ func (r *RingBuffer) ReadFrom(ctx context.Context, src io.Reader) error {
 
 		// Read directly from network into ring buffer
 		n, err := src.Read(r.data[writeOff : writeOff+contiguous])
+		if r.debugLog != nil {
+			r.debugLog("ring: network read",
+				"bytesRead", n,
+				"err", err,
+				"writeOff", writeOff,
+				"contiguous", contiguous)
+		}
 		if n > 0 {
 			r.rawEnd += int64(n)
 
@@ -448,6 +474,14 @@ func (r *RingBuffer) parseCompleteMessages(msgsUntilSpaceRefresh *int) bool {
 // handleStreamingMessage pauses the reader goroutine until the consumer
 // finishes reading the streaming message directly from the network connection.
 func (r *RingBuffer) handleStreamingMessage(ctx context.Context, src io.Reader) error {
+	if r.debugLog != nil {
+		r.debugLog("ring: streaming message started",
+			"msgIdx", r.streaming.msgIdx,
+			"totalLen", r.streaming.totalLen,
+			"bodyInRing", r.streaming.bodyInRing,
+			"parsePos", r.parsePos)
+	}
+
 	// Wait for consumer to signal completion
 	select {
 	case <-ctx.Done():
@@ -459,10 +493,26 @@ func (r *RingBuffer) handleStreamingMessage(ctx context.Context, src io.Reader) 
 			return err
 		}
 
+		oldParsePos := r.parsePos
+
 		// Reset streaming state and advance parsePos
 		r.parsePos += r.streaming.totalLen
 		r.rawEnd = r.parsePos // Discard any buffered data
 		r.streaming.active = false
+
+		// CRITICAL: Update publishedBytes so that MessageEnd() returns the correct
+		// position for the streaming message. Without this, ReleaseThrough() would
+		// get the wrong end position and consumedBytes wouldn't advance far enough,
+		// causing the ring buffer to think it's over capacity.
+		atomic.StoreInt64(&r.publishedBytes, r.parsePos)
+
+		if r.debugLog != nil {
+			r.debugLog("ring: streaming message completed",
+				"msgIdx", r.streaming.msgIdx,
+				"oldParsePos", oldParsePos,
+				"newParsePos", r.parsePos,
+				"publishedBytes", r.parsePos)
+		}
 
 		return nil
 	case <-r.done:
@@ -539,6 +589,14 @@ func (r *RingBuffer) ReleaseThrough(throughMsg int64) {
 	// the offset slots wrap around - when throughMsg >= metaSize and slots have been
 	// reused, offsets[throughMsg&metaMask] would give the wrong position.
 	dataPos := r.MessageEnd(throughMsg - 1)
+
+	if r.debugLog != nil {
+		r.debugLog("ring: release through",
+			"throughMsg", throughMsg,
+			"dataPos", dataPos,
+			"prevConsumedBytes", atomic.LoadInt64(&r.consumedBytes),
+			"prevConsumedMsgs", atomic.LoadInt64(&r.consumedMsgs))
+	}
 
 	atomic.StoreInt64(&r.consumedMsgs, throughMsg)
 	atomic.StoreInt64(&r.consumedBytes, dataPos)

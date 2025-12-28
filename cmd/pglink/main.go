@@ -167,6 +167,7 @@ func main() {
 	prometheusPush := flag.String("prometheus-push", "", "Prometheus OTLP push endpoint (e.g., localhost:19090)")
 	otelLogs := flag.Bool("otel-logs", false, "enable OTEL logs export (uses -otel-endpoint or -otel-logs-endpoint)")
 	otelLogsEndpoint := flag.String("otel-logs-endpoint", "", "OTLP endpoint for logs (e.g., localhost:13100)")
+	logLevel := flag.String("log-level", "", "log level: debug, info, warn, error (overrides PGLINK_LOG_LEVEL env var)")
 
 	flag.Usage = printUsage
 	flag.Parse()
@@ -185,11 +186,27 @@ func main() {
 	}
 
 	// Set up logger
+	logLevelStr := *logLevel
+	if logLevelStr == "" {
+		logLevelStr = os.Getenv("PGLINK_LOG_LEVEL")
+	}
+	var slogLevel slog.Level
+	switch strings.ToLower(logLevelStr) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "warn", "warning":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+	handlerOpts := &slog.HandlerOptions{Level: slogLevel}
 	var handler slog.Handler
 	if *jsonLogs {
-		handler = slog.NewJSONHandler(os.Stdout, nil)
+		handler = slog.NewJSONHandler(os.Stdout, handlerOpts)
 	} else {
-		handler = slog.NewTextHandler(os.Stdout, nil)
+		handler = slog.NewTextHandler(os.Stdout, handlerOpts)
 	}
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
