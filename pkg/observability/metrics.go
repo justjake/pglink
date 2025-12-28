@@ -12,6 +12,7 @@ type Metrics struct {
 	QueriesTotal           *prometheus.CounterVec
 	BackendAcquireTotal    *prometheus.CounterVec
 	ErrorsTotal            *prometheus.CounterVec
+	TimeoutsTotal          *prometheus.CounterVec
 
 	// Prepared statement cache counters
 	PreparedStatementCacheHitsTotal      *prometheus.CounterVec
@@ -283,6 +284,15 @@ func NewMetrics(prefix string) *Metrics {
 				Help: "Total number of errors by type",
 			},
 			[]string{"type"},
+		),
+		TimeoutsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "pglink_timeouts_total",
+				Help: "Total number of timeouts triggered",
+			},
+			[]string{"database", "timeout_type", "outcome"},
+			// timeout_type: "query", "idle_transaction", "transaction"
+			// outcome: "canceled" (cancel worked), "terminated" (had to disconnect)
 		),
 
 		// Prepared statement cache counters
@@ -1166,4 +1176,14 @@ func (m *Metrics) InitPoolStubs(database, user string) {
 	// Health check stubs
 	m.PoolsServerUsedConnections.WithLabelValues(database, user).Set(0)
 	m.PoolsServerTestingConnections.WithLabelValues(database, user).Set(0)
+}
+
+// RecordTimeout records a timeout event.
+// timeoutType: "query", "idle_transaction", "transaction"
+// outcome: "canceled" (cancel worked), "terminated" (had to disconnect)
+func (m *Metrics) RecordTimeout(database, timeoutType, outcome string) {
+	if m == nil {
+		return
+	}
+	m.TimeoutsTotal.WithLabelValues(database, timeoutType, outcome).Inc()
 }

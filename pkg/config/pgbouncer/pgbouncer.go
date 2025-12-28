@@ -254,6 +254,11 @@ func buildINI(cfg *config.Config, listenPort int, databases string, opts Options
 		hasConnTimeout        bool
 		hasLifetime           bool
 		hasIdleTimeout        bool
+
+		// Timeout settings from pglink config
+		queryTimeout           time.Duration
+		idleTransactionTimeout time.Duration
+		transactionTimeout     time.Duration
 	)
 	for _, dbCfg := range cfg.Databases {
 		if dbCfg.Backend.PoolMaxConns > maxPoolConns {
@@ -302,6 +307,17 @@ func buildINI(cfg *config.Config, listenPort int, databases string, opts Options
 				}
 			}
 		}
+
+		// Collect timeout settings (use max values for pgbouncer global config)
+		if qt := dbCfg.QueryTimeout.Duration(); qt > queryTimeout {
+			queryTimeout = qt
+		}
+		if it := dbCfg.IdleTransactionTimeout.Duration(); it > idleTransactionTimeout {
+			idleTransactionTimeout = it
+		}
+		if tt := dbCfg.TransactionTimeout.Duration(); tt > transactionTimeout {
+			transactionTimeout = tt
+		}
 	}
 	if maxPoolConns == 0 {
 		maxPoolConns = 20 // pgbouncer default
@@ -339,6 +355,17 @@ func buildINI(cfg *config.Config, listenPort int, databases string, opts Options
 	// Enable server-side prepared statement tracking for transaction pooling compatibility.
 	// This must match pglink's prepared_statement_cache_size to ensure equivalent behavior.
 	b.WriteString(fmt.Sprintf("max_prepared_statements = %d\n", maxPreparedStatements))
+
+	// Timeout settings from pglink config (passed through for benchmarking equivalence)
+	if queryTimeout > 0 {
+		b.WriteString(fmt.Sprintf("query_timeout = %.1f\n", queryTimeout.Seconds()))
+	}
+	if idleTransactionTimeout > 0 {
+		b.WriteString(fmt.Sprintf("idle_transaction_timeout = %.1f\n", idleTransactionTimeout.Seconds()))
+	}
+	if transactionTimeout > 0 {
+		b.WriteString(fmt.Sprintf("transaction_timeout = %.1f\n", transactionTimeout.Seconds()))
+	}
 
 	// TLS configuration
 	if opts.TLS != nil {

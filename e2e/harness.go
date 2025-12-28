@@ -69,6 +69,10 @@ var PredefinedDatabases = []TestDatabase{
 	{Name: "charlie_dos", BackendHost: "localhost", BackendPort: 15434, BackendDB: "dos"},
 }
 
+// ConfigModifier is a function that modifies a config before starting the service.
+// Used by StartWithConfig to customize timeout settings, pool sizes, etc.
+type ConfigModifier func(*config.Config)
+
 // Harness manages the test infrastructure lifecycle
 type Harness struct {
 	t           *testing.T
@@ -79,6 +83,10 @@ type Harness struct {
 	// Algo is the session algorithm to use ("default" or "ring").
 	// Set this before calling Start().
 	Algo string
+
+	// ConfigModifier is called to modify the config before starting the service.
+	// Set this before calling Start() or use StartWithConfig().
+	ConfigModifier ConfigModifier
 
 	// pglinkPort is dynamically allocated to avoid conflicts between worktrees
 	pglinkPort int
@@ -405,6 +413,11 @@ func (h *Harness) startService(ctx context.Context) {
 	if h.Algo != "" {
 		cfg.SetAlgo(h.Algo)
 		h.logger.Info("using session algorithm", "algo", h.Algo)
+	}
+
+	// Apply config modifier if specified
+	if h.ConfigModifier != nil {
+		h.ConfigModifier(cfg)
 	}
 
 	secrets, err := config.NewSecretCacheFromEnv(ctx)
