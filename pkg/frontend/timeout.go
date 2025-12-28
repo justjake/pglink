@@ -6,7 +6,6 @@ import (
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
-	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/pgwire"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -157,31 +156,11 @@ func (s *Session) handleTimeout(result *TimeoutResult) error {
 	}
 
 	// Record metrics
-	action := s.dbConfig.GetTimeoutAction()
-	outcome := "terminated"
-
-	switch action {
-	case config.TimeoutActionTerminate:
-		if s.metrics != nil {
-			s.metrics.RecordTimeout(s.databaseName, result.Type.String(), outcome)
-		}
-		return s.terminateOnTimeout(errCode, errMsg, result)
-
-	case config.TimeoutActionRequestCancel:
-		// TODO: Implement cancel request logic
-		// For now, fall back to terminate
-		s.logger.Debug("request_cancel not yet implemented, using terminate")
-		if s.metrics != nil {
-			s.metrics.RecordTimeout(s.databaseName, result.Type.String(), outcome)
-		}
-		return s.terminateOnTimeout(errCode, errMsg, result)
-
-	default:
-		if s.metrics != nil {
-			s.metrics.RecordTimeout(s.databaseName, result.Type.String(), outcome)
-		}
-		return s.terminateOnTimeout(errCode, errMsg, result)
+	if s.metrics != nil {
+		s.metrics.RecordTimeout(s.databaseName, result.Type.String(), "terminated")
 	}
+
+	return s.terminateOnTimeout(errCode, errMsg, result)
 }
 
 // terminateOnTimeout sends error to client, marks backend for destruction.

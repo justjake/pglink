@@ -63,7 +63,7 @@ type DatabaseConfig struct {
 	//   - Timer starts: When RequestFlow starts (PushRequest called for first request in flow)
 	//   - Timer resets: When ReadyForQuery received and ActiveRequestFlow becomes nil
 	//   - Timeout check: Only when ActiveRequestFlow != nil, using flow.StartTime
-	//   - Action: Configurable via TimeoutAction (terminate or request_cancel)
+	//   - Action: Configurable via TimeoutAction
 	//   - COPY: NOT suspended (matches pgbouncer)
 	//   - Pipelining: Timeout covers entire pipeline from first request to final ReadyForQuery
 	QueryTimeout Duration `json:"query_timeout,omitzero"`
@@ -106,33 +106,19 @@ type DatabaseConfig struct {
 	// TimeoutAction specifies what to do when a timeout fires.
 	// Default: "terminate"
 	//
-	// "terminate": Send error to client, send Terminate to backend, close both connections.
+	// "terminate": Send error to client, close both connections.
 	//   Matches pgbouncer behavior exactly. Simple and works even if backend is unresponsive.
 	//   Backend may continue executing query until it notices connection closed.
-	//
-	// "request_cancel": Send PostgreSQL CancelRequest to backend first, wait up to CancelTimeout
-	//   for backend to respond with ErrorResponse + ReadyForQuery. If backend responds, the
-	//   connection may be reusable. Falls back to terminate if backend doesn't respond.
-	//   Backend stops work immediately on receiving cancel.
 	TimeoutAction TimeoutAction `json:"timeout_action,omitzero"`
-
-	// CancelTimeout is how long to wait for backend response after sending CancelRequest.
-	// Only used when TimeoutAction is "request_cancel".
-	// Uses Go duration format: "5s", "10s". Default: "5s"
-	CancelTimeout Duration `json:"cancel_timeout,omitzero"`
 }
 
 // TimeoutAction specifies the action to take when a timeout fires.
 type TimeoutAction string
 
 const (
-	// TimeoutActionTerminate sends error to client, Terminate to backend, closes both.
+	// TimeoutActionTerminate sends error to client, closes both connections.
 	// This matches pgbouncer's behavior exactly.
 	TimeoutActionTerminate TimeoutAction = "terminate"
-
-	// TimeoutActionRequestCancel sends CancelRequest to backend first, waits for response.
-	// Falls back to terminate if backend doesn't respond within CancelTimeout.
-	TimeoutActionRequestCancel TimeoutAction = "request_cancel"
 )
 
 // GetTimeoutAction returns the timeout action, defaulting to terminate.
@@ -141,14 +127,6 @@ func (c *DatabaseConfig) GetTimeoutAction() TimeoutAction {
 		return TimeoutActionTerminate
 	}
 	return c.TimeoutAction
-}
-
-// GetCancelTimeout returns the cancel timeout, defaulting to 5 seconds.
-func (c *DatabaseConfig) GetCancelTimeout() time.Duration {
-	if c.CancelTimeout == 0 {
-		return 5 * time.Second
-	}
-	return c.CancelTimeout.Duration()
 }
 
 // Validate checks that the database configuration is valid.
@@ -195,11 +173,8 @@ func (c *DatabaseConfig) Validate(ctx context.Context, secrets *SecretCache) err
 	if c.TransactionTimeout < 0 {
 		errs = append(errs, fmt.Errorf("transaction_timeout must be non-negative"))
 	}
-	if c.CancelTimeout < 0 {
-		errs = append(errs, fmt.Errorf("cancel_timeout must be non-negative"))
-	}
-	if c.TimeoutAction != "" && c.TimeoutAction != TimeoutActionTerminate && c.TimeoutAction != TimeoutActionRequestCancel {
-		errs = append(errs, fmt.Errorf("timeout_action must be %q or %q, got %q", TimeoutActionTerminate, TimeoutActionRequestCancel, c.TimeoutAction))
+	if c.TimeoutAction != "" && c.TimeoutAction != TimeoutActionTerminate {
+		errs = append(errs, fmt.Errorf("timeout_action must be %q, got %q", TimeoutActionTerminate, c.TimeoutAction))
 	}
 
 	// Check for duplicate usernames
