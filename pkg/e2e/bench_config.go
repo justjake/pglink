@@ -31,6 +31,9 @@ type BenchSuiteConfig struct {
 	Observable     bool // Enable observability integration
 	FlightRecorder bool // Enable flight recorder for pglink targets
 
+	// Pglink pool settings
+	PglinkPoolMaxConns int // Backend pool max connections (0 = use CPU setting)
+
 	// Targets to benchmark
 	Targets []TargetConfig
 

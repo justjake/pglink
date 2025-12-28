@@ -1249,7 +1249,10 @@ func (s *Session) initSessionProcessState() {
 	s.state.PID = s.service.allocPID()
 	s.logger = s.logger.With("pid", s.state.PID)
 	s.state.SecretCancelKey = rand.Uint32()
-	s.state.ParameterStatuses = maps.Collect(s.dbConfig.Backend.DefaultStartupParameters.All())
+	// Start with base parameter statuses (includes standard_conforming_strings=on),
+	// then override with config defaults, then with client-provided values.
+	s.state.ParameterStatuses = maps.Clone(pgwire.BaseParameterStatuses)
+	maps.Copy(s.state.ParameterStatuses, maps.Collect(s.dbConfig.Backend.DefaultStartupParameters.All()))
 	maps.Copy(s.state.ParameterStatuses, s.startupParameters)
 	s.state.TxStatus = pgwire.TxIdle
 	s.state.Statements = pgwire.NamedObjectState[bool]{

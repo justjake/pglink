@@ -62,7 +62,7 @@ func BenchmarkConnect(b *testing.B) {
 
 		b.RunParallel(func(pb *testing.PB) {
 			// Always use per-op mode for this benchmark
-			pool := &loopPool{connString: benchConfig.ConnString}
+			pool := &loopPool{}
 
 			var i int
 			for pb.Next() {

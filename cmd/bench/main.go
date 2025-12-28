@@ -40,6 +40,7 @@ func main() {
 	simpleQuery := flag.Bool("simple-query", false, "use simple query protocol instead of extended")
 	observable := flag.Bool("observable", false, "enable observability integration (traces/metrics)")
 	seed := flag.Int64("seed", 0, "random seed for workload generation (0 = time-based)")
+	pglinkPoolMaxConns := flag.Int("pglink-pool-max-conns", 0, "backend pool max connections for pglink (0 = use -cpu value)")
 
 	// A/B test flags
 	aLabel := flag.String("a-label", "", "label for A variant (empty = 'pglink')")
@@ -67,15 +68,16 @@ func main() {
 
 	// Build config
 	cfg := e2e.BenchSuiteConfig{
-		Duration:        *duration,
-		Warmup:          *warmup,
-		Rounds:          *rounds,
-		Count:           *count,
-		CPU:             *cpu,
-		OutputDir:       *outputDir,
-		SimpleQueryMode: *simpleQuery,
-		Observable:      *observable,
-		Seed:            *seed,
+		Duration:           *duration,
+		Warmup:             *warmup,
+		Rounds:             *rounds,
+		Count:              *count,
+		CPU:                *cpu,
+		OutputDir:          *outputDir,
+		SimpleQueryMode:    *simpleQuery,
+		Observable:         *observable,
+		Seed:               *seed,
+		PglinkPoolMaxConns: *pglinkPoolMaxConns,
 	}
 
 	// Parse cases
@@ -160,7 +162,7 @@ func main() {
 		cfg.Targets = append(cfg.Targets, e2e.TargetConfig{
 			Name: "pgbouncer",
 			Type: e2e.TargetTypePgbouncer,
-			Port: 6432,
+			Port: 16433, // Use 16433 to avoid conflicts with docker's 6432
 		})
 	}
 

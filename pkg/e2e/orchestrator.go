@@ -13,6 +13,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/config/pgbouncer"
 )
 
 // Orchestrator manages the benchmark lifecycle including:
@@ -269,9 +272,22 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 		return fmt.Errorf("pglink binary not found at %s", binaryPath)
 	}
 
+	// Generate benchmark config and write as pglink JSON
+	cfg, err := o.benchmarkConfig()
+	if err != nil {
+		return fmt.Errorf("failed to create benchmark config: %w", err)
+	}
+
+	configPath, err := o.writePglinkConfig(cfg, target)
+	if err != nil {
+		return fmt.Errorf("failed to write pglink config: %w", err)
+	}
+
+	o.Logger.Info("generated pglink config", "path", configPath, "pool_max_conns", cfg.Databases["alpha_uno"].Backend.PoolMaxConns)
+
 	// Build args
 	args := []string{
-		"-config", filepath.Join(o.mainWorktreePath, "pglink.json"),
+		"-config", configPath,
 	}
 
 	if target.Port != 0 {
@@ -320,10 +336,119 @@ func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) er
 	return nil
 }
 
+// benchmarkConfig creates a benchmark-optimized config from pglink.json.
+// This is the single source of truth for both pglink and pgbouncer benchmark configs.
+func (o *Orchestrator) benchmarkConfig() (*config.Config, error) {
+	// Read the original config from the current worktree (not main)
+	// so that worktree-specific config changes are used
+	srcPath := filepath.Join(o.currentWorktree, "pglink.json")
+	cfg, err := config.ReadConfigFile(srcPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config: %w", err)
+	}
+
+	// Determine pool size: use explicit setting, or fall back to CPU (parallelism)
+	poolMaxConns := o.Config.PglinkPoolMaxConns
+	if poolMaxConns == 0 {
+		poolMaxConns = o.Config.CPU
+	}
+
+	// Set pool_max_conns for each database to handle high parallelism
+	for _, dbCfg := range cfg.Databases {
+		dbCfg.Backend.PoolMaxConns = int32(poolMaxConns)
+		dbCfg.Backend.PoolMinIdleConns = nil
+		// Set pool acquire timeout to match pgbouncer's default query_wait_timeout (120s)
+		// pglink's default is only 1s which causes spurious failures under high contention
+		longTimeout := 120000 // 120 seconds, same as pgbouncer default
+		dbCfg.PoolAcquireTimeoutMilliseconds = &longTimeout
+	}
+
+	// Disable TLS for benchmarks (connecting via localhost)
+	cfg.TLS = &config.JsonTLSConfig{
+		SSLMode: config.SSLModeDisable,
+	}
+
+	return cfg, nil
+}
+
+// writePglinkConfig writes the config as pglink JSON format.
+func (o *Orchestrator) writePglinkConfig(cfg *config.Config, target *TargetConfig) (string, error) {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	configPath := filepath.Join(o.outputDir, fmt.Sprintf("pglink.%s.json", target.Name))
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return "", fmt.Errorf("failed to write config: %w", err)
+	}
+
+	return configPath, nil
+}
+
+// writePgbouncerConfig writes the config as pgbouncer INI format.
+func (o *Orchestrator) writePgbouncerConfig(ctx context.Context, cfg *config.Config, target *TargetConfig) (string, error) {
+	// Create secrets cache (nil client is fine since our test config uses insecure: values)
+	secrets := config.NewSecretCache(nil)
+
+	// Generate pgbouncer config using transaction mode (same as pglink)
+	opts := pgbouncer.Options{
+		PoolMode: pgbouncer.PoolModeTransaction,
+	}
+	pgbCfg, err := pgbouncer.GenerateConfigWithOptions(ctx, cfg, secrets, target.Port, opts)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate pgbouncer config: %w", err)
+	}
+
+	// Write config to output directory
+	configDir := filepath.Join(o.outputDir, fmt.Sprintf("pgbouncer.%s", target.Name))
+	if err := pgbCfg.WriteToDir(configDir); err != nil {
+		return "", fmt.Errorf("failed to write pgbouncer config: %w", err)
+	}
+
+	return configDir, nil
+}
+
 // startPgbouncer starts a pgbouncer process.
 func (o *Orchestrator) startPgbouncer(ctx context.Context, target *TargetConfig) error {
-	// TODO: Implement pgbouncer start
-	return fmt.Errorf("pgbouncer support not yet implemented")
+	// Generate benchmark config (same as pglink) and write as pgbouncer INI
+	cfg, err := o.benchmarkConfig()
+	if err != nil {
+		return fmt.Errorf("failed to create benchmark config: %w", err)
+	}
+
+	configDir, err := o.writePgbouncerConfig(ctx, cfg, target)
+	if err != nil {
+		return fmt.Errorf("failed to write pgbouncer config: %w", err)
+	}
+
+	o.Logger.Info("generated pgbouncer config", "path", configDir, "pool_max_conns", cfg.Databases["alpha_uno"].Backend.PoolMaxConns)
+
+	// Create log file
+	logFile, err := os.Create(filepath.Join(o.outputDir, fmt.Sprintf("pgbouncer.%s.log", target.Name)))
+	if err != nil {
+		return fmt.Errorf("failed to create log file: %w", err)
+	}
+
+	// Start pgbouncer
+	configPath := filepath.Join(configDir, "pgbouncer.ini")
+	cmd := exec.CommandContext(ctx, "pgbouncer", configPath)
+	cmd.Dir = configDir // Run from config dir so relative paths work
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return fmt.Errorf("failed to start pgbouncer: %w", err)
+	}
+
+	o.processes[target.Name] = cmd
+	o.Logger.Info("started pgbouncer", "target", target.Name, "pid", cmd.Process.Pid, "port", target.Port)
+
+	// Wait for pgbouncer to be ready
+	time.Sleep(2 * time.Second)
+
+	return nil
 }
 
 // stopTargetProcess stops a running target process.

@@ -57,6 +57,7 @@ var BaseTrackedParameters = []string{
 var BaseParameterStatuses = ParameterStatuses{
 	ParamServerVersion:             "18.1 (pglink proxy)",
 	ParamServerEncoding:            "UTF8",
+	ParamClientEncoding:            "UTF8",
 	ParamIntegerDatetimes:          "on",
 	ParamStandardConformingStrings: "on",
 	ParamIntervalStyle:             "postgres",

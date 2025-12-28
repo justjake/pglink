@@ -96,7 +96,17 @@ func TestMain(m *testing.M) {
 // connect creates a new database connection for a benchmark worker.
 // Each parallel worker should call this once and reuse the connection.
 func connect(ctx context.Context) (*pgx.Conn, error) {
-	return pgx.Connect(ctx, benchConfig.ConnString)
+	cfg, err := pgx.ParseConfig(benchConfig.ConnString)
+	if err != nil {
+		return nil, err
+	}
+
+	// When using simple query protocol, disable prepared statements entirely
+	if benchConfig.Protocol == "simple" {
+		cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	}
+
+	return pgx.ConnectConfig(ctx, cfg)
 }
 
 // TestConn wraps a pgx.Conn with a Release method compatible with pgxpool.
@@ -130,7 +140,7 @@ type TestPool interface {
 func GetTestPool(b *testing.B, benchCtx context.Context) (TestPool, error) {
 	switch benchConfig.ConnectMode {
 	case ConnectPerOp:
-		return &loopPool{connString: benchConfig.ConnString}, nil
+		return &loopPool{}, nil
 	case ConnectPerWorker:
 		fallthrough
 	default:
@@ -172,12 +182,10 @@ func (p *workerPool) Close() error {
 
 // loopPool creates a new connection on each Acquire call.
 // Release closes the connection immediately.
-type loopPool struct {
-	connString string
-}
+type loopPool struct{}
 
 func (p *loopPool) Acquire(ctx context.Context) (*TestConn, error) {
-	conn, err := pgx.Connect(ctx, p.connString)
+	conn, err := connect(ctx)
 	if err != nil {
 		return nil, err
 	}

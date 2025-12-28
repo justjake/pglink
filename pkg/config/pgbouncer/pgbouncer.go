@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/justjake/pglink/pkg/config"
 )
@@ -239,20 +240,94 @@ func buildINI(cfg *config.Config, listenPort int, databases string, opts Options
 	}
 	b.WriteString(fmt.Sprintf("pool_mode = %s\n", poolMode))
 
-	// Connection limits - find max from all databases
-	maxPoolConns := int32(0)
+	// Collect pool settings from all databases (use max values since pgbouncer is global)
+	// We use the config package's public API to get parsed/defaulted values
+	var (
+		maxPoolConns      int32
+		minPoolSize       int32
+		queryWaitTimeout  time.Duration
+		serverConnTimeout time.Duration
+		serverLifetime    time.Duration
+		serverIdleTimeout time.Duration
+		hasMinPoolSize    bool
+		hasConnTimeout    bool
+		hasLifetime       bool
+		hasIdleTimeout    bool
+	)
 	for _, dbCfg := range cfg.Databases {
 		if dbCfg.Backend.PoolMaxConns > maxPoolConns {
 			maxPoolConns = dbCfg.Backend.PoolMaxConns
 		}
+
+		// Get min idle conns directly from config
+		if dbCfg.Backend.PoolMinIdleConns != nil {
+			if !hasMinPoolSize || *dbCfg.Backend.PoolMinIdleConns > minPoolSize {
+				minPoolSize = *dbCfg.Backend.PoolMinIdleConns
+				hasMinPoolSize = true
+			}
+		}
+
+		// Use DatabaseConfig.PoolAcquireTimeout() to get the parsed value
+		timeout := dbCfg.PoolAcquireTimeout()
+		if timeout > queryWaitTimeout {
+			queryWaitTimeout = timeout
+		}
+
+		// Use BackendConfig.PoolConfig() to get parsed pool durations
+		poolCfg, err := dbCfg.Backend.PoolConfig()
+		if err == nil {
+			if poolCfg.ConnConfig.ConnectTimeout > 0 {
+				if !hasConnTimeout || poolCfg.ConnConfig.ConnectTimeout > serverConnTimeout {
+					serverConnTimeout = poolCfg.ConnConfig.ConnectTimeout
+					hasConnTimeout = true
+				}
+			}
+			if poolCfg.MaxConnLifetime > 0 {
+				if !hasLifetime || poolCfg.MaxConnLifetime > serverLifetime {
+					serverLifetime = poolCfg.MaxConnLifetime
+					hasLifetime = true
+				}
+			}
+			if poolCfg.MaxConnIdleTime > 0 {
+				if !hasIdleTimeout || poolCfg.MaxConnIdleTime > serverIdleTimeout {
+					serverIdleTimeout = poolCfg.MaxConnIdleTime
+					hasIdleTimeout = true
+				}
+			}
+		}
 	}
 	if maxPoolConns == 0 {
-		maxPoolConns = 20 // default
+		maxPoolConns = 20 // pgbouncer default
 	}
 
-	// PgBouncer settings
+	// PgBouncer pool settings
 	b.WriteString(fmt.Sprintf("default_pool_size = %d\n", maxPoolConns))
 	b.WriteString(fmt.Sprintf("max_client_conn = %d\n", cfg.GetMaxClientConnections()))
+
+	// min_pool_size from pool_min_idle_conns
+	if hasMinPoolSize {
+		b.WriteString(fmt.Sprintf("min_pool_size = %d\n", minPoolSize))
+	}
+
+	// query_wait_timeout from pool_acquire_timeout (duration -> seconds)
+	if queryWaitTimeout > 0 {
+		b.WriteString(fmt.Sprintf("query_wait_timeout = %.1f\n", queryWaitTimeout.Seconds()))
+	}
+
+	// server_connect_timeout from connect_timeout
+	if hasConnTimeout {
+		b.WriteString(fmt.Sprintf("server_connect_timeout = %.0f\n", serverConnTimeout.Seconds()))
+	}
+
+	// server_lifetime from pool_max_conn_lifetime
+	if hasLifetime {
+		b.WriteString(fmt.Sprintf("server_lifetime = %.0f\n", serverLifetime.Seconds()))
+	}
+
+	// server_idle_timeout from pool_max_conn_idle_time
+	if hasIdleTimeout {
+		b.WriteString(fmt.Sprintf("server_idle_timeout = %.0f\n", serverIdleTimeout.Seconds()))
+	}
 
 	// Disable server-side prepared statements for transaction pooling compatibility
 	b.WriteString("max_prepared_statements = 0\n")
