@@ -435,7 +435,7 @@ func main() {
 	var metricsPusher *observability.MetricsPusher
 	if cfg.Prometheus != nil && cfg.Prometheus.Push != nil {
 		var err error
-		metricsPusher, err = observability.NewMetricsPusher(ctx, cfg.Prometheus, cfg.OpenTelemetry)
+		metricsPusher, err = observability.NewMetricsPusher(ctx, cfg.Prometheus, logger)
 		if err != nil {
 			logger.Error("failed to create metrics pusher", "error", err)
 			os.Exit(1)

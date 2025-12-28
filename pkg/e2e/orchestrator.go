@@ -882,42 +882,18 @@ func (o *Orchestrator) checkObservability(ctx context.Context, results *Benchmar
 		}
 	}
 
-	// 2. Check metrics - use scraped metrics from pglink targets
-	// Note: pglink uses prometheus client library for metrics, not OTEL metrics.
-	// Push metrics won't work until we migrate to OTEL. We scraped directly before stopping.
-	metricsResult := &MetricsCheckResult{
-		Found:       false,
-		MetricNames: []string{},
-	}
-	for _, tr := range results.Results {
-		for _, cfg := range o.Config.Targets {
-			if cfg.Name == tr.Target && cfg.Type == TargetTypePglink {
-				if tr.ScrapedMetrics != nil && len(tr.ScrapedMetrics.MetricNames) > 0 {
-					metricsResult.Found = true
-					metricsResult.SampleCount += tr.ScrapedMetrics.SampleCount
-					metricsResult.Source = tr.ScrapedMetrics.Source
-					// Collect unique metric names
-					for _, name := range tr.ScrapedMetrics.MetricNames {
-						found := false
-						for _, existing := range metricsResult.MetricNames {
-							if existing == name {
-								found = true
-								break
-							}
-						}
-						if !found {
-							metricsResult.MetricNames = append(metricsResult.MetricNames, name)
-						}
-					}
-				}
-			}
+	// 2. Check Prometheus for pushed metrics - REQUIRED
+	metricsResult, err := o.checkPrometheus(ctx)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("prometheus check failed: %v", err))
+		result.Passed = false
+	} else {
+		result.Metrics = metricsResult
+		if !metricsResult.Found {
+			result.Errors = append(result.Errors, "no pglink metrics found in Prometheus")
+			result.Passed = false
 		}
 	}
-	if !metricsResult.Found {
-		result.Errors = append(result.Errors, "no pglink metrics found (scraped from /metrics endpoint)")
-		result.Passed = false
-	}
-	result.Metrics = metricsResult
 
 	// 3. Check Loki for pushed logs - REQUIRED
 	logsResult, err := o.checkLoki(ctx)
@@ -1030,6 +1006,78 @@ type tempoTrace struct {
 
 type tempoMetrics struct {
 	InspectedTraces int `json:"inspectedTraces"`
+}
+
+// checkPrometheus queries Prometheus to verify metrics were pushed via remote write.
+func (o *Orchestrator) checkPrometheus(ctx context.Context) (*MetricsCheckResult, error) {
+	result := &MetricsCheckResult{
+		Found:       false,
+		MetricNames: []string{},
+		Source:      "prometheus:19090",
+	}
+
+	// Query Prometheus for pglink metrics using the series API
+	// We look for any metrics with the bench_execution_id label matching our run
+	// Note: We don't use time constraints since the execution_id is unique enough
+	promURL := "http://localhost:19090/api/v1/series"
+	params := url.Values{}
+	// Match any metric with our execution_id label
+	params.Set("match[]", fmt.Sprintf("{bench_execution_id=\"%s\"}", o.executionID))
+
+	reqURL := fmt.Sprintf("%s?%s", promURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("prometheus request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var promResp prometheusSeriesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&promResp); err != nil {
+		return result, fmt.Errorf("failed to decode prometheus response: %w", err)
+	}
+
+	if promResp.Status != "success" {
+		return result, fmt.Errorf("prometheus query failed: status=%s", promResp.Status)
+	}
+
+	// Collect unique metric names
+	metricSet := make(map[string]bool)
+	for _, series := range promResp.Data {
+		if name, ok := series["__name__"]; ok {
+			metricSet[name] = true
+		}
+	}
+
+	for name := range metricSet {
+		result.MetricNames = append(result.MetricNames, name)
+	}
+
+	result.SampleCount = len(promResp.Data)
+	result.Found = len(result.MetricNames) > 0
+
+	o.Logger.Info("prometheus check complete",
+		"metrics", len(result.MetricNames),
+		"samples", result.SampleCount)
+
+	return result, nil
+}
+
+// prometheusSeriesResponse is the response from Prometheus series API.
+type prometheusSeriesResponse struct {
+	Status string              `json:"status"`
+	Data   []map[string]string `json:"data"`
 }
 
 // scrapeMetricsEndpoint scrapes pglink's /metrics endpoint directly to verify metrics are being generated.
