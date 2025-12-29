@@ -462,7 +462,7 @@ func TestVarcache(t *testing.T) {
 	t.Logf("Default TimeZone: %q", defaultTimeZone)
 
 	// Set a custom TimeZone (using session-level SET, not LOCAL)
-	customTimeZone := "America/New_York"
+	customTimeZone := "Africa/Lagos"
 	_, err = conn.Exec(ctx, "SET TimeZone = '"+customTimeZone+"'")
 	require.NoError(t, err)
 
@@ -1270,13 +1270,13 @@ func TestTimeZone(t *testing.T) {
 	defer tx.Rollback(context.Background())
 
 	// Set timezone
-	_, err = tx.Exec(ctx, "SET LOCAL timezone = 'America/New_York'")
+	_, err = tx.Exec(ctx, "SET LOCAL timezone = 'Africa/Lagos'")
 	require.NoError(t, err)
 
 	var tz string
 	err = tx.QueryRow(ctx, "SHOW timezone").Scan(&tz)
 	require.NoError(t, err)
-	assert.Equal(t, "America/New_York", tz)
+	assert.Equal(t, "Africa/Lagos", tz)
 
 	tx.Commit(ctx)
 }
