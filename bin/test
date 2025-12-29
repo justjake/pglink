@@ -4,4 +4,30 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 eval "$(mise activate bash --shims)"
 
-exec go test -v "$@" ./...
+args=("$@")
+if [[ ${#args[@]} -eq 0 ]]; then
+    args=(./...)
+fi
+
+# Capture output to show failure summary at end
+tmpfile=$(mktemp)
+trap "rm -f $tmpfile" EXIT
+
+set +e
+go test "${args[@]}" 2>&1 | tee "$tmpfile"
+test_exit=${PIPESTATUS[0]}
+set -e
+
+# Print failure summary
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+failed=$(grep -E "^--- FAIL:" "$tmpfile" || true)
+if [[ -n "$failed" ]]; then
+    echo -e "\033[31mFAILED TESTS:\033[0m"
+    echo "$failed" | sed 's/^--- FAIL: /  • /' | sed 's/ (.*//'
+else
+    echo -e "\033[32mAll tests passed!\033[0m"
+fi
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+exit $test_exit
