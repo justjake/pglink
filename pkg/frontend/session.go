@@ -280,13 +280,14 @@ func (s *Session) Run() {
 	// Configure metrics tracking for frontend (bytes sent to client)
 	s.frontend.SetMetrics(s.metrics, s.databaseName)
 
-	// Connect ring buffer debug logging to session logger.
-	// The ring buffer only logs when debugLog is non-nil (zero overhead check),
-	// and slog.Debug() returns early when log level is higher than debug.
-	// This enables detailed ring buffer tracing via PGLINK_LOG_LEVEL=debug.
-	s.frontend.RingBuffer().SetDebugLog(func(msg string, args ...any) {
-		s.logger.Debug(msg, args...)
-	})
+	// Connect ring buffer debug logging to session logger, but only if debug
+	// level is enabled. This avoids allocating variadic args in the hot path
+	// when debug logging is disabled (the common case in production/benchmarks).
+	if s.logger.Enabled(s.ctx, slog.LevelDebug) {
+		s.frontend.RingBuffer().SetDebugLog(func(msg string, args ...any) {
+			s.logger.Debug(msg, args...)
+		})
+	}
 
 	// Idle client state.
 	// When true, transition to backend connected state to handle the query.

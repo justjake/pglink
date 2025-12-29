@@ -230,7 +230,8 @@ type RingBuffer struct {
 	conn       net.Conn
 	readerDone chan struct{}
 
-	// Optional debug logging function
+	// Optional debug logging function. Only set when debug level is enabled.
+	// The nil check avoids allocating log arguments in the hot path.
 	debugLog func(msg string, args ...any)
 
 	// State tracking for observability
@@ -284,6 +285,8 @@ func (r *RingBuffer) maxBufferableSize() int64 {
 }
 
 // SetDebugLog sets a debug logging function for tracing ring buffer operations.
+// Only set this when debug level is enabled to avoid allocation overhead.
+// Pass nil to disable debug logging (default).
 func (r *RingBuffer) SetDebugLog(fn func(msg string, args ...any)) {
 	r.debugLog = fn
 }
