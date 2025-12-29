@@ -33,6 +33,8 @@ import (
 // handled successfully and the connection should be closed.
 var errCancelRequest = errors.New("cancel request handled")
 
+var errTerminateConn = errors.New("client terminating connection")
+
 // Session represents a client connection to pglink.
 //
 // STATE TRACKING: This session tracks TWO separate protocol states:
@@ -301,8 +303,7 @@ func (s *Session) Run() {
 		},
 
 		TerminateConn: func(msg pgwire.ClientTerminateConn) (bool, error) {
-			s.logger.Info("client terminated connection")
-			return false, nil
+			return false, errTerminateConn
 		},
 
 		// These messages don't make any sense in the idle state.
@@ -661,8 +662,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 			},
 
 			TerminateConn: func(msg pgwire.ClientTerminateConn) (bool, error) {
-				s.logger.Info("client terminated connection")
-				return false, nil
+				return false, errTerminateConn
 			},
 
 			Cancel: func(msg pgwire.ClientCancel) (bool, error) {
@@ -1518,6 +1518,11 @@ func (s *Session) initSessionProcessState() {
 
 // sendError sends an error response to the client.
 func (s *Session) sendError(err error) {
+	if errors.Is(err, errTerminateConn) {
+		s.logger.Info("client terminated connection")
+		return
+	}
+
 	var pgErr *pgwire.Err
 	if !errors.As(err, &pgErr) {
 		pgErr = pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InternalError, "unexpected error", err)
