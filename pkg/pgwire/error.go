@@ -25,6 +25,10 @@ func (e *Err) Error() string {
 	return fmt.Sprintf("%s %s: %s", e.Severity, e.Code, e.Message)
 }
 
+func (e *Err) Unwrap() error {
+	return e.C
+}
+
 func (e *Err) Cause() error {
 	return e.C
 }
