@@ -502,21 +502,10 @@ func (s *Session) runInternalQuery(ctx context.Context, query string) error {
 //
 // This implements the "varcache" pattern from PgBouncer.
 func (s *Session) restoreVariables(ctx context.Context) error {
-	// Get backend's current parameter state
-	backendParams := s.backend.ParameterStatuses()
-
-	// Compute: what SETs do we need to make backend match client expectations?
-	// backend.DiffToTip(client) = operations to apply to backend to reach client state
-	diff := backendParams.DiffToTip(s.state.ParameterStatuses)
-
-	// Filter to only tracked parameters - these are the ones PostgreSQL sends
-	// via ParameterStatus and can be SET via SQL. Other parameters like "user"
-	// and "database" are connection-level and cannot be changed.
-	trackedParams := s.backend.TrackedParameters()
-	diff = diff.FilterKeys(trackedParams)
-
+	diff := s.backend.ParameterStatuses().DiffToTip(s.backend.TrackedParameters(), s.state.ParameterStatuses)
 	query := diff.BuildSetQuery()
 	if query == "" {
+		s.backend.SyncParameterStatusesFromPgConn()
 		return nil // No changes needed
 	}
 

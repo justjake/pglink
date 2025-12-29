@@ -85,53 +85,31 @@ var BaseParameterStatuses = ParameterStatuses{
 
 type ParameterStatusDiff map[string]*string
 
-func (base ParameterStatuses) DiffToTip(tip ParameterStatuses) ParameterStatusDiff {
+func (base ParameterStatuses) DiffToTip(tracked []string, tip ParameterStatuses) ParameterStatusDiff {
 	var diff ParameterStatusDiff
 
-	// Items in tip that are different are upserted.
-	for tipKey, tipValue := range tip {
-		if baseValue, baseHas := base[tipKey]; !baseHas || baseValue != tipValue {
-			if diff == nil {
-				diff = make(ParameterStatusDiff)
-			}
-			diff[tipKey] = &tipValue
+	for _, key := range tracked {
+		tipValue, tipHas := tip[key]
+		baseValue, baseHas := base[key]
+		if !tipHas && !baseHas {
+			continue
 		}
-	}
 
-	// Items in base that are not in tip are deleted.
-	for baseKey := range base {
-		if _, tipHas := tip[baseKey]; !tipHas {
-			if diff == nil {
-				diff = make(ParameterStatusDiff)
-			}
-			diff[baseKey] = nil
+		if tipHas && baseHas && tipValue == baseValue {
+			continue
+		}
+
+		if diff == nil {
+			diff = make(ParameterStatusDiff)
+		}
+		if !tipHas {
+			diff[key] = nil
+		} else {
+			diff[key] = &tipValue
 		}
 	}
 
 	return diff
-}
-
-// FilterKeys returns a new diff containing only the specified keys.
-// This is used to restrict variable restoration to tracked parameters only.
-func (diff ParameterStatusDiff) FilterKeys(keys []string) ParameterStatusDiff {
-	if diff == nil {
-		return nil
-	}
-	keySet := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		keySet[k] = true
-	}
-
-	var filtered ParameterStatusDiff
-	for k, v := range diff {
-		if keySet[k] {
-			if filtered == nil {
-				filtered = make(ParameterStatusDiff)
-			}
-			filtered[k] = v
-		}
-	}
-	return filtered
 }
 
 // BuildSetQuery builds SET statements to apply this diff.

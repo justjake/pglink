@@ -88,7 +88,7 @@ func (s *Session) String() string {
 }
 
 func (s *Session) ParameterStatusChanges(keys []string, since pgwire.ParameterStatuses) pgwire.ParameterStatusDiff {
-	return since.DiffToTip(s.updateParameterStatuses(keys))
+	return since.DiffToTip(keys, s.State.ParameterStatuses)
 }
 
 // Acquire prepares the session for use but does NOT start the ring buffer.
