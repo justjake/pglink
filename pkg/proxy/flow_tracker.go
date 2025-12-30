@@ -3,13 +3,14 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/justjake/pglink/pkg/pgwire"
 	"github.com/justjake/pglink/pkg/pure"
 )
 
 type FlowReducer[T any] = pure.Reducer[FlowState[T], pgwire.Message]
-type FlowCompleteHandler[T any] = func(ctx context.Context, flow T) error
+type FlowCompleteHandler[T any] = func(ctx context.Context, flow FlowState[T]) error
 
 type MessageFlowState[T any] = pure.ReducerState[FlowState[T], pgwire.Message]
 type ServerFlowReducers[T any] = pgwire.ServerHandlers[MessageFlowState[T], MessageFlowState[T]]
@@ -23,8 +24,26 @@ type FlowTracker[T any] interface {
 }
 
 type FlowState[T any] struct {
+	// Should be set by the flow reducer.
 	Active bool
 	Flow   T
+	// Managed automatically based on `Active` if not set by the flow reducer.
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+func StartedFlowState[T any](flow T) FlowState[T] {
+	return FlowState[T]{
+		Active:    true,
+		StartTime: time.Now(),
+		Flow:      flow,
+	}
+}
+
+func EndedFlowState[T any](started FlowState[T]) FlowState[T] {
+	started.EndTime = time.Now()
+	started.Active = false
+	return started
 }
 
 type flowTracker[T any] struct {
@@ -82,14 +101,14 @@ func (t *flowTracker[T]) updateNow(ctx context.Context, msg pgwire.Message) (boo
 	}
 
 	if wasActive && !state.Active {
-		err = t.onComplete(ctx, state.Flow)
+		err = t.onComplete(ctx, state)
 	}
 
 	if t.state.Reducer == nil {
 		t.reset()
 	}
 
-	return changed, nil
+	return changed, err
 }
 
 func (t *flowTracker[T]) reset() {

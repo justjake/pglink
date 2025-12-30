@@ -32,15 +32,15 @@ func (m ServerCopyCopyData) DataSize() int {
 // TxStatusByte returns the transaction status byte without parsing the full message.
 // This is a fast path for protocol state tracking.
 // The byte values are: 'I' (idle), 'T' (in transaction), 'E' (failed transaction).
-func (m ServerResponseReadyForQuery) TxStatusByte() byte {
+func (m ServerResponseReadyForQuery) TxStatus() TxStatus {
 	if m.isParsed {
-		return m.parsed.TxStatus
+		return TxStatus(m.parsed.TxStatus)
 	}
 	if m.source != nil {
 		body := m.source.MessageBody()
 		if len(body) >= 1 {
-			return body[0]
+			return TxStatus(body[0])
 		}
 	}
-	return 'I' // Default to idle
+	panic("ServerResponseReadyForQuery.TxStatus: no source")
 }
