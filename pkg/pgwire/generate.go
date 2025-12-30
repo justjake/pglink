@@ -14,66 +14,23 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
-var from = flag.String("from", "", "the origin of the message: Frontend or Backend")
-var typePrefix = flag.String("type", "", "the type prefix for generated types")
-var fn = flag.String("fn", "", "the function name containing the type switch")
-var methods = flag.String("methods", "", "comma-separated list of additional no-arg methods to generate")
-
-// returnFlags collects multiple -return flags
-var returnFlags returnFlagList
-
-// returnSpec defines a method that returns a value
-type returnSpec struct {
-	name       string // method name
-	returnType string // return type
-	expr       string // expression to return (use 't' for the receiver)
-}
-
-// returnFlagList implements flag.Value for collecting multiple -return flags
-type returnFlagList []returnSpec
-
-func (r *returnFlagList) String() string {
-	return fmt.Sprintf("%v", *r)
-}
-
-func (r *returnFlagList) Set(value string) error {
-	// Parse: name=returnType=expr
-	parts := strings.SplitN(value, "=", 3)
-	if len(parts) != 3 {
-		return fmt.Errorf("invalid -return format: expected name=returnType=expr, got %q", value)
-	}
-	*r = append(*r, returnSpec{
-		name:       parts[0],
-		returnType: parts[1],
-		expr:       parts[2],
-	})
-	return nil
-}
-
-func init() {
-	flag.Var(&returnFlags, "return", "method with return value: name=returnType=expr (can be specified multiple times)")
-}
+var from = flag.String("from", "", "the origin of the message: Client or Server (filters //pgwire: comments)")
 
 func main() {
 	flag.Parse()
 
 	if *from == "" {
-		log.Fatal("-from is required (Frontend or Backend)")
-	}
-	if *typePrefix == "" {
-		log.Fatal("-type is required")
-	}
-	if *fn == "" {
-		log.Fatal("-fn is required")
+		log.Fatal("-from is required (Client or Server)")
 	}
 
 	// Get the source file from GOFILE env var (set by go generate)
 	gofile := os.Getenv("GOFILE")
 	if gofile == "" {
-		gofile = "messages.go"
+		gofile = "generate_templates.go"
 	}
 
 	// Parse the source file with comments
@@ -89,109 +46,124 @@ func main() {
 	// Extract imports
 	imports := extractImports(fset, file)
 
-	// Find the function
-	var targetFunc *ast.FuncDecl
+	// Find all template functions with //pgwire: comments matching -from
+	var groups []typeGroup
 	for _, decl := range file.Decls {
-		if funcDecl, ok := decl.(*ast.FuncDecl); ok {
-			if funcDecl.Name.Name == *fn {
-				targetFunc = funcDecl
-				break
-			}
-		}
-	}
-	if targetFunc == nil {
-		log.Fatalf("function %s not found in %s", *fn, gofile)
-	}
-
-	// Extract the input parameter type from the function signature
-	var inputType string
-	if targetFunc.Type.Params != nil && len(targetFunc.Type.Params.List) > 0 {
-		param := targetFunc.Type.Params.List[0]
-		var buf bytes.Buffer
-		printer.Fprint(&buf, fset, param.Type)
-		inputType = buf.String()
-	}
-	if inputType == "" {
-		log.Fatalf("function %s has no parameters", *fn)
-	}
-
-	// Find the type switch in the function body
-	var typeSwitch *ast.TypeSwitchStmt
-	ast.Inspect(targetFunc.Body, func(n ast.Node) bool {
-		if ts, ok := n.(*ast.TypeSwitchStmt); ok {
-			typeSwitch = ts
-			return false
-		}
-		return true
-	})
-	if typeSwitch == nil {
-		log.Fatalf("no type switch found in function %s", *fn)
-	}
-
-	// Extract types from the switch cases
-	var types []typeInfo
-	caseClauses := typeSwitch.Body.List
-	for i, stmt := range caseClauses {
-		caseClause, ok := stmt.(*ast.CaseClause)
+		funcDecl, ok := decl.(*ast.FuncDecl)
 		if !ok {
 			continue
 		}
-		// Skip default case (List is nil)
-		if caseClause.List == nil {
+
+		// Look for //pgwire: comment above the function
+		config := findPgwireComment(file, funcDecl)
+		if config == nil {
 			continue
 		}
 
-		// Find the end boundary for comment extraction
-		// (either the next case or the end of the switch body)
-		var nextCasePos token.Pos
-		if i+1 < len(caseClauses) {
-			nextCasePos = caseClauses[i+1].Pos()
-		} else {
-			nextCasePos = typeSwitch.Body.Rbrace
+		// Check if -from matches
+		if config.from != *from {
+			continue
 		}
 
-		// Extract comments from the case body
-		comments := extractCaseComments(file, caseClause.Colon, nextCasePos)
-
-		for _, expr := range caseClause.List {
-			ti := extractTypeInfo(expr)
-			if ti.shortName != "" {
-				ti.comments = comments
-				types = append(types, ti)
-			}
+		// Extract types from the type switch
+		types := extractTypesFromFunc(fset, file, funcDecl)
+		if len(types) == 0 {
+			continue
 		}
+
+		groups = append(groups, typeGroup{
+			prefix: config.typePrefix,
+			types:  types,
+		})
 	}
 
-	if len(types) == 0 {
-		log.Fatalf("no types found in type switch in function %s", *fn)
-	}
-
-	// Parse additional methods
-	var extraMethods []string
-	if *methods != "" {
-		extraMethods = strings.Split(*methods, ",")
+	if len(groups) == 0 {
+		log.Fatalf("no template functions found for -from=%s", *from)
 	}
 
 	// Generate the output
-	output := generateCode(pkgName, imports, *from, *typePrefix, inputType, extraMethods, returnFlags, types)
+	output := generateCode(pkgName, imports, *from, groups)
 
 	// Write to output file
-	outFile := toSnakeCase(*from) + "_" + toSnakeCase(*typePrefix) + ".go"
+	outFile := toSnakeCase(*from) + "_generated.go"
 	outPath := filepath.Join(filepath.Dir(gofile), outFile)
 	if err := os.WriteFile(outPath, output, 0644); err != nil {
 		log.Fatalf("failed to write %s: %v", outPath, err)
 	}
 
-	fmt.Printf("Generated %s with %d types\n", outFile, len(types))
+	totalTypes := 0
+	for _, g := range groups {
+		totalTypes += len(g.types)
+	}
+	fmt.Printf("Generated %s with %d groups, %d types\n", outFile, len(groups), totalTypes)
+}
+
+type pgwireConfig struct {
+	from       string
+	typePrefix string
+}
+
+// findPgwireComment looks for a //pgwire: comment above the function
+// and parses -from=X and -type=Y from it.
+func findPgwireComment(file *ast.File, funcDecl *ast.FuncDecl) *pgwireConfig {
+	funcPos := funcDecl.Pos()
+
+	// Find the comment group closest to and immediately preceding the function
+	var closestGroup *ast.CommentGroup
+	for _, cg := range file.Comments {
+		// Comment must end before function starts
+		if cg.End() < funcPos {
+			// Track the closest one (later in file = closer to function)
+			if closestGroup == nil || cg.End() > closestGroup.End() {
+				closestGroup = cg
+			}
+		}
+	}
+
+	if closestGroup == nil {
+		return nil
+	}
+
+	// Check if the closest comment group has a pgwire directive
+	for _, c := range closestGroup.List {
+		if strings.HasPrefix(c.Text, "//pgwire:") {
+			text := strings.TrimPrefix(c.Text, "//pgwire:")
+			return parsePgwireComment(text)
+		}
+	}
+	return nil
+}
+
+func parsePgwireComment(text string) *pgwireConfig {
+	config := &pgwireConfig{}
+
+	// Parse -from=X
+	fromRe := regexp.MustCompile(`-from=(\w+)`)
+	if matches := fromRe.FindStringSubmatch(text); len(matches) >= 2 {
+		config.from = matches[1]
+	}
+
+	// Parse -type=X
+	typeRe := regexp.MustCompile(`-type=(\w+)`)
+	if matches := typeRe.FindStringSubmatch(text); len(matches) >= 2 {
+		config.typePrefix = matches[1]
+	}
+
+	if config.from == "" || config.typePrefix == "" {
+		return nil
+	}
+	return config
+}
+
+type typeGroup struct {
+	prefix string
+	types  []typeInfo
 }
 
 type typeInfo struct {
-	// The full qualified type as it appears in code, e.g. "*pgproto3.GSSEncRequest"
-	qualified string
-	// Just the type name without package, e.g. "GSSEncRequest"
-	shortName string
-	// Comments from the case clause body
-	comments []string
+	qualified string   // e.g., "*pgproto3.GSSEncRequest"
+	shortName string   // e.g., "GSSEncRequest"
+	comments  []string // comments from the case clause
 }
 
 func toSnakeCase(s string) string {
@@ -211,8 +183,6 @@ func extractImports(fset *token.FileSet, file *ast.File) []string {
 		var buf bytes.Buffer
 		printer.Fprint(&buf, fset, imp)
 		impStr := buf.String()
-		// Only include imports that are likely used in the generated code
-		// (imports containing pgproto3 which defines the message types)
 		if strings.Contains(impStr, "pgproto3") {
 			imports = append(imports, impStr)
 		}
@@ -220,11 +190,52 @@ func extractImports(fset *token.FileSet, file *ast.File) []string {
 	return imports
 }
 
+func extractTypesFromFunc(fset *token.FileSet, file *ast.File, funcDecl *ast.FuncDecl) []typeInfo {
+	// Find the type switch in the function body
+	var typeSwitch *ast.TypeSwitchStmt
+	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
+		if ts, ok := n.(*ast.TypeSwitchStmt); ok {
+			typeSwitch = ts
+			return false
+		}
+		return true
+	})
+	if typeSwitch == nil {
+		return nil
+	}
+
+	// Extract types from the switch cases
+	var types []typeInfo
+	caseClauses := typeSwitch.Body.List
+	for i, stmt := range caseClauses {
+		caseClause, ok := stmt.(*ast.CaseClause)
+		if !ok || caseClause.List == nil {
+			continue
+		}
+
+		var nextCasePos token.Pos
+		if i+1 < len(caseClauses) {
+			nextCasePos = caseClauses[i+1].Pos()
+		} else {
+			nextCasePos = typeSwitch.Body.Rbrace
+		}
+
+		comments := extractCaseComments(file, caseClause.Colon, nextCasePos)
+
+		for _, expr := range caseClause.List {
+			ti := extractTypeInfo(expr)
+			if ti.shortName != "" {
+				ti.comments = comments
+				types = append(types, ti)
+			}
+		}
+	}
+	return types
+}
+
 func extractCaseComments(file *ast.File, colonPos, nextCasePos token.Pos) []string {
 	var comments []string
-
 	for _, cg := range file.Comments {
-		// Comments must be after the colon and before the next case
 		if cg.Pos() > colonPos && cg.End() < nextCasePos {
 			for _, c := range cg.List {
 				text := strings.TrimPrefix(c.Text, "//")
@@ -233,14 +244,12 @@ func extractCaseComments(file *ast.File, colonPos, nextCasePos token.Pos) []stri
 			}
 		}
 	}
-
 	return comments
 }
 
 func extractTypeInfo(expr ast.Expr) typeInfo {
 	var ti typeInfo
 
-	// Handle pointer types
 	if star, ok := expr.(*ast.StarExpr); ok {
 		inner := extractTypeInfo(star.X)
 		ti.qualified = "*" + inner.qualified
@@ -248,7 +257,6 @@ func extractTypeInfo(expr ast.Expr) typeInfo {
 		return ti
 	}
 
-	// Handle selector expressions (pkg.Type)
 	if sel, ok := expr.(*ast.SelectorExpr); ok {
 		if ident, ok := sel.X.(*ast.Ident); ok {
 			ti.qualified = ident.Name + "." + sel.Sel.Name
@@ -257,7 +265,6 @@ func extractTypeInfo(expr ast.Expr) typeInfo {
 		}
 	}
 
-	// Handle simple identifiers
 	if ident, ok := expr.(*ast.Ident); ok {
 		ti.qualified = ident.Name
 		ti.shortName = ident.Name
@@ -267,7 +274,7 @@ func extractTypeInfo(expr ast.Expr) typeInfo {
 	return ti
 }
 
-func generateCode(pkgName string, imports []string, from, prefix, inputType string, extraMethods []string, returnMethods []returnSpec, types []typeInfo) []byte {
+func generateCode(pkgName string, imports []string, from string, groups []typeGroup) []byte {
 	var buf bytes.Buffer
 
 	// Header
@@ -276,156 +283,101 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 
 	// Imports
 	buf.WriteString("import (\n")
+	buf.WriteString("\t\"context\"\n")
 	buf.WriteString("\t\"fmt\"\n\n")
 	for _, imp := range imports {
 		fmt.Fprintf(&buf, "\t%s\n", imp)
 	}
 	buf.WriteString(")\n\n")
 
-	// Build set of methods with return values (to avoid generating void versions)
-	returnMethodNames := make(map[string]bool)
-	for _, rm := range returnMethods {
-		returnMethodNames[rm.name] = true
-	}
-
-	// Determine the lazy wrapper type based on from (Server or Client)
 	lazyType := "From" + from
 
-	// Interface
-	interfaceName := from + prefix
-	fmt.Fprintf(&buf, "// %s is implemented by all %s %s message wrapper types.\n", interfaceName, from, prefix)
-	fmt.Fprintf(&buf, "type %s interface {\n", interfaceName)
-	// Only generate void method if not overridden by a return method
-	if !returnMethodNames[from] {
+	// Collect all types for the unified handler
+	var allTypes []unifiedType
+
+	// Generate each group
+	for _, group := range groups {
+		interfaceName := from + group.prefix
+
+		// Interface
+		fmt.Fprintf(&buf, "// %s is implemented by all %s %s message wrapper types.\n", interfaceName, from, group.prefix)
+		fmt.Fprintf(&buf, "type %s interface {\n", interfaceName)
 		fmt.Fprintf(&buf, "\t%s()\n", from)
-	}
-	if !returnMethodNames[prefix] {
-		fmt.Fprintf(&buf, "\t%s()\n", prefix)
-	}
-	for _, method := range extraMethods {
-		if !returnMethodNames[method] {
-			fmt.Fprintf(&buf, "\t%s()\n", method)
+		fmt.Fprintf(&buf, "\t%s()\n", group.prefix)
+		fmt.Fprintf(&buf, "\tMsgType() MsgType\n")
+		buf.WriteString("}\n\n")
+
+		// Compile-time checks
+		buf.WriteString("// Compile-time checks that all wrapper types implement the interface.\n")
+		buf.WriteString("var (\n")
+		for _, ti := range group.types {
+			newTypeName := from + group.prefix + ti.shortName
+			fmt.Fprintf(&buf, "\t_ %s = (*%s)(nil)\n", interfaceName, newTypeName)
 		}
-	}
-	for _, rm := range returnMethods {
-		fmt.Fprintf(&buf, "\t%s() %s\n", rm.name, rm.returnType)
-	}
-	buf.WriteString("}\n\n")
+		buf.WriteString(")\n\n")
 
-	// Compile-time interface checks (using pointer receivers for flyweight pattern)
-	buf.WriteString("// Compile-time checks that all wrapper types implement the interface.\n")
-	buf.WriteString("var (\n")
-	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
-		fmt.Fprintf(&buf, "\t_ %s = (*%s)(nil)\n", interfaceName, newTypeName)
-	}
-	buf.WriteString(")\n\n")
+		// Type definitions
+		for _, ti := range group.types {
+			newTypeName := from + group.prefix + ti.shortName
 
-	// Type definitions and methods
-	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
-
-		// Write comments from the source case clause
-		if len(ti.comments) > 0 {
-			for _, comment := range ti.comments {
-				fmt.Fprintf(&buf, "// %s\n", comment)
+			if len(ti.comments) > 0 {
+				for _, comment := range ti.comments {
+					fmt.Fprintf(&buf, "// %s\n", comment)
+				}
+			} else {
+				fmt.Fprintf(&buf, "// %s wraps %s from the %s.\n", newTypeName, ti.qualified, strings.ToLower(from))
 			}
-		} else {
-			// Fallback comment if no source comments
-			fmt.Fprintf(&buf, "// %s wraps %s from the %s.\n", newTypeName, ti.qualified, strings.ToLower(from))
-		}
 
-		// Type definition using type alias for FromServer/FromClient
-		fmt.Fprintf(&buf, "type %s %s[%s]\n\n", newTypeName, lazyType, ti.qualified)
+			fmt.Fprintf(&buf, "type %s %s[%s]\n\n", newTypeName, lazyType, ti.qualified)
 
-		// Marker methods for interface satisfaction (pointer receivers for flyweight pattern)
-		if !returnMethodNames[from] {
+			// Marker methods
 			fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, from)
-		}
-		if !returnMethodNames[prefix] {
-			fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, prefix)
-		}
-		for _, method := range extraMethods {
-			if !returnMethodNames[method] {
-				fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, method)
-			}
-		}
-		// Methods with return values - pointer receivers for flyweight pattern
-		for _, rm := range returnMethods {
-			// Replace t.T with t.Parse() since each type has a Parse() method
-			expr := strings.ReplaceAll(rm.expr, "t.T", "t.Parse()")
-			fmt.Fprintf(&buf, "func (t *%s) %s() %s { return %s }\n", newTypeName, rm.name, rm.returnType, expr)
+			fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, group.prefix)
+			fmt.Fprintf(&buf, "func (t *%s) MsgType() MsgType { return t.source.MessageType() }\n", newTypeName)
+
+			// Parse method
+			fmt.Fprintf(&buf, "func (m *%s) Parse() %s { return (*%s[%s])(m).Parse() }\n", newTypeName, ti.qualified, lazyType, ti.qualified)
+
+			// Retain method
+			fmt.Fprintf(&buf, "\n// Retain returns a copy of this message with retained source bytes.\n")
+			fmt.Fprintf(&buf, "// Use this when the message must outlive the current iteration.\n")
+			fmt.Fprintf(&buf, "func (m %s) Retain() %s {\n", newTypeName, newTypeName)
+			fmt.Fprintf(&buf, "\tsrc, parsed, isParsed := (*%s[%s])(&m).retainFields()\n", lazyType, ti.qualified)
+			fmt.Fprintf(&buf, "\treturn %s{source: src, parsed: parsed, isParsed: isParsed}\n", newTypeName)
+			fmt.Fprintf(&buf, "}\n\n")
+
+			// Add to unified types
+			allTypes = append(allTypes, unifiedType{
+				groupPrefix:   group.prefix,
+				interfaceName: interfaceName,
+				typeName:      newTypeName,
+				shortName:     ti.shortName,
+				qualified:     ti.qualified,
+			})
 		}
 
-		// Parse() method wrapper - delegates to underlying type (needs pointer receiver for caching)
-		fmt.Fprintf(&buf, "func (m *%s) Parse() %s { return (*%s[%s])(m).Parse() }\n", newTypeName, ti.qualified, lazyType, ti.qualified)
+		// Conversion function
+		newLazyFunc := from + "Parsed"
+		funcName := "To" + interfaceName
+		fmt.Fprintf(&buf, "// %s converts a %s to a %s if it matches one of the known types.\n", funcName, inputType(from), interfaceName)
+		fmt.Fprintf(&buf, "// Note: This allocates. For zero-allocation iteration, use Cursor.As%s().\n", from)
+		fmt.Fprintf(&buf, "func %s(msg %s) (%s, bool) {\n", funcName, inputType(from), interfaceName)
+		buf.WriteString("\tswitch m := msg.(type) {\n")
+		for _, ti := range group.types {
+			newTypeName := from + group.prefix + ti.shortName
+			fmt.Fprintf(&buf, "\tcase %s:\n", ti.qualified)
+			fmt.Fprintf(&buf, "\t\treturn (*%s)(%s(m)), true\n", newTypeName, newLazyFunc)
+		}
+		buf.WriteString("\t}\n")
+		buf.WriteString("\treturn nil, false\n")
+		buf.WriteString("}\n\n")
 
-		// Retain method - returns a copy with retained source bytes
-		// This is needed for messages that must outlive cursor iteration
-		fmt.Fprintf(&buf, "\n// Retain returns a copy of this message with retained source bytes.\n")
-		fmt.Fprintf(&buf, "// Use this when the message must outlive the current iteration.\n")
-		fmt.Fprintf(&buf, "func (m %s) Retain() %s {\n", newTypeName, newTypeName)
-		fmt.Fprintf(&buf, "\tsrc, parsed, isParsed := (*%s[%s])(&m).retainFields()\n", lazyType, ti.qualified)
-		fmt.Fprintf(&buf, "\treturn %s{source: src, parsed: parsed, isParsed: isParsed}\n", newTypeName)
-		fmt.Fprintf(&buf, "}\n")
-
-		buf.WriteString("\n")
+		// Group-specific handlers
+		generateGroupHandlers(&buf, from, group.prefix, interfaceName, group.types)
 	}
 
-	// Conversion function: To<From><Prefix>(inputType) -> (interface, bool)
-	// This uses *Parsed helper functions for backward compatibility.
-	// Returns a pointer to satisfy the interface (pointer receivers for flyweight pattern).
-	// Note: This allocates - for zero-alloc, use Cursor.AsClient/AsServer with flyweights.
-	funcName := "To" + from + prefix
-	newLazyFunc := from + "Parsed"
-	fmt.Fprintf(&buf, "// %s converts a %s to a %s if it matches one of the known types.\n", funcName, inputType, interfaceName)
-	fmt.Fprintf(&buf, "// Note: This allocates. For zero-allocation iteration, use Cursor.As%s().\n", from)
-	fmt.Fprintf(&buf, "func %s(msg %s) (%s, bool) {\n", funcName, inputType, interfaceName)
-	buf.WriteString("\tswitch m := msg.(type) {\n")
-	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
-		fmt.Fprintf(&buf, "\tcase %s:\n", ti.qualified)
-		fmt.Fprintf(&buf, "\t\treturn (*%s)(%s(m)), true\n", newTypeName, newLazyFunc)
-	}
-	buf.WriteString("\t}\n")
-	buf.WriteString("\treturn nil, false\n")
-	buf.WriteString("}\n\n")
-
-	// Handler struct: <From><Prefix>Handlers[T any]
-	handlersName := from + prefix + "Handlers"
-	fmt.Fprintf(&buf, "// %s provides type-safe handlers for each %s variant.\n", handlersName, interfaceName)
-	fmt.Fprintf(&buf, "type %s[T any] struct {\n", handlersName)
-	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
-		fmt.Fprintf(&buf, "\t%s func(msg *%s) (T, error)\n", ti.shortName, newTypeName)
-	}
-	buf.WriteString("}\n\n")
-
-	// HandleDefault method
-	fmt.Fprintf(&buf, "// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.\n")
-	fmt.Fprintf(&buf, "func (h %s[T]) HandleDefault(msg %s, defaultHandler func(msg %s) (T, error)) (r T, err error) {\n", handlersName, interfaceName, interfaceName)
-	buf.WriteString("\tswitch msg := msg.(type) {\n")
-	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
-		fmt.Fprintf(&buf, "\tcase *%s:\n", newTypeName)
-		fmt.Fprintf(&buf, "\t\tif h.%s != nil {\n", ti.shortName)
-		fmt.Fprintf(&buf, "\t\t\treturn h.%s(msg)\n", ti.shortName)
-		buf.WriteString("\t\t} else {\n")
-		buf.WriteString("\t\t\treturn defaultHandler(msg)\n")
-		buf.WriteString("\t\t}\n")
-	}
-	buf.WriteString("\t}\n")
-	fmt.Fprintf(&buf, "\terr = fmt.Errorf(\"unknown %s message: %%T\", msg)\n", strings.ToLower(from+" "+prefix))
-	buf.WriteString("\treturn\n")
-	buf.WriteString("}\n\n")
-
-	// Handle method (panics on unhandled)
-	fmt.Fprintf(&buf, "// Handle dispatches to the appropriate handler, or panics if the handler is nil.\n")
-	fmt.Fprintf(&buf, "func (h %s[T]) Handle(msg %s) (T, error) {\n", handlersName, interfaceName)
-	fmt.Fprintf(&buf, "\treturn h.HandleDefault(msg, func(msg %s) (T, error) {\n", interfaceName)
-	fmt.Fprintf(&buf, "\t\tpanic(fmt.Sprintf(\"no handler defined for %s message: %%T\", msg))\n", strings.ToLower(from+" "+prefix))
-	buf.WriteString("\t})\n")
-	buf.WriteString("}\n")
+	// Generate unified handlers for all types
+	generateUnifiedHandlers(&buf, from, groups, allTypes)
 
 	// Format the code
 	formatted, err := format.Source(buf.Bytes())
@@ -434,4 +386,163 @@ func generateCode(pkgName string, imports []string, from, prefix, inputType stri
 		return buf.Bytes()
 	}
 	return formatted
+}
+
+type unifiedType struct {
+	groupPrefix   string
+	interfaceName string
+	typeName      string
+	shortName     string
+	qualified     string
+}
+
+func inputType(from string) string {
+	if from == "Client" {
+		return "pgproto3.FrontendMessage"
+	}
+	return "pgproto3.BackendMessage"
+}
+
+func generateGroupHandlers(buf *bytes.Buffer, from, prefix, interfaceName string, types []typeInfo) {
+	handlersName := from + prefix + "Handlers"
+
+	// Handlers struct
+	fmt.Fprintf(buf, "// %s provides type-safe handlers for each %s variant.\n", handlersName, interfaceName)
+	fmt.Fprintf(buf, "type %s[T any] struct {\n", handlersName)
+	fmt.Fprintf(buf, "\tDefault func(msg %s) (T, error)\n", interfaceName)
+	for _, ti := range types {
+		newTypeName := from + prefix + ti.shortName
+		fmt.Fprintf(buf, "\t%s func(msg *%s) (T, error)\n", ti.shortName, newTypeName)
+	}
+	buf.WriteString("}\n\n")
+
+	// HandleDefault
+	fmt.Fprintf(buf, "// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.\n")
+	fmt.Fprintf(buf, "func (h %s[T]) HandleDefault(msg %s, defaultHandler func(msg %s) (T, error)) (r T, err error) {\n", handlersName, interfaceName, interfaceName)
+	buf.WriteString("\tif h.Default != nil {\n")
+	buf.WriteString("\t\tdefaultHandler = h.Default\n")
+	buf.WriteString("\t} else if defaultHandler == nil {\n")
+	fmt.Fprintf(buf, "\t\tdefaultHandler = func(msg %s) (T, error) {\n", interfaceName)
+	fmt.Fprintf(buf, "\t\t\tpanic(fmt.Sprintf(\"no handler defined for %s message: %%T\", msg))\n", strings.ToLower(from+" "+prefix))
+	buf.WriteString("\t\t}\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\tswitch msg := msg.(type) {\n")
+	for _, ti := range types {
+		newTypeName := from + prefix + ti.shortName
+		fmt.Fprintf(buf, "\tcase *%s:\n", newTypeName)
+		fmt.Fprintf(buf, "\t\tif h.%s != nil {\n", ti.shortName)
+		fmt.Fprintf(buf, "\t\t\treturn h.%s(msg)\n", ti.shortName)
+		buf.WriteString("\t\t}\n")
+		buf.WriteString("\t\treturn defaultHandler(msg)\n")
+	}
+	buf.WriteString("\t}\n")
+	fmt.Fprintf(buf, "\terr = fmt.Errorf(\"unknown %s message: %%T\", msg)\n", strings.ToLower(from+" "+prefix))
+	buf.WriteString("\treturn\n")
+	buf.WriteString("}\n\n")
+
+	// Handle
+	fmt.Fprintf(buf, "// Handle dispatches to the appropriate handler, or panics if the handler is nil.\n")
+	fmt.Fprintf(buf, "func (h %s[T]) Handle(msg %s) (T, error) {\n", handlersName, interfaceName)
+	buf.WriteString("\treturn h.HandleDefault(msg, nil)\n")
+	buf.WriteString("}\n\n")
+
+	// Context-aware handlers
+	handlersCtxName := from + prefix + "HandlersCtx"
+	fmt.Fprintf(buf, "// %s provides type-safe handlers with context and an argument for each %s variant.\n", handlersCtxName, interfaceName)
+	fmt.Fprintf(buf, "type %s[Arg, Result any] struct {\n", handlersCtxName)
+	fmt.Fprintf(buf, "\tDefault func(ctx context.Context, msg %s, arg Arg) (Result, error)\n", interfaceName)
+	for _, ti := range types {
+		newTypeName := from + prefix + ti.shortName
+		fmt.Fprintf(buf, "\t%s func(ctx context.Context, msg *%s, arg Arg) (Result, error)\n", ti.shortName, newTypeName)
+	}
+	buf.WriteString("}\n\n")
+
+	// HandleDefault for Ctx
+	fmt.Fprintf(buf, "// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.\n")
+	fmt.Fprintf(buf, "func (h %s[Arg, Result]) HandleDefault(ctx context.Context, msg %s, arg Arg, defaultHandler func(ctx context.Context, msg %s, arg Arg) (Result, error)) (r Result, err error) {\n", handlersCtxName, interfaceName, interfaceName)
+	buf.WriteString("\tif h.Default != nil {\n")
+	buf.WriteString("\t\tdefaultHandler = h.Default\n")
+	buf.WriteString("\t} else if defaultHandler == nil {\n")
+	fmt.Fprintf(buf, "\t\tdefaultHandler = func(ctx context.Context, msg %s, arg Arg) (Result, error) {\n", interfaceName)
+	fmt.Fprintf(buf, "\t\t\tpanic(fmt.Sprintf(\"no handler defined for %s message: %%T\", msg))\n", strings.ToLower(from+" "+prefix))
+	buf.WriteString("\t\t}\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\tswitch msg := msg.(type) {\n")
+	for _, ti := range types {
+		newTypeName := from + prefix + ti.shortName
+		fmt.Fprintf(buf, "\tcase *%s:\n", newTypeName)
+		fmt.Fprintf(buf, "\t\tif h.%s != nil {\n", ti.shortName)
+		fmt.Fprintf(buf, "\t\t\treturn h.%s(ctx, msg, arg)\n", ti.shortName)
+		buf.WriteString("\t\t}\n")
+		buf.WriteString("\t\treturn defaultHandler(ctx, msg, arg)\n")
+	}
+	buf.WriteString("\t}\n")
+	fmt.Fprintf(buf, "\terr = fmt.Errorf(\"unknown %s message: %%T\", msg)\n", strings.ToLower(from+" "+prefix))
+	buf.WriteString("\treturn\n")
+	buf.WriteString("}\n\n")
+
+	// Handle for Ctx
+	fmt.Fprintf(buf, "// Handle dispatches to the appropriate handler, or panics if the handler is nil.\n")
+	fmt.Fprintf(buf, "func (h %s[Arg, Result]) Handle(ctx context.Context, msg %s, arg Arg) (Result, error) {\n", handlersCtxName, interfaceName)
+	buf.WriteString("\treturn h.HandleDefault(ctx, msg, arg, nil)\n")
+	buf.WriteString("}\n\n")
+}
+
+func generateUnifiedHandlers(buf *bytes.Buffer, from string, groups []typeGroup, allTypes []unifiedType) {
+	handlersName := from + "Handlers"
+	msgInterface := from + "Message"
+
+	// Unified handlers struct with context
+	fmt.Fprintf(buf, "// %s provides type-safe dispatch for all %s variants.\n", handlersName, from)
+	fmt.Fprintf(buf, "type %s[Arg, Result any] struct {\n", handlersName)
+	fmt.Fprintf(buf, "\tDefault func(ctx context.Context, msg %s, arg Arg) (Result, error)\n", msgInterface)
+
+	// Group by prefix for comments and group handler pointers
+	currentPrefix := ""
+	for _, ut := range allTypes {
+		if ut.groupPrefix != currentPrefix {
+			if currentPrefix != "" {
+				buf.WriteString("\n")
+			}
+			currentPrefix = ut.groupPrefix
+			fmt.Fprintf(buf, "\t// %s\n", ut.groupPrefix)
+			handlersCtxName := from + ut.groupPrefix + "HandlersCtx"
+			fmt.Fprintf(buf, "\t%s *%s[Arg, Result]\n", ut.groupPrefix, handlersCtxName)
+		}
+		fmt.Fprintf(buf, "\t%s func(ctx context.Context, msg *%s, arg Arg) (Result, error)\n", ut.shortName, ut.typeName)
+	}
+	buf.WriteString("}\n\n")
+
+	// HandleDefault
+	fmt.Fprintf(buf, "// HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.\n")
+	fmt.Fprintf(buf, "func (h %s[Arg, Result]) HandleDefault(ctx context.Context, msg %s, arg Arg, defaultHandler func(ctx context.Context, msg %s, arg Arg) (Result, error)) (r Result, err error) {\n", handlersName, msgInterface, msgInterface)
+	buf.WriteString("\tif h.Default != nil {\n")
+	buf.WriteString("\t\tdefaultHandler = h.Default\n")
+	buf.WriteString("\t} else if defaultHandler == nil {\n")
+	fmt.Fprintf(buf, "\t\tdefaultHandler = func(ctx context.Context, msg %s, arg Arg) (Result, error) {\n", msgInterface)
+	fmt.Fprintf(buf, "\t\t\tpanic(fmt.Sprintf(\"no handler defined for %s message: %%T\", msg))\n", strings.ToLower(from))
+	buf.WriteString("\t\t}\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\tswitch msg := msg.(type) {\n")
+	for _, ut := range allTypes {
+		fmt.Fprintf(buf, "\tcase *%s:\n", ut.typeName)
+		fmt.Fprintf(buf, "\t\tif h.%s != nil {\n", ut.shortName)
+		fmt.Fprintf(buf, "\t\t\treturn h.%s(ctx, msg, arg)\n", ut.shortName)
+		fmt.Fprintf(buf, "\t\t} else if h.%s != nil && h.%s.%s != nil {\n", ut.groupPrefix, ut.groupPrefix, ut.shortName)
+		fmt.Fprintf(buf, "\t\t\treturn h.%s.%s(ctx, msg, arg)\n", ut.groupPrefix, ut.shortName)
+		fmt.Fprintf(buf, "\t\t} else if h.%s != nil && h.%s.Default != nil {\n", ut.groupPrefix, ut.groupPrefix)
+		fmt.Fprintf(buf, "\t\t\treturn h.%s.Default(ctx, msg, arg)\n", ut.groupPrefix)
+		buf.WriteString("\t\t}\n")
+		buf.WriteString("\t\treturn defaultHandler(ctx, msg, arg)\n")
+	}
+	buf.WriteString("\t}\n")
+	fmt.Fprintf(buf, "\terr = fmt.Errorf(\"unknown %s message: %%T\", msg)\n", strings.ToLower(from))
+	buf.WriteString("\treturn\n")
+	buf.WriteString("}\n\n")
+
+	// Handle
+	fmt.Fprintf(buf, "// Handle dispatches to the appropriate handler, or panics if the handler is nil.\n")
+	fmt.Fprintf(buf, "func (h %s[Arg, Result]) Handle(ctx context.Context, msg %s, arg Arg) (Result, error) {\n", handlersName, msgInterface)
+	buf.WriteString("\treturn h.HandleDefault(ctx, msg, arg, nil)\n")
+	buf.WriteString("}\n")
 }

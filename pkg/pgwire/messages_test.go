@@ -156,13 +156,6 @@ func TestToClientMessage(t *testing.T) {
 			if gotType != tt.wantType {
 				t.Errorf("ToClientMessage() type = %v, want %v", gotType, tt.wantType)
 			}
-			// Verify round-trip
-			if got.Client() != tt.input {
-				t.Errorf("ToClientMessage().Client() did not return original message")
-			}
-			if got.PgwireMessage() != tt.input {
-				t.Errorf("ToClientMessage().PgwireMessage() did not return original message")
-			}
 		})
 	}
 }
@@ -355,13 +348,6 @@ func TestToServerMessage(t *testing.T) {
 			gotType := typeName(got)
 			if gotType != tt.wantType {
 				t.Errorf("ToServerMessage() type = %v, want %v", gotType, tt.wantType)
-			}
-			// Verify round-trip
-			if got.Server() != tt.input {
-				t.Errorf("ToServerMessage().Server() did not return original message")
-			}
-			if got.PgwireMessage() != tt.input {
-				t.Errorf("ToServerMessage().PgwireMessage() did not return original message")
 			}
 		})
 	}

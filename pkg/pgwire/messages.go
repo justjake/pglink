@@ -7,18 +7,17 @@ import (
 )
 
 type Message interface {
-	PgwireMessage() pgproto3.Message
 	MsgType() MsgType // TODO
 }
 
 type ClientMessage interface {
 	Message
-	Client() pgproto3.FrontendMessage
+	Client()
 }
 
 type ServerMessage interface {
 	Message
-	Server() pgproto3.BackendMessage
+	Server()
 }
 
 func ToClient(msg pgproto3.FrontendMessage) ClientMessage {

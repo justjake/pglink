@@ -1,11 +1,9 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"time"
-	"unsafe"
 
 	"github.com/justjake/pglink/pkg/pgwire"
 	"github.com/justjake/pglink/pkg/pure"
@@ -36,6 +34,10 @@ func (q *OutstandingRequestQueue) drop(req *OutstandingRequest) {
 	}
 }
 
+func (q *OutstandingRequestQueue) Len() int {
+	return len(q.requests)
+}
+
 func (q *OutstandingRequestQueue) WaitingFor(res pgwire.ServerMessage) *OutstandingRequest {
 	if len(q.requests) == 0 {
 		return nil
@@ -47,9 +49,7 @@ func (q *OutstandingRequestQueue) WaitingFor(res pgwire.ServerMessage) *Outstand
 		return nil
 	}
 
-	// TODO: need to add .MsgType() to ServerMessage interface
-	responseTypesBytes := unsafe.Slice((*byte)(unsafe.SliceData(responseTypes)), len(responseTypes))
-	if bytes.IndexByte(responseTypesBytes, byte(res.MsgType())) != -1 {
+	if pgwire.MsgTypeIndex(responseTypes, res.MsgType()) != -1 {
 		return first
 	}
 
@@ -78,20 +78,23 @@ type OutstandingRequest struct {
 }
 
 func (r *OutstandingRequest) String() string {
-	return fmt.Sprintf("OutstandingRequest(%d %s)", r.seq, r.RequestType)
+	return fmt.Sprintf("OutstandingRequest(%d %v)", r.seq, r.RequestType)
 }
 
 func (r *OutstandingRequest) Handle(ctx context.Context, msg pgwire.ServerMessage) Action {
-	out, state, err := r.handler(ctx, ResponseHandlerArgs{Res: msg})
+	changed, action, state, err := r.handler(ctx, nil, ResponseEvent{Res: msg, ReqType: r.RequestType})
 	if err != nil {
 		return UnexpectedError(msg, err)
 	}
 
-	action := out.Action
+	effect := pure.NoOp()
+	if changed {
+		effect = r.setStateEffect(state)
+	}
 	if action == nil {
-		return Forward(msg, r.setStateEffect(state))
+		return Forward(msg, effect)
 	} else {
-		return action.WithEffects(r.setStateEffect(state))
+		return action.WithEffects(effect)
 	}
 }
 

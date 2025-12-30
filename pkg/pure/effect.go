@@ -94,6 +94,32 @@ func DescribeFunction(f any) string {
 	return fmt.Sprintf("%s%#v", rt.Name(), f)
 }
 
+func WithName(name string, effect Effect) Effect {
+	return namedEffect{name, effect}
+}
+
+func WithNameFunc(name func() string, effect Effect) Effect {
+	return nameFuncEffect{name, effect}
+}
+
+type namedEffect struct {
+	name string
+	Effect
+}
+
+func (e namedEffect) String() string {
+	return fmt.Sprintf("%s/%s", e.name, e.Effect.String())
+}
+
+type nameFuncEffect struct {
+	name func() string
+	Effect
+}
+
+func (e nameFuncEffect) String() string {
+	return fmt.Sprintf("%s/%s", e.name(), e.Effect.String())
+}
+
 // Effects is a list of effects.
 type Effects []Effect
 
@@ -111,4 +137,18 @@ func (e Effects) String() string {
 	}
 	b.WriteString("]")
 	return b.String()
+}
+
+type noOpEffect struct{}
+
+func NoOp() Effect {
+	return (*noOpEffect)(nil)
+}
+
+func (e *noOpEffect) String() string {
+	return "NoOp"
+}
+
+func (e *noOpEffect) Apply(ctx context.Context) (cleanup Effect, err error) {
+	return nil, nil
 }

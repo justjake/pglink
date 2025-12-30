@@ -1152,10 +1152,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 	} else {
 		// Passthrough - still need to update backend state with original message
 		// so the backend knows about statements/portals that exist.
-		clientMsg, ok := pgwire.ToClientMessage(msg.Client())
-		if ok {
-			s.backend.UpdateState(clientMsg)
-		}
+		s.backend.UpdateState(msg)
 		// Include the original message in the toServer range so it gets flushed.
 		(*toServer).SetEndInclusive(msgIdx)
 	}

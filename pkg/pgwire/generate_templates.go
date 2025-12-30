@@ -12,13 +12,16 @@ package pgwire
 // To regenerate the wrapper types after modifying these templates:
 //   go generate ./pkg/pgwire/...
 
+//go:generate go run ./generate.go -from=Client
+//go:generate go run ./generate.go -from=Server
+
 import (
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 // Client message templates
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isStartupModeMessage -from=Client -type=Startup -return=Client=pgproto3.FrontendMessage=t.T
+//pgwire: -from=Client -type=Startup
 func isStartupModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.GSSEncRequest:
@@ -39,7 +42,7 @@ func isStartupModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isSimpleQueryModeMessage -from=Client -type=SimpleQuery -return=Client=pgproto3.FrontendMessage=t.T
+//pgwire: -from=Client -type=SimpleQuery
 func isSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.Query:
@@ -53,7 +56,7 @@ func isSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isExtendedQueryModeMessage -from=Client -type=ExtendedQuery -return=Client=pgproto3.FrontendMessage=t.T
+//pgwire: -from=Client -type=ExtendedQuery
 func isExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	// Extended Query flow:
@@ -132,7 +135,7 @@ func isExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isCopyModeMessage -from=Client -type=Copy -return=Client=pgproto3.FrontendMessage=t.T
+//pgwire: -from=Client -type=Copy
 func isCopyModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CopyData:
@@ -145,7 +148,7 @@ func isCopyModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isCancelMessage -from=Client -type=Cancel -return=Client=pgproto3.FrontendMessage=t.T
+//pgwire: -from=Client -type=Cancel
 func isCancelMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CancelRequest:
@@ -154,7 +157,7 @@ func isCancelMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn=isTerminateConnMessage -from=Client -type=TerminateConn -return=Client=pgproto3.FrontendMessage=t.T
+//pgwire: -from=Client -type=TerminateConn
 func isTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.Terminate:
@@ -165,7 +168,7 @@ func isTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
 
 // Server message templates
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isBackendStartupModeMessage -from=Server -type=Startup -return=Server=pgproto3.BackendMessage=t.T
+//pgwire: -from=Server -type=Startup
 func isBackendStartupModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.AuthenticationCleartextPassword:
@@ -192,7 +195,7 @@ func isBackendStartupModeMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isBackendExtendedQueryModeMessage -from=Server -type=ExtendedQuery -return=Server=pgproto3.BackendMessage=t.T
+//pgwire: -from=Server -type=ExtendedQuery
 func isBackendExtendedQueryModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	// Extended Query mode:
@@ -222,7 +225,7 @@ func isBackendExtendedQueryModeMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isBackendCopyModeMessage -from=Server -type=Copy -return=Server=pgproto3.BackendMessage=t.T
+//pgwire: -from=Server -type=Copy
 func isBackendCopyModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CopyInResponse:
@@ -250,7 +253,7 @@ func isBackendCopyModeMessage(msg pgproto3.BackendMessage) bool {
 
 // isBackendResponseMessage matches messages that apply to both query modes.
 //
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isBackendResponseMessage -from=Server -type=Response -return=Server=pgproto3.BackendMessage=t.T
+//pgwire: -from=Server -type=Response
 func isBackendResponseMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.ReadyForQuery:
@@ -277,7 +280,7 @@ func isBackendResponseMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//go:generate go run ./generate.go -return=PgwireMessage=pgproto3.Message=t.T -fn isBackendAsyncMessage -from=Server -type=Async -return=Server=pgproto3.BackendMessage=t.T
+//pgwire: -from=Server -type=Async
 func isBackendAsyncMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.NoticeResponse:

@@ -35,7 +35,7 @@ func BenchmarkFlyweightAllocation(b *testing.B) {
 			b.Fatal(err)
 		}
 		// Use msg to prevent optimization
-		_ = msg.PgwireMessage()
+		_ = msg.MsgType()
 	}
 }
 

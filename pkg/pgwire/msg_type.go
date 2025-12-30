@@ -1,7 +1,17 @@
 package pgwire
 
+import (
+	"bytes"
+	"fmt"
+	"unsafe"
+)
+
 // MsgType represents a PostgreSQL wire protocol message type byte.
 type MsgType byte
+
+func (m MsgType) String() string {
+	return fmt.Sprintf("%s (%s)", string(m), MsgName.Get(m))
+}
 
 // MsgLookup is a lookup table from MsgType to T.
 // It uses [256]T so that indexing by a byte is always in-bounds, allowing
@@ -158,6 +168,19 @@ var MsgName = MsgLookup[string]{
 	'Z': "ReadyForQuery",
 }
 
+// MsgTerminalResponse returns the terminal response messages for the given request message type,
+// which indicate the end of the request.
+var MsgTerminalResponse = MsgLookup[[]MsgType]{
+	MsgClientQuery:    {MsgServerReadyForQuery},
+	MsgClientParse:    {MsgServerParseComplete, MsgServerErrorResponse},
+	MsgClientBind:     {MsgServerBindComplete, MsgServerErrorResponse},
+	MsgClientClose:    {MsgServerCloseComplete, MsgServerErrorResponse},
+	MsgClientDescribe: {MsgServerRowDescription, MsgServerNoData, MsgServerErrorResponse},
+	MsgClientExecute:  {MsgServerCommandComplete, MsgServerEmptyQueryResponse, MsgServerErrorResponse, MsgServerPortalSuspended},
+	MsgClientFunc:     {MsgServerReadyForQuery},
+	MsgClientSync:     {MsgServerReadyForQuery},
+}
+
 var MsgResponse = MsgLookup[[]MsgType]{
 	// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
 	// Should not complete until ReadyForQuery.
@@ -193,9 +216,9 @@ var MsgResponse = MsgLookup[[]MsgType]{
 		// processing terminates successfully or with an error.
 		MsgServerReadyForQuery, // terminal
 	},
-	MsgClientParse: {MsgServerParseComplete, MsgServerErrorResponse},
-	MsgClientBind:  {MsgServerBindComplete, MsgServerErrorResponse},
-	MsgClientClose: {MsgServerCloseComplete, MsgServerErrorResponse},
+	MsgClientParse: MsgTerminalResponse[MsgClientParse],
+	MsgClientBind:  MsgTerminalResponse[MsgClientBind],
+	MsgClientClose: MsgTerminalResponse[MsgClientClose],
 	// Describe statement or portal.
 	MsgClientDescribe: {
 		// Portal -> RowDescription message describing the rows that will be
@@ -228,7 +251,10 @@ var MsgResponse = MsgLookup[[]MsgType]{
 		MsgServerFuncCallResponse,
 		MsgServerErrorResponse,
 		MsgServerNoticeResponse,
-		MsgServerReadyForQuery,
+		MsgServerReadyForQuery, // terminal
+
+		// It's not well-documented, but we assume a function call could start a COPY query.
+		MsgServerCopyInResponse, MsgServerCopyOutResponse, MsgServerCopyBothResponse,
 	},
 	// At completion of each series of extended-query messages, the frontend
 	// should issue a Sync message. This parameterless message causes the backend
@@ -242,5 +268,13 @@ var MsgResponse = MsgLookup[[]MsgType]{
 	// note that no skipping occurs if an error is detected while processing Sync
 	// — this ensures that there is one and only one ReadyForQuery sent for each
 	// Sync.)
-	MsgClientSync: {MsgServerReadyForQuery},
+	MsgClientSync: MsgTerminalResponse[MsgClientSync],
+}
+
+func MsgTypeIndex(slice []MsgType, msg MsgType) int {
+	if len(slice) == 0 {
+		return -1
+	}
+	byteSlice := unsafe.Slice((*byte)(unsafe.SliceData(slice)), len(slice))
+	return bytes.IndexByte(byteSlice, byte(msg))
 }

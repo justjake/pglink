@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // AuthSession manages client authentication using the PostgreSQL protocol.
@@ -98,10 +99,11 @@ func (s *AuthSession) runPlainAuth() error {
 		return fmt.Errorf("failed to receive password: %w", err)
 	}
 
-	pwMsg, ok := msg.Client().(*pgproto3.PasswordMessage)
+	pwWrapper, ok := msg.(*pgwire.ClientStartupPasswordMessage)
 	if !ok {
 		return s.authError(fmt.Errorf("expected PasswordMessage, got %T", msg))
 	}
+	pwMsg := pwWrapper.Parse()
 
 	if subtle.ConstantTimeCompare([]byte(pwMsg.Password), []byte(s.credentials.Password())) != 1 {
 		return s.authError(errors.New("password authentication failed"))
@@ -125,10 +127,11 @@ func (s *AuthSession) runMD5Auth() error {
 		return fmt.Errorf("failed to receive password: %w", err)
 	}
 
-	pwMsg, ok := msg.Client().(*pgproto3.PasswordMessage)
+	pwWrapper, ok := msg.(*pgwire.ClientStartupPasswordMessage)
 	if !ok {
 		return s.authError(fmt.Errorf("expected PasswordMessage, got %T", msg))
 	}
+	pwMsg := pwWrapper.Parse()
 
 	expected := computeMD5Password(s.credentials, s.md5Salt)
 	if subtle.ConstantTimeCompare([]byte(pwMsg.Password), []byte(expected)) != 1 {
@@ -166,10 +169,11 @@ func (s *AuthSession) runSCRAMAuth() error {
 		return fmt.Errorf("failed to receive SASL initial response: %w", err)
 	}
 
-	initMsg, ok := msg.Client().(*pgproto3.SASLInitialResponse)
+	initWrapper, ok := msg.(*pgwire.ClientStartupSASLInitialResponse)
 	if !ok {
 		return s.authError(fmt.Errorf("expected SASLInitialResponse, got %T", msg))
 	}
+	initMsg := initWrapper.Parse()
 
 	// Validate mechanism
 	mechanism := initMsg.AuthMechanism
@@ -254,10 +258,11 @@ func (s *AuthSession) runSCRAMAuth() error {
 		return fmt.Errorf("failed to receive SASL response: %w", err)
 	}
 
-	respMsg, ok := msg.Client().(*pgproto3.SASLResponse)
+	respWrapper, ok := msg.(*pgwire.ClientStartupSASLResponse)
 	if !ok {
 		return s.authError(fmt.Errorf("expected SASLResponse, got %T", msg))
 	}
+	respMsg := respWrapper.Parse()
 
 	// Process client-final-message and verify proof
 	clientFinalMsg := string(respMsg.Data)

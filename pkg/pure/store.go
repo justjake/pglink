@@ -9,37 +9,43 @@ type Store[T any] interface {
 	RevertEffect() Effect
 }
 
-type store[T any] struct {
-	value T
+type StoreState[T any] struct {
+	State T
 }
 
 func NewStore[T any](value T) Store[T] {
-	return &store[T]{value}
+	return &StoreState[T]{value}
 }
 
-func (s *store[T]) Value() T {
-	return s.value
+func (s *StoreState[T]) Value() T {
+	return s.State
 }
 
-func (s *store[T]) RevertEffect() Effect {
-	prev := s.value
+func (s *StoreState[T]) RevertEffect() Effect {
+	prev := s.State
 	return DoNamed("Store.Revert", func() {
-		s.value = prev
+		s.State = prev
 	})
 }
 
-func (s *store[T]) SetEffect(next T) Effect {
+func (s *StoreState[T]) SetEffect(next T) Effect {
 	return DoNamedCleanup("Store.Set", func(ctx context.Context) (cleanup Effect, err error) {
 		cleanup = s.RevertEffect()
-		s.value = next
+		s.State = next
 		return
 	})
 }
 
-func (s *store[T]) UpdateEffect(update func(T) T) Effect {
+func (s *StoreState[T]) UpdateEffect(update func(T) T) Effect {
 	return DoNamedCleanup("Store.Update", func(ctx context.Context) (cleanup Effect, err error) {
 		cleanup = s.RevertEffect()
-		s.value = update(s.value)
+		s.UpdateNow(update)
 		return
 	})
+}
+
+func (s *StoreState[T]) UpdateNow(update func(T) T) T {
+	state := update(s.State)
+	s.State = state
+	return state
 }
