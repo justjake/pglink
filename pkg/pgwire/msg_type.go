@@ -157,3 +157,90 @@ var MsgName = MsgLookup[string]{
 	'W': "CopyBothResponse",
 	'Z': "ReadyForQuery",
 }
+
+var MsgResponse = MsgLookup[[]MsgType]{
+	// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+	// Should not complete until ReadyForQuery.
+	MsgClientQuery: {
+		// One (of possibly many) An SQL command completed normally.
+		MsgServerCommandComplete,
+
+		// Indicates copy mode began (sent before CommandComplete)
+		MsgServerCopyInResponse,
+		MsgServerCopyOutResponse,
+		MsgServerCopyBothResponse,
+
+		// Indicates that rows are about to be returned in response to a SELECT,
+		// FETCH, etc. query. The contents of this message describe the column
+		// layout of the rows. This will be followed by a DataRow message for each
+		// row being returned to the frontend.
+		MsgServerRowDescription,
+		MsgServerDataRow,
+
+		// Query SQL was empty string.
+		MsgServerEmptyQueryResponse,
+		// An error has occurred.
+		MsgServerErrorResponse,
+		// A warning message has been issued in relation to the query. Notices are
+		// in addition to other responses, i.e., the backend will continue
+		// processing the command.
+		MsgServerNoticeResponse,
+
+		// Processing of the query string is complete. A separate message is sent to
+		// indicate this because the query string might contain multiple SQL
+		// commands. (CommandComplete marks the end of processing one SQL command,
+		// not the whole string.) ReadyForQuery will always be sent, whether
+		// processing terminates successfully or with an error.
+		MsgServerReadyForQuery, // terminal
+	},
+	MsgClientParse: {MsgServerParseComplete, MsgServerErrorResponse},
+	MsgClientBind:  {MsgServerBindComplete, MsgServerErrorResponse},
+	MsgClientClose: {MsgServerCloseComplete, MsgServerErrorResponse},
+	// Describe statement or portal.
+	MsgClientDescribe: {
+		// Portal -> RowDescription message describing the rows that will be
+		// returned by executing the portal; or a NoData message if the portal does
+		// not contain a query that will return rows; or ErrorResponse if there is
+		// no such portal
+		MsgServerRowDescription, // terminal
+		MsgServerNoData,         // terminal
+		// ParameterDescription message describing the parameters needed by the
+		// statement, followed by a RowDescription message describing the rows that
+		// will be returned when the statement is eventually executed (or a NoData
+		// message if the statement will not return rows)
+		MsgServerParameterDescription,
+		// No such statement or portal.
+		MsgServerErrorResponse, // terminal
+	},
+	// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+	// Specifically: https://arc.net/l/quote/xubsvspn
+	MsgClientExecute: {
+		// an Execute phase is always terminated by the appearance of exactly one of
+		// these messages: CommandComplete, EmptyQueryResponse (if the portal was
+		// created from an empty query string), ErrorResponse, or PortalSuspended.
+		MsgServerCommandComplete, MsgServerEmptyQueryResponse, MsgServerErrorResponse, MsgServerPortalSuspended, // terminal
+		// We also listen for Copy messages.
+		// Execute handlers should not complete their flow on these messages.
+		MsgServerCopyInResponse, MsgServerCopyOutResponse, MsgServerCopyBothResponse,
+	},
+	// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-FUNCTION-CALL
+	MsgClientFunc: {
+		MsgServerFuncCallResponse,
+		MsgServerErrorResponse,
+		MsgServerNoticeResponse,
+		MsgServerReadyForQuery,
+	},
+	// At completion of each series of extended-query messages, the frontend
+	// should issue a Sync message. This parameterless message causes the backend
+	// to close the current transaction if it's not inside a BEGIN/COMMIT
+	// transaction block (“close” meaning to commit if no error, or roll back if
+	// error). Then a ReadyForQuery response is issued. The purpose of Sync is to
+	// provide a resynchronization point for error recovery. When an error is
+	// detected while processing any extended-query message, the backend issues
+	// ErrorResponse, then reads and discards messages until a Sync is reached,
+	// then issues ReadyForQuery and returns to normal message processing. (But
+	// note that no skipping occurs if an error is detected while processing Sync
+	// — this ensures that there is one and only one ReadyForQuery sent for each
+	// Sync.)
+	MsgClientSync: {MsgServerReadyForQuery},
+}

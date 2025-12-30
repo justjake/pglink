@@ -8,6 +8,7 @@ import (
 
 type Message interface {
 	PgwireMessage() pgproto3.Message
+	MsgType() MsgType // TODO
 }
 
 type ClientMessage interface {
@@ -18,6 +19,14 @@ type ClientMessage interface {
 type ServerMessage interface {
 	Message
 	Server() pgproto3.BackendMessage
+}
+
+func ToClient(msg pgproto3.FrontendMessage) ClientMessage {
+	if m, ok := ToClientMessage(msg); ok {
+		return m
+	} else {
+		panic(fmt.Sprintf("unknown client message: %T", msg))
+	}
 }
 
 // ToClientMessage converts a pgproto3.FrontendMessage to a ClientMessage.
@@ -74,6 +83,14 @@ func ToClientMessage(msg pgproto3.FrontendMessage) (ClientMessage, bool) {
 		return (*ClientStartupStartupMessage)(ClientParsed(m)), true
 	}
 	return nil, false
+}
+
+func ToServer(msg pgproto3.BackendMessage) ServerMessage {
+	if m, ok := ToServerMessage(msg); ok {
+		return m
+	} else {
+		panic(fmt.Sprintf("unknown server message: %T", msg))
+	}
 }
 
 // ToServerMessage converts a pgproto3.BackendMessage to a ServerMessage.
@@ -223,9 +240,14 @@ type ServerMessageHandlers[T any] struct {
 	ExtendedQuery func(msg ServerExtendedQuery) (T, error)
 	Response      func(msg ServerResponse) (T, error)
 	Startup       func(msg ServerStartup) (T, error)
+	// TODO: default?
 }
 
 func (h ServerMessageHandlers[T]) HandleDefault(msg ServerMessage, defaultHandler func(msg ServerMessage) (T, error)) (r T, err error) {
+	if defaultHandler == nil {
+		return h.Handle(msg)
+	}
+
 	switch msg := msg.(type) {
 	case ServerAsync:
 		if h.Async != nil {
