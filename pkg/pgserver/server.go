@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
@@ -34,13 +35,13 @@ type UnauthorizedConn struct {
 	// Conn is the underlying connection.
 	// It's often a [*tls.Conn] wrapping a [net.TCPConn].
 	Conn           net.Conn
-	Frontend       *pgproto3.Frontend
+	Frontend       *pgproto3.Backend
 	StartupMessage *pgproto3.StartupMessage
 }
 
 type AuthorizedConn struct {
 	Conn           net.Conn
-	Frontend       *pgproto3.Frontend
+	Frontend       *pgproto3.Backend
 	User           string
 	Database       string
 	StartupMessage *pgproto3.StartupMessage
@@ -48,33 +49,26 @@ type AuthorizedConn struct {
 
 type CancelConn struct {
 	Conn          net.Conn
-	Frontend      *pgproto3.Frontend
+	Frontend      *pgproto3.Backend
 	CancelMessage *pgproto3.CancelRequest
 }
 
-// This is the type used by [pgproto3.BackendKeyData].
-type ProcessID uint32
-
-// This is the type used by [pgproto3.BackendKeyData].
-// However, the PostgreSQL wire protocol allows for up to 256 bytes.
-// TODO: support longer secret keys.
-type SecretKey uint32
-
-type Conn struct {
+type ClientConn struct {
 	Conn              net.Conn
 	Frontend          *pgproto3.Frontend
 	User              string
 	Database          string
-	ProcessID         ProcessID
-	SecretKey         SecretKey
+	ProcessID         pgwire.ProcessID
+	SecretKey         pgwire.SecretKey
 	StartupParameters pgwire.ParameterStatuses
+	ExtraData         any
 }
 
 type ConnValidator func(ctx context.Context, conn net.Conn) (net.Conn, error)
-type AuthHandler func(ctx context.Context, conn UnauthorizedConn) (AuthorizedConn, error)
-type CancelHandler func(ctx context.Context, conn CancelConn) error
-type StartupHandler func(ctx context.Context, conn AuthorizedConn) (*Conn, error)
-type ConnHandler func(ctx context.Context, conn *Conn) error
+type AuthHandler func(ctx context.Context, conn *UnauthorizedConn) (*AuthorizedConn, error)
+type CancelHandler func(ctx context.Context, conn *CancelConn) error
+type StartupHandler func(ctx context.Context, conn *AuthorizedConn) (*ClientConn, error)
+type ConnHandler func(ctx context.Context, conn *ClientConn) error
 
 type contextKey struct{ name string }
 
@@ -118,9 +112,13 @@ type ServerConfig struct {
 	// ConnContext may return nil, error to reject the connection.
 	ConnContext func(ctx context.Context, conn net.Conn) (context.Context, error)
 
-	// Required. Authorizes the connection by communicating with the client.
+	// Required. Authenticates and authorizes the connection by communicating with
+	// the client.
+	//
 	// On error, the connection is closed.
 	// On success, passes the authorized connection to the [StartupHandler].
+	//
+	// [PasswordAuthenticator] provides [PasswordAuthenticator.CleartextPassword], [PasswordAuthenticator.MD5Password], and [PasswordAuthenticator.SASL] handlers.
 	AuthHandler AuthHandler
 
 	// Required. Handles cancellation request connections.
@@ -144,6 +142,29 @@ type Server struct {
 	ServerConfig
 	ConnMap *ConnMap
 	serverTrackers
+}
+
+// ListenAndServe listens on the TCP network address s.Addr and then
+// calls [Serve] to handle requests on incoming connections.
+// Accepted connections are configured to enable TCP keep-alives.
+//
+// If s.Addr is blank, ListenAndServe will panic.
+//
+// ListenAndServe always returns a non-nil error. After [Server.Shutdown] or [Server.Close],
+// the returned error is [ErrServerClosed].
+func (s *Server) ListenAndServe() error {
+	if s.shuttingDown() {
+		return ErrServerClosed
+	}
+	addr := s.Addr
+	if addr == "" {
+		panic("Addr is blank")
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
 }
 
 func (s *Server) Serve(l net.Listener) error {
@@ -216,55 +237,6 @@ func (s *Server) Serve(l net.Listener) error {
 		c.setState(connStateNew)
 		go c.serve(connCtx)
 	}
-}
-
-func (s *Server) handle(ctx context.Context, rawConn net.Conn) (err error) {
-	defer func() {
-		closeErr := rawConn.Close()
-		if closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("%w: %w", ErrCloseFailed, closeErr))
-		}
-	}()
-
-	var unauthedConn *UnauthorizedConn
-	var cancelConn *CancelConn
-
-	unauthedConn, cancelConn, err = s.encryptConn(ctx, rawConn)
-	if err != nil {
-		return err
-	}
-
-	if cancelConn != nil {
-		if cancelErr := s.CancelHandler(ctx, *cancelConn); cancelErr != nil {
-			err = errors.Join(err, fmt.Errorf("%w: %w", ErrCancelFailed, cancelErr))
-		}
-		return
-	}
-
-	var authConn AuthorizedConn
-	authConn, err = s.AuthHandler(ctx, *unauthedConn)
-	if err != nil {
-		err = errors.Join(err, fmt.Errorf("%w: %w", ErrAuthFailed, err))
-		return
-	}
-
-	var startedConn *Conn
-	startedConn, err = s.StartupHandler(ctx, authConn)
-	if err != nil {
-		err = errors.Join(err, fmt.Errorf("%w: %w", ErrStartupFailed, err))
-		return
-	}
-
-	var key ConnKey
-	key, err = s.ConnMap.Add(startedConn)
-	if err != nil {
-		err = errors.Join(err, fmt.Errorf("%w: %w", ErrStartupFailed, err))
-		return
-	}
-	defer s.ConnMap.Remove(key)
-
-	err = s.Handler(ctx, startedConn)
-	return
 }
 
 func (s *Server) newConn(rawConn net.Conn, logger *slog.Logger) *conn {
@@ -349,11 +321,14 @@ func (s *serverTrackers) trackConn(c *conn, add bool) {
 }
 
 type conn struct {
-	raw    net.Conn
-	state  atomic.Uint32
-	server *Server
-	ready  *Conn
-	logger *slog.Logger
+	raw      net.Conn
+	conn     net.Conn
+	tls      *tls.Conn
+	state    atomic.Uint32
+	server   *Server
+	ready    *ClientConn
+	logger   *slog.Logger
+	frontend *pgproto3.Backend
 }
 
 func (c *conn) setState(state connState) {
@@ -392,12 +367,14 @@ func (c *conn) serve(ctx context.Context) {
 	unauthedConn, cancelConn, err := c.connect(ctx)
 	if err != nil {
 		c.logger.Error("connect error", "error", err)
+		c.sendErr(err)
 		return
 	}
 
 	if cancelConn != nil {
-		if cancelErr := s.CancelHandler(ctx, *cancelConn); cancelErr != nil {
+		if cancelErr := s.CancelHandler(ctx, cancelConn); cancelErr != nil {
 			c.logger.Error("cancel error", "error", cancelErr)
+			c.sendErr(cancelErr)
 		}
 		return
 	}
@@ -405,21 +382,24 @@ func (c *conn) serve(ctx context.Context) {
 		panic("encryptConn returned no connection types")
 	}
 
-	authConn, err := s.AuthHandler(ctx, *unauthedConn)
+	authConn, err := s.AuthHandler(ctx, unauthedConn)
 	if err != nil {
 		c.logger.Error("auth error", "error", err)
+		c.sendErr(err)
 		return
 	}
 
 	startedConn, err := s.StartupHandler(ctx, authConn)
 	if err != nil {
 		c.logger.Error("startup error", "error", err)
+		c.sendErr(err)
 		return
 	}
 
 	key, err := s.ConnMap.Add(startedConn)
 	if err != nil {
 		c.logger.Error("startup error", "error", err)
+		c.sendErr(err)
 		return
 	}
 	defer s.ConnMap.Remove(key)
@@ -427,11 +407,168 @@ func (c *conn) serve(ctx context.Context) {
 	err = s.Handler(ctx, startedConn)
 	if err != nil {
 		c.logger.Error("handler error", "error", err)
+		c.sendErr(err)
 	}
 }
 
-func (c *conn) encryptConn(ctx context.Context) (unauthedConn *UnauthorizedConn, cancelConn *CancelConn, err error) {
+func (c *conn) connect(ctx context.Context) (unauthedConn *UnauthorizedConn, cancelConn *CancelConn, err error) {
+	s := c.server
+	conn := c.raw
 
+	// Check for TLS fast-start (client begins with TLS handshake directly)
+	if s.TLSConfig != nil && !s.TLSFastStartDisabled {
+		var isTLS bool
+		conn, isTLS, err = isTLSHandshake(conn)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: peek failed: %w", ErrTLSFailed, err)
+		}
+		if isTLS {
+			tlsConn, err := c.updateToTLS(ctx, conn)
+			if err != nil {
+				return nil, nil, err
+			}
+			conn = tlsConn
+			c.logger.Debug("TLS fast-start completed")
+		}
+	}
+
+	frontend := pgproto3.NewBackend(conn, conn)
+
+loop:
+	for {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
+
+		msg, err := frontend.ReceiveStartupMessage()
+		if err != nil {
+			return nil, nil, pgwire.NewProtocolViolation(fmt.Errorf("%w: reading first message: %w", ErrStartupFailed, err), nil)
+		}
+
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
+
+		switch msg := msg.(type) {
+		case *pgproto3.SSLRequest:
+			if s.TLSConfig == nil {
+				if _, err := conn.Write([]byte{'N'}); err != nil {
+					return nil, nil, fmt.Errorf("writing TLS decline `N`: %w", err)
+				}
+			} else {
+				if _, err := conn.Write([]byte{'S'}); err != nil {
+					return nil, nil, fmt.Errorf("%w: wirting TLS approve `S`: %w", ErrTLSFailed, err)
+				}
+				tlsConn, err := c.updateToTLS(ctx, conn)
+				if err != nil {
+					return nil, nil, err
+				}
+				conn = tlsConn
+				frontend = pgproto3.NewBackend(conn, conn)
+			}
+		case *pgproto3.CancelRequest:
+			cancelConn = &CancelConn{
+				Conn:          conn,
+				Frontend:      frontend,
+				CancelMessage: msg,
+			}
+			break loop
+		case *pgproto3.StartupMessage:
+			c.frontend = frontend
+			if s.TLSConfig != nil && !s.TLSOptional {
+				err = pgwire.NewProtocolViolation(fmt.Errorf("%w: TLS required", ErrTLSFailed), pgwire.ToClient(msg))
+				break loop
+			}
+			unauthedConn = &UnauthorizedConn{
+				Conn:           conn,
+				Frontend:       frontend,
+				StartupMessage: msg,
+			}
+			break loop
+		default:
+			c.frontend = frontend
+			err = pgwire.NewProtocolViolation(fmt.Errorf("unsupported startup message"), pgwire.ToClient(msg))
+			break loop
+		}
+	}
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	c.conn = conn
+	return
+}
+
+func (c *conn) updateToTLS(ctx context.Context, conn net.Conn) (*tls.Conn, error) {
+	if c.tls != nil {
+		return nil, fmt.Errorf("%w: TLS already established", ErrTLSFailed)
+	}
+	tlsConn := tls.Server(conn, c.server.TLSConfig)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		return nil, fmt.Errorf("%w: handshake failed: %w", ErrTLSFailed, err)
+	}
+	c.logger.Debug("TLS handshake completed")
+	c.tls = tlsConn
+	return tlsConn, nil
+}
+
+func (c *conn) sendErr(err error) {
+	if c.frontend == nil {
+		c.logger.Debug("cannot send error: no frontend")
+		return
+	}
+
+	var pgErr *pgwire.Err
+	if !errors.As(err, &pgErr) {
+		pgErr = pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InternalError, "unexpected error", err)
+	}
+	c.frontend.Send(pgErr)
+	if err := c.frontend.Flush(); err != nil {
+		c.logger.Error("error flushing error to client", "error", err)
+	}
+}
+
+// tlsRecordTypeHandshake is the TLS record type for handshake messages.
+// A TLS ClientHello starts with this byte.
+const tlsRecordTypeHandshake = 0x16
+
+// peekedConn wraps a net.Conn with a peeked byte that's returned first on Read.
+type peekedConn struct {
+	net.Conn
+	peeked byte
+	used   bool
+}
+
+func (c *peekedConn) Read(b []byte) (int, error) {
+	if !c.used && len(b) > 0 {
+		b[0] = c.peeked
+		c.used = true
+		if len(b) == 1 {
+			return 1, nil
+		}
+		n, err := c.Conn.Read(b[1:])
+		return n + 1, err
+	}
+	return c.Conn.Read(b)
+}
+
+// isTLSHandshake peeks the first byte to check if it's a TLS ClientHello.
+// Returns the (possibly wrapped) connection and whether TLS was detected.
+func isTLSHandshake(conn net.Conn) (net.Conn, bool, error) {
+	var buf [1]byte
+	n, err := conn.Read(buf[:])
+	if err != nil {
+		return conn, false, err
+	}
+	if n == 0 {
+		return conn, false, nil
+	}
+
+	// Wrap conn to "unread" the peeked byte
+	wrapped := &peekedConn{Conn: conn, peeked: buf[0], used: false}
+
+	return wrapped, buf[0] == tlsRecordTypeHandshake, nil
 }
 
 type connState int

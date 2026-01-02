@@ -10,13 +10,14 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/pgserver/scram"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // AuthSession manages client authentication using the PostgreSQL protocol.
 type AuthSession struct {
 	frontend    *Frontend
-	credentials UserSecretData
+	credentials pgwire.UserSecretData
 	method      config.AuthMethod
 	tlsState    *tls.ConnectionState
 
@@ -26,13 +27,13 @@ type AuthSession struct {
 	// SCRAM state
 	scramIterations    int
 	channelBindingData []byte
-	channelBindingType ChannelBindingType
+	channelBindingType scram.ChannelBindingType
 }
 
 // NewAuthSession creates a new AuthSession.
 func NewAuthSession(
 	frontend *Frontend,
-	credentials UserSecretData,
+	credentials pgwire.UserSecretData,
 	method config.AuthMethod,
 	tlsState *tls.ConnectionState,
 	scramIterations int,
@@ -56,7 +57,7 @@ func NewAuthSession(
 
 	case config.AuthMethodSCRAMSHA256, config.AuthMethodSCRAMSHA256Plus:
 		if tlsState != nil {
-			data, cbType, err := getChannelBindingData(tlsState)
+			data, cbType, err := scram.ChannelBindingData(tlsState)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get channel binding data: %w", err)
 			}
@@ -133,7 +134,7 @@ func (s *AuthSession) runMD5Auth() error {
 	}
 	pwMsg := pwWrapper.Parse()
 
-	expected := computeMD5Password(s.credentials, s.md5Salt)
+	expected := pgwire.MD5Password(s.credentials, s.md5Salt)
 	if subtle.ConstantTimeCompare([]byte(pwMsg.Password), []byte(expected)) != 1 {
 		return s.authError(errors.New("password authentication failed"))
 	}
@@ -151,12 +152,12 @@ func (s *AuthSession) runSCRAMAuth() error {
 	if s.tlsState == nil {
 		// No TLS, can only offer non-PLUS
 		s.frontend.Send(&pgproto3.AuthenticationSASL{
-			AuthMechanisms: []string{scramSASLMechanismSHA256},
+			AuthMechanisms: []string{pgwire.SASLMechanismSCRAMSHA256},
 		})
 	} else {
 		// TLS available: offer both PLUS (preferred) and non-PLUS (fallback)
 		s.frontend.Send(&pgproto3.AuthenticationSASL{
-			AuthMechanisms: []string{scramSASLMechanismSHA256Plus, scramSASLMechanismSHA256},
+			AuthMechanisms: []string{pgwire.SASLMechanismSCRAMSHA256Plus, pgwire.SASLMechanismSCRAMSHA256},
 		})
 	}
 	if err := s.frontend.Flush(); err != nil {
@@ -177,11 +178,11 @@ func (s *AuthSession) runSCRAMAuth() error {
 
 	// Validate mechanism
 	mechanism := initMsg.AuthMechanism
-	if mechanism != scramSASLMechanismSHA256 && mechanism != scramSASLMechanismSHA256Plus {
+	if mechanism != pgwire.SASLMechanismSCRAMSHA256 && mechanism != pgwire.SASLMechanismSCRAMSHA256Plus {
 		return s.authError(fmt.Errorf("unsupported SASL mechanism: %s", mechanism))
 	}
 
-	usePLUS := mechanism == scramSASLMechanismSHA256Plus
+	usePLUS := mechanism == pgwire.SASLMechanismSCRAMSHA256Plus
 	if usePLUS && s.tlsState == nil {
 		return s.authError(errors.New("channel binding requested but no TLS connection"))
 	}
@@ -190,7 +191,7 @@ func (s *AuthSession) runSCRAMAuth() error {
 	clientFirstMsg := string(initMsg.Data)
 
 	// Validate channel binding flag
-	cbFlag, cbType, err := ParseChannelBindingFlag(clientFirstMsg)
+	cbFlag, cbType, err := scram.ParseChannelBindingFlag(clientFirstMsg)
 	if err != nil {
 		return s.authError(fmt.Errorf("invalid channel binding: %w", err))
 	}
@@ -216,16 +217,14 @@ func (s *AuthSession) runSCRAMAuth() error {
 	}
 
 	if usePLUS {
-		scramServer, err = NewSCRAMServerPlus(
-			s.credentials.Username(),
-			s.credentials.Password(),
+		scramServer, err = scram.NewSCRAMServerPlus(
+			s.credentials,
 			s.scramIterations,
 			s.channelBindingData,
 		)
 	} else {
-		scramServer, err = NewSCRAMServer(
-			s.credentials.Username(),
-			s.credentials.Password(),
+		scramServer, err = scram.NewSCRAMServer(
+			s.credentials,
 			s.scramIterations,
 		)
 	}

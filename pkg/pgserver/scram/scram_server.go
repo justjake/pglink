@@ -1,4 +1,4 @@
-package frontend
+package scram
 
 import (
 	"crypto/hmac"
@@ -11,18 +11,28 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/justjake/pglink/pkg/pgwire"
 	"golang.org/x/crypto/pbkdf2"
 )
+
+const (
+	// PostgreSQL default
+	DefaultSCRAMIterationCount = 4096
+)
+
+type Server interface {
+	ProcessClientFirstMessage(string) (string, error)
+	ProcessClientFinalMessage(string) (string, error)
+}
 
 // SCRAMServer handles SCRAM-SHA-256 authentication for PostgreSQL clients.
 // It specifically handles the PostgreSQL convention of omitting the username
 // in the SCRAM messages (using n=,) since the username is already provided
 // in the startup message.
 type SCRAMServer struct {
-	username       string
-	password       string
+	credentials    pgwire.UserSecretData
 	iterationCount int
-	salt           []byte
+	salt           [16]byte
 
 	// State from the exchange
 	clientFirstMsgBare string
@@ -32,19 +42,18 @@ type SCRAMServer struct {
 }
 
 // NewSCRAMServer creates a new SCRAM-SHA-256 server for the given credentials.
-func NewSCRAMServer(username, password string, iterationCount int) (*SCRAMServer, error) {
+func NewSCRAMServer(credentials pgwire.UserSecretData, iterationCount int) (*SCRAMServer, error) {
+	scramServer := SCRAMServer{
+		credentials:    credentials,
+		iterationCount: iterationCount,
+	}
+
 	// Generate random salt
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
+	if _, err := rand.Read(scramServer.salt[:]); err != nil {
 		return nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
 
-	return &SCRAMServer{
-		username:       username,
-		password:       password,
-		iterationCount: iterationCount,
-		salt:           salt,
-	}, nil
+	return &scramServer, nil
 }
 
 // ProcessClientFirstMessage processes the client-first-message and returns
@@ -85,7 +94,7 @@ func (s *SCRAMServer) ProcessClientFirstMessage(clientFirstMsg string) (string, 
 	// Build server-first-message
 	// Format: "r=combined-nonce,s=base64-salt,i=iteration-count"
 	combinedNonce := s.clientNonce + s.serverNonce
-	saltB64 := base64.StdEncoding.EncodeToString(s.salt)
+	saltB64 := base64.StdEncoding.EncodeToString(s.salt[:])
 	s.serverFirstMsg = fmt.Sprintf("r=%s,s=%s,i=%d", combinedNonce, saltB64, s.iterationCount)
 
 	return s.serverFirstMsg, nil
@@ -125,7 +134,7 @@ func (s *SCRAMServer) ProcessClientFinalMessage(clientFinalMsg string) (string, 
 	authMessage := s.clientFirstMsgBare + "," + s.serverFirstMsg + "," + clientFinalWithoutProof
 
 	// Compute SaltedPassword
-	saltedPassword := pbkdf2.Key([]byte(s.password), s.salt, s.iterationCount, 32, sha256.New)
+	saltedPassword := pbkdf2.Key([]byte(s.credentials.Password()), s.salt[:], s.iterationCount, 32, sha256.New)
 
 	// Compute ClientKey = HMAC(SaltedPassword, "Client Key")
 	clientKey := hmacSHA256(saltedPassword, []byte("Client Key"))
@@ -239,8 +248,8 @@ type SCRAMServerPlus struct {
 }
 
 // NewSCRAMServerPlus creates a new SCRAM-SHA-256-PLUS server with channel binding.
-func NewSCRAMServerPlus(username, password string, iterationCount int, channelBindingData []byte) (*SCRAMServerPlus, error) {
-	base, err := NewSCRAMServer(username, password, iterationCount)
+func NewSCRAMServerPlus(credentials pgwire.UserSecretData, iterationCount int, channelBindingData []byte) (*SCRAMServerPlus, error) {
+	base, err := NewSCRAMServer(credentials, iterationCount)
 	if err != nil {
 		return nil, err
 	}

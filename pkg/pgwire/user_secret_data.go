@@ -1,20 +1,24 @@
-package frontend
+package pgwire
 
 import (
 	"crypto/md5"
-	"crypto/tls"
 	"errors"
 	"fmt"
-
-	"github.com/cybergarage/go-sasl/sasl/auth"
 )
+
+type SASLMechanism = string
 
 const (
-	scramSASLMechanismSHA256     = "SCRAM-SHA-256"
-	scramSASLMechanismSHA256Plus = "SCRAM-SHA-256-PLUS"
+	SASLMechanismSCRAMSHA256     SASLMechanism = "SCRAM-SHA-256"
+	SASLMechanismSCRAMSHA256Plus SASLMechanism = "SCRAM-SHA-256-PLUS"
 )
 
-// UserSecretData holds user credentials securely.
+var SASLMechanisms = []SASLMechanism{
+	SASLMechanismSCRAMSHA256Plus,
+	SASLMechanismSCRAMSHA256,
+}
+
+// UserSecretData holds user credentials.
 // The password is never printed in logs or string representations.
 type UserSecretData struct {
 	username string
@@ -79,9 +83,9 @@ func (u UserSecretData) MarshalText() ([]byte, error) {
 	return nil, errUserSecretDataMarshal
 }
 
-// computeMD5Password computes the MD5 password hash.
+// MD5Password computes the MD5 password hash in PostgreSQL format.
 // Format: "md5" + md5(md5(password + user) + salt)
-func computeMD5Password(creds UserSecretData, salt [4]byte) string {
+func MD5Password(creds UserSecretData, salt [4]byte) string {
 	// First hash: md5(password + user)
 	h1 := md5.New()
 	h1.Write([]byte(creds.Password()))
@@ -93,59 +97,4 @@ func computeMD5Password(creds UserSecretData, salt [4]byte) string {
 	h2.Write([]byte(inner))
 	h2.Write(salt[:])
 	return "md5" + fmt.Sprintf("%x", h2.Sum(nil))
-}
-
-// LookupCredential implements auth.CredentialStore for SCRAM authentication.
-func (u *UserSecretData) LookupCredential(q auth.Query) (auth.Credential, bool, error) {
-	// Verify username matches (per RFC 5802, empty username means "use the one from startup")
-	queryUser := q.Username()
-	if queryUser != "" && queryUser != u.Username() {
-		return nil, false, nil
-	}
-
-	// Return credential with the password
-	cred := auth.NewCredential(
-		auth.WithCredentialUsername(u.Username()),
-		auth.WithCredentialPassword(u.Password()),
-	)
-	return cred, true, nil
-}
-
-// ChannelBindingType represents the type of channel binding to use.
-type ChannelBindingType int
-
-const (
-	// ChannelBindingNone means no channel binding is used.
-	ChannelBindingNone ChannelBindingType = iota
-	// ChannelBindingTLSUnique uses tls-unique channel binding (deprecated in TLS 1.3).
-	ChannelBindingTLSUnique
-	// ChannelBindingTLSExporter uses tls-exporter channel binding (TLS 1.3+).
-	ChannelBindingTLSExporter
-)
-
-// getChannelBindingData extracts channel binding data from a TLS connection state.
-// For TLS 1.3+, it uses tls-exporter; for earlier versions, it uses tls-unique.
-func getChannelBindingData(tlsState *tls.ConnectionState) ([]byte, ChannelBindingType, error) {
-	if tlsState == nil {
-		return nil, ChannelBindingNone, nil
-	}
-
-	// TLS 1.3 uses tls-exporter
-	if tlsState.Version >= tls.VersionTLS13 {
-		// The label and context are per RFC 9266
-		data, err := tlsState.ExportKeyingMaterial("EXPORTER-Channel-Binding", nil, 32)
-		if err != nil {
-			return nil, ChannelBindingNone, fmt.Errorf("failed to export keying material: %w", err)
-		}
-		return data, ChannelBindingTLSExporter, nil
-	}
-
-	// TLS 1.2 and earlier use tls-unique (the finished message)
-	// Note: tls-unique is not available in Go's TLS package directly
-	// We need to use the TLSUnique field from ConnectionState
-	if len(tlsState.TLSUnique) > 0 {
-		return tlsState.TLSUnique, ChannelBindingTLSUnique, nil
-	}
-
-	return nil, ChannelBindingNone, nil
 }

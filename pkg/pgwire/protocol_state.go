@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+// This is the type used by [pgproto3.BackendKeyData].
+type ProcessID uint32
+
+// This is the type used by [pgproto3.BackendKeyData].
+// However, the PostgreSQL wire protocol allows for up to 256 bytes.
+// TODO: support longer secret keys.
+type SecretKey uint32
+
 // NewProtocolState creates a new ProtocolState with all maps initialized.
 func NewProtocolState() ProtocolState {
 	return ProtocolState{

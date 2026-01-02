@@ -11,7 +11,7 @@ var ErrConnAlreadyExists = errors.New("connection already exists")
 
 type ConnMap struct {
 	mu    sync.RWMutex
-	conns map[ConnKey]*Conn
+	conns map[ConnKey]*ClientConn
 }
 
 type ConnKey struct {
@@ -19,14 +19,14 @@ type ConnKey struct {
 	SecretKey SecretKey
 }
 
-func (c *ConnMap) Get(key ConnKey) (*Conn, bool) {
+func (c *ConnMap) Get(key ConnKey) (*ClientConn, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	conn, ok := c.conns[key]
 	return conn, ok
 }
 
-func (c *ConnMap) Add(conn *Conn) (ConnKey, error) {
+func (c *ConnMap) Add(conn *ClientConn) (ConnKey, error) {
 	key := c.key(conn)
 	if _, ok := c.Get(key); ok {
 		return ConnKey{}, fmt.Errorf("%w: ProcessId=%v, SecretKey=<redacted>", ErrConnAlreadyExists, key.ProcessID)
@@ -45,8 +45,8 @@ func (c *ConnMap) Len() int {
 	return len(c.conns)
 }
 
-func (c *ConnMap) Iter() iter.Seq2[ConnKey, *Conn] {
-	return func(yield func(ConnKey, *Conn) bool) {
+func (c *ConnMap) Iter() iter.Seq2[ConnKey, *ClientConn] {
+	return func(yield func(ConnKey, *ClientConn) bool) {
 		c.mu.RLock()
 		defer c.mu.RUnlock()
 		for key, conn := range c.conns {
@@ -57,11 +57,11 @@ func (c *ConnMap) Iter() iter.Seq2[ConnKey, *Conn] {
 	}
 }
 
-func (c *ConnMap) set(key ConnKey, conn *Conn) {
+func (c *ConnMap) set(key ConnKey, conn *ClientConn) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conns == nil {
-		c.conns = make(map[ConnKey]*Conn)
+		c.conns = make(map[ConnKey]*ClientConn)
 	}
 	c.conns[key] = conn
 }
@@ -72,7 +72,7 @@ func (c *ConnMap) delete(key ConnKey) {
 	delete(c.conns, key)
 }
 
-func (c *ConnMap) key(conn *Conn) ConnKey {
+func (c *ConnMap) key(conn *ClientConn) ConnKey {
 	return ConnKey{
 		ProcessID: conn.ProcessID,
 		SecretKey: conn.SecretKey,
