@@ -17,7 +17,7 @@ func NewExtendedQueryFlowTracker(onComplete FlowCompleteHandler[ExtendedQueryFlo
 func waitingForExtendedQueryRequest(ctx context.Context, state FlowState[ExtendedQueryFlow], msg pgwire.Message) (bool, FlowState[ExtendedQueryFlow], FlowReducer[ExtendedQueryFlow], error) {
 	switch msg := msg.(type) {
 	case pgwire.ClientExtendedQuery:
-		return extendedQueryActive(ctx, StartedFlowState(ExtendedQueryFlow{}), msg)
+		return extendedQueryActive(ctx, StartedFlowState(state, ExtendedQueryFlow{}), msg)
 	default:
 		return false, state, waitingForExtendedQueryRequest, nil
 	}

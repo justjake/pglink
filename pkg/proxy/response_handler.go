@@ -18,7 +18,7 @@ type ResponseEvent struct {
 	// Input. Not required to be returned by the response handler.
 	Res pgwire.ServerMessage
 	// Original request message. Parsed data may not be available.
-	ReqType pgwire.MsgType
+	Req FlowState[RequestFlow]
 }
 
 // ResponseHandler is a state machine that handles a response message.
@@ -32,12 +32,12 @@ type MessageHandlerResult struct {
 }
 
 // TODO: lots of hacking around pgwire.ServerResponseHandlers to inject context.
-type MessageResponseHandlers = pgwire.ServerHandlers[pgwire.MsgType, MessageHandlerResult]
+type MessageResponseHandlers = pgwire.ServerHandlers[FlowState[RequestFlow], MessageHandlerResult]
 
 // TODO: lots of hacking around pgwire.ServerResponseHandlers to inject context.
 func ResponseHandlers(handlers MessageResponseHandlers) ResponseHandler {
 	return func(ctx context.Context, _ Action, event ResponseEvent) (bool, Action, ResponseHandler, error) {
-		messageResult, err := handlers.Handle(ctx, event.Res, event.ReqType)
+		messageResult, err := handlers.Handle(ctx, event.Res, event.Req)
 		return messageResult.Changed, messageResult.Action, messageResult.State, err
 	}
 }

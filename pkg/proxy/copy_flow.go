@@ -19,11 +19,11 @@ func NewCopyFlowTracker(onComplete FlowCompleteHandler[CopyFlow]) FlowTracker[Co
 func waitingForCopyResponse(ctx context.Context, state FlowState[CopyFlow], msg pgwire.Message) (bool, FlowState[CopyFlow], FlowReducer[CopyFlow], error) {
 	switch msg.(type) {
 	case *pgwire.ServerCopyCopyBothResponse:
-		return true, StartedFlowState(CopyFlow{Mode: pgwire.CopyBoth}), copyActive, nil
+		return true, StartedFlowState(state, CopyFlow{Mode: pgwire.CopyBoth}), copyActive, nil
 	case *pgwire.ServerCopyCopyInResponse:
-		return true, StartedFlowState(CopyFlow{Mode: pgwire.CopyIn}), copyActive, nil
+		return true, StartedFlowState(state, CopyFlow{Mode: pgwire.CopyIn}), copyActive, nil
 	case *pgwire.ServerCopyCopyOutResponse:
-		return true, StartedFlowState(CopyFlow{Mode: pgwire.CopyOut}), copyActive, nil
+		return true, StartedFlowState(state, CopyFlow{Mode: pgwire.CopyOut}), copyActive, nil
 	default:
 		return false, state, waitingForCopyResponse, nil
 	}

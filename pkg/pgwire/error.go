@@ -1,6 +1,7 @@
 package pgwire
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 
@@ -68,3 +69,5 @@ func NewProtocolViolation(cause error, msg Message) *Err {
 		C: cause,
 	}
 }
+
+var ErrUnknownMessageType = errors.New("unknown message type")

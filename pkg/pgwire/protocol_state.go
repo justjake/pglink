@@ -283,7 +283,7 @@ func (s *ProtocolState) updateForServerResponseMessage(msg ServerResponse) *Pend
 	case *ServerResponseReadyForQuery:
 		s.CopyMode = CopyNone
 		// Fast path: use TxStatusByte() to avoid full parsing
-		s.TxStatus = TxStatus(msg.TxStatusByte())
+		s.TxStatus = msg.TxStatus()
 		s.ServerIgnoringMessagesUntilSync = false
 		if s.SyncsInFlight > 0 {
 			s.SyncsInFlight--

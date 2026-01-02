@@ -7,7 +7,7 @@ import (
 )
 
 type Message interface {
-	MsgType() MsgType // TODO
+	MsgType() MsgType
 }
 
 type ClientMessage interface {

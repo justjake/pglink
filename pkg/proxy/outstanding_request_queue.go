@@ -3,122 +3,166 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/justjake/pglink/pkg/pgwire"
 	"github.com/justjake/pglink/pkg/pure"
 )
 
 type OutstandingRequestQueue struct {
-	seq      int
-	requests []*OutstandingRequest
+	seq           int
+	outstanding   []*OutstandingRequest
+	lastCompleted *OutstandingRequest
 }
 
-// Mutation must be private (return effects)
-func (q *OutstandingRequestQueue) push(req *OutstandingRequest) {
-	q.seq++
-	req.seq = q.seq
-	q.requests = append(q.requests, req)
-}
-
-func (q *OutstandingRequestQueue) drop(req *OutstandingRequest) {
-	if q.requests[0] == req {
-		q.requests = q.requests[1:]
-	} else {
-		for i, r := range q.requests {
-			if r == req {
-				q.requests = append(q.requests[:i], q.requests[i+1:]...)
-				break
-			}
-		}
-	}
-}
+var _ Tracker = &OutstandingRequestQueue{}
 
 func (q *OutstandingRequestQueue) Len() int {
-	return len(q.requests)
+	return len(q.outstanding)
 }
 
-func (q *OutstandingRequestQueue) WaitingFor(res pgwire.ServerMessage) *OutstandingRequest {
-	if len(q.requests) == 0 {
-		return nil
+func (q *OutstandingRequestQueue) LastCompleted() *OutstandingRequest {
+	return q.lastCompleted
+}
+
+func (q *OutstandingRequestQueue) FirstOutstanding() *OutstandingRequest {
+	if len(q.outstanding) != 0 {
+		return q.outstanding[0]
+	}
+	return nil
+}
+
+func (q *OutstandingRequestQueue) LastOutstanding() *OutstandingRequest {
+	if len(q.outstanding) != 0 {
+		return q.outstanding[len(q.outstanding)-1]
+	}
+	return nil
+}
+
+func (q *OutstandingRequestQueue) GetResponseHandler(res pgwire.ServerMessage) *OutstandingRequest {
+	if req := q.LastCompleted(); req != nil {
+		if pgwire.MsgTerminalResponse.Get(req.flowState.Flow.ReqType).Contains(res.MsgType()) {
+			return req
+		}
 	}
 
-	first := q.requests[0]
-	responseTypes := pgwire.MsgResponse.Get(first.RequestType)
-	if len(responseTypes) == 0 {
-		return nil
-	}
-
-	if pgwire.MsgTypeIndex(responseTypes, res.MsgType()) != -1 {
-		return first
+	if req := q.FirstOutstanding(); req != nil {
+		if pgwire.MsgResponse.Get(req.flowState.Flow.ReqType).Contains(res.MsgType()) {
+			return req
+		}
 	}
 
 	return nil
 }
 
-func (q *OutstandingRequestQueue) EnqueueRequestEffect(msg pgwire.ClientMessage, state ResponseHandler) pure.Effect {
-	req := &OutstandingRequest{
-		RequestType: msg.MsgType(),
-		StartTime:   time.Now(),
-		handler:     state,
-		q:           q,
-		seq:         q.seq + 1, // prediction
+func (q *OutstandingRequestQueue) TrackEffect(msg pgwire.Message) pure.Effect {
+	return pure.DoNamedCleanup(fmt.Sprintf("OutstandingRequestQueue.Track(%T)", msg), func(ctx context.Context) (cleanup pure.Effect, err error) {
+		_, err = q.trackNow(ctx, msg)
+		return
+	})
+}
+
+func (q *OutstandingRequestQueue) trackNow(ctx context.Context, msg pgwire.Message) (bool, error) {
+	// The message may be a response to the earliest outstanding request.
+	if req := q.FirstOutstanding(); req != nil {
+		changed, flowState, _, err := inOutstandingRequest(ctx, req.flowState, msg)
+		if err != nil {
+			return false, err
+		}
+
+		if changed {
+			req.flowState = flowState
+			// Once the request is complete, remove it from the queue.
+			if !flowState.Active {
+				q.lastCompleted = req
+				q.outstanding = q.outstanding[1:]
+			}
+			return true, nil
+		}
 	}
-	return req.enqueueEffect()
+
+	// If the msg wasn't handled by the earliest outstanding request, it may need
+	// to start a new request.
+	start, newFlowState, _, err := waitingForRequestStart(ctx, FlowState[RequestFlow]{Seq: q.seq}, msg)
+	if err != nil {
+		return false, err
+	}
+	if start {
+		q.seq = newFlowState.Seq
+		req := &OutstandingRequest{flowState: newFlowState}
+		q.outstanding = append(q.outstanding, req)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 type OutstandingRequest struct {
-	RequestType pgwire.MsgType // should be a client message
-	StartTime   time.Time
-	handler     ResponseHandler
-	// TODO: remove this pgbouncer representation, perhaps..?
-	// waitingFor []pgwire.MsgType
-	q   *OutstandingRequestQueue
-	seq int
+	flowState FlowState[RequestFlow]
+	handler   ResponseHandler
+}
+
+func (r *OutstandingRequest) Seq() int {
+	return r.flowState.Seq
+}
+
+func (r *OutstandingRequest) ReqType() pgwire.MsgType {
+	return r.flowState.Flow.ReqType
+}
+
+func (r *OutstandingRequest) FlowState() FlowState[RequestFlow] {
+	return r.flowState
 }
 
 func (r *OutstandingRequest) String() string {
-	return fmt.Sprintf("OutstandingRequest(%d %v)", r.seq, r.RequestType)
+	return fmt.Sprintf("OutstandingRequest(%d %v)", r.Seq(), r.ReqType())
 }
 
-func (r *OutstandingRequest) Handle(ctx context.Context, msg pgwire.ServerMessage) Action {
-	changed, action, state, err := r.handler(ctx, nil, ResponseEvent{Res: msg, ReqType: r.RequestType})
+func (r *OutstandingRequest) Handle(ctx context.Context, msg pgwire.ServerMessage) (Action, bool) {
+	if r.handler == nil {
+		return nil, false
+	}
+
+	changed, action, state, err := r.handler(ctx, nil, ResponseEvent{Res: msg, Req: r.flowState})
 	if err != nil {
-		return UnexpectedError(msg, err)
+		return UnexpectedError(msg, err), true
 	}
 
 	effect := pure.NoOp()
 	if changed {
-		effect = r.setStateEffect(state)
+		effect = r.SetResponseHandlerEffect(state)
 	}
 	if action == nil {
-		return Forward(msg, effect)
+		return Forward(msg, effect), true
 	} else {
-		return action.WithEffects(effect)
+		return action.WithEffects(effect), true
 	}
 }
 
-func (r *OutstandingRequest) setStateEffect(state ResponseHandler) pure.Effect {
-	if state == nil {
-		return r.dequeueEffect()
-	}
-	return pure.DoNamed(fmt.Sprintf("SetState(%s = %s)", r.String(), pure.DescribeFunction(state)), func() {
+func (r *OutstandingRequest) SetResponseHandlerEffect(state ResponseHandler) pure.Effect {
+	return pure.DoNamed(fmt.Sprintf("%v.SetState(%s)", r, pure.DescribeFunction(state)), func() {
 		r.handler = state
 	})
 }
 
-func (r *OutstandingRequest) dequeue() {
-	r.q.drop(r)
+type RequestFlow struct {
+	ReqType pgwire.MsgType
 }
 
-func (r *OutstandingRequest) dequeueEffect() pure.Effect {
-	return pure.DoNamed(fmt.Sprintf("Drop(%s)", r.String()), r.dequeue)
+func waitingForRequestStart(ctx context.Context, state FlowState[RequestFlow], msg pgwire.Message) (bool, FlowState[RequestFlow], FlowReducer[RequestFlow], error) {
+	msgType := msg.MsgType()
+	responseTypes := pgwire.MsgResponse.Get(msgType)
+	if len(responseTypes) != 0 {
+		return true, StartedFlowState(state, RequestFlow{ReqType: msgType}), inOutstandingRequest, nil
+	}
+
+	return false, state, waitingForRequestStart, nil
 }
 
-func (r *OutstandingRequest) enqueue() {
-	r.q.push(r)
-}
+func inOutstandingRequest(ctx context.Context, state FlowState[RequestFlow], msg pgwire.Message) (bool, FlowState[RequestFlow], FlowReducer[RequestFlow], error) {
+	responseTypes := pgwire.MsgResponse.Get(state.Flow.ReqType)
+	if pgwire.MsgTypeIndex(responseTypes, msg.MsgType()) != -1 {
+		return true, EndedFlowState(state), nil, nil
+	}
 
-func (r *OutstandingRequest) enqueueEffect() pure.Effect {
-	return pure.DoNamed(fmt.Sprintf("Enqueue(%s)", r.String()), r.enqueue)
+	return false, state, inOutstandingRequest, nil
 }

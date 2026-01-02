@@ -123,6 +123,13 @@ func (e nameFuncEffect) String() string {
 // Effects is a list of effects.
 type Effects []Effect
 
+func (e *Effects) Add(effect Effect) {
+	if effect == nil {
+		return
+	}
+	*e = append(*e, effect)
+}
+
 func (e Effects) String() string {
 	if len(e) == 0 {
 		return "Pure"

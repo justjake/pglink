@@ -19,7 +19,7 @@ func NewTransactionFlowTracker(onComplete FlowCompleteHandler[TransactionFlow]) 
 
 func waitingForTransactionStart(ctx context.Context, state FlowState[TransactionFlow], msg pgwire.Message) (bool, FlowState[TransactionFlow], FlowReducer[TransactionFlow], error) {
 	transactionStarted := func() (bool, FlowState[TransactionFlow], FlowReducer[TransactionFlow], error) {
-		return true, StartedFlowState(TransactionFlow{}), inTransaction, nil
+		return true, StartedFlowState(state, TransactionFlow{}), inTransaction, nil
 	}
 	switch msg.(type) {
 	case *pgwire.ClientSimpleQueryQuery:

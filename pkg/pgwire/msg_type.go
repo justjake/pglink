@@ -168,9 +168,15 @@ var MsgName = MsgLookup[string]{
 	'Z': "ReadyForQuery",
 }
 
+type MsgTypeSet []MsgType
+
+func (s MsgTypeSet) Contains(msg MsgType) bool {
+	return MsgTypeIndex(s, msg) != -1
+}
+
 // MsgTerminalResponse returns the terminal response messages for the given request message type,
 // which indicate the end of the request.
-var MsgTerminalResponse = MsgLookup[[]MsgType]{
+var MsgTerminalResponse = MsgLookup[MsgTypeSet]{
 	MsgClientQuery:    {MsgServerReadyForQuery},
 	MsgClientParse:    {MsgServerParseComplete, MsgServerErrorResponse},
 	MsgClientBind:     {MsgServerBindComplete, MsgServerErrorResponse},
@@ -181,7 +187,7 @@ var MsgTerminalResponse = MsgLookup[[]MsgType]{
 	MsgClientSync:     {MsgServerReadyForQuery},
 }
 
-var MsgResponse = MsgLookup[[]MsgType]{
+var MsgResponse = MsgLookup[MsgTypeSet]{
 	// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
 	// Should not complete until ReadyForQuery.
 	MsgClientQuery: {

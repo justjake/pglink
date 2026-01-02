@@ -30,14 +30,15 @@ type FlowState[T any] struct {
 	// Managed automatically based on `Active` if not set by the flow reducer.
 	StartTime time.Time
 	EndTime   time.Time
+	Seq       int
 }
 
-func StartedFlowState[T any](flow T) FlowState[T] {
-	return FlowState[T]{
-		Active:    true,
-		StartTime: time.Now(),
-		Flow:      flow,
-	}
+func StartedFlowState[T any](idle FlowState[T], flow T) FlowState[T] {
+	idle.Flow = flow
+	idle.Active = true
+	idle.StartTime = time.Now()
+	idle.Seq = idle.Seq + 1
+	return idle
 }
 
 func EndedFlowState[T any](started FlowState[T]) FlowState[T] {
@@ -74,7 +75,7 @@ func (t *flowTracker[T]) Active() bool {
 }
 
 func (t *flowTracker[T]) TrackEffect(msg pgwire.Message) pure.Effect {
-	return pure.DoNamedCleanup(fmt.Sprintf("Track(%T)", msg), func(ctx context.Context) (cleanup pure.Effect, err error) {
+	return pure.DoNamedCleanup(fmt.Sprintf("Track(%T -> %T)", msg, t.state.State.Flow), func(ctx context.Context) (cleanup pure.Effect, err error) {
 		cleanup = t.state.RevertEffect()
 		changed, err := t.updateNow(ctx, msg)
 		if changed {

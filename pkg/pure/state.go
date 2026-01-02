@@ -37,6 +37,10 @@ type WithEffects[T any] struct {
 // EffectHandler is a function that handles effects. It should schedule cleanup internally.
 type EffectHandler func(ctx context.Context, effects Effects) error
 
+func (e EffectHandler) HandleOne(ctx context.Context, effect Effect) error {
+	return e(ctx, Effects{effect})
+}
+
 // RunWithEffects runs a state machine handling effects as they are produced.
 func RunWithEffects[T any](ctx context.Context, handler EffectHandler, args T, initialState State[WithEffects[T]]) (WithEffects[T], error) {
 	return RunState(ctx, WithEffects[T]{T: args}, WithEffectHandler(handler, initialState))

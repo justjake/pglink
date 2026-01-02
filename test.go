@@ -11,9 +11,15 @@ var specs = []string{
 	"%T",
 }
 
+
 type byteType byte
 
+func (b byteType) String() string {
+	return string(b) + " :)"
+}
+
 type some struct{}
+type SliceType []byteType
 
 func (s some) method(a string) {
 	fmt.Println("hi", a)
@@ -33,17 +39,16 @@ func debug(name string, v any) {
 }
 
 func main() {
-	f := func() {
-		fmt.Println("hi")
-	}
-
 	likeBytes := []byteType{'a','b'}
 	fmt.Println(likeBytes)
-	bytes := likeBytes.([]byte)
-	fmt.Println(bytes)
+	likeBytesTyped := SliceType(likeBytes)
+	debug("SliceType", likeBytesTyped)
 
-	debug("func literal", f)
-	s := some{}
-	debug("some method", s.method)
-	debug("some", s)
+	// bytes := likeBytes.([]byte)
+	// fmt.Println(bytes)
+
+	// debug("func literal", f)
+	// s := some{}
+	// debug("some method", s.method)
+	// debug("some", s)
 }
