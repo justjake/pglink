@@ -101,11 +101,6 @@ func (s RingBufferStats) LogValue() slog.Value {
 
 // Ring buffer constants
 const (
-	// DefaultHeadroomBytes ensures we can always fit a message that has already started
-	// being parsed. Without this, we could deadlock: parser waits for complete message,
-	// writer can't read more because buffer is full.
-	DefaultHeadroomBytes = 8192
-
 	// DefaultMessageBytes is the default ring buffer data capacity
 	DefaultMessageBytes = 16 * 1024 // 16KiB
 
@@ -128,7 +123,7 @@ type RingBufferConfig struct {
 
 	// HeadroomBytes is reserved space to prevent deadlock when a message
 	// header has been read but the body hasn't arrived yet.
-	// Defaults to DefaultHeadroomBytes (8KB).
+	// Defaults to 0 (TODO: remove?)
 	HeadroomBytes int64
 }
 

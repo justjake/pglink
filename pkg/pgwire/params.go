@@ -18,6 +18,18 @@ import (
 // current effective value.
 type ParameterStatuses map[string]string
 
+func (p ParameterStatuses) User() string {
+	return p[ParamUser]
+}
+
+// Database returns the `database` parameter value, or the `user` parameter value if `database` is not set.
+func (p ParameterStatuses) Database() string {
+	if db, ok := p[ParamDatabase]; ok {
+		return db
+	}
+	return p.User()
+}
+
 // At present there is a hard-wired set of parameters for which ParameterStatus
 // will be generated. They are:
 const (
@@ -73,7 +85,7 @@ var ImmutableParameters = map[string]bool{
 	ParamInHotStandby:              true, // server state, not settable
 }
 
-var BaseParameterStatuses = ParameterStatuses{
+var DefaultParameterStatuses = ParameterStatuses{
 	ParamServerVersion:             "18.1 (pglink proxy)",
 	ParamServerEncoding:            "UTF8",
 	ParamClientEncoding:            "UTF8",

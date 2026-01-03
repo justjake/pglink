@@ -4,8 +4,19 @@ import "errors"
 
 var ErrNoMessageSource = errors.New("pgwire: no message source")
 
-// This file contains manually-added helper methods for message types
-// that provide fast-path access to specific fields without full parsing.
+// This file contains manually-added helper methods for message types.
+
+func (m *ClientStartupStartupMessage) StartupParameters() ParameterStatuses {
+	return ParameterStatuses(m.Parse().Parameters)
+}
+
+func (m *ClientStartupStartupMessage) User() string {
+	return m.StartupParameters().User()
+}
+
+func (m *ClientStartupStartupMessage) Database() string {
+	return m.StartupParameters().Database()
+}
 
 // DataSize returns the size of the copy data without parsing the full message.
 // This allows counting bytes transferred during COPY without allocation.

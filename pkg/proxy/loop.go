@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/justjake/pglink/pkg/pgwire"
@@ -24,13 +25,10 @@ type Terminater interface {
 }
 
 type Conn[Rx pgwire.Message, Tx pgwire.Message] interface {
-	WriteBuffered(ctx context.Context, msg Tx) error
-	HasBufferedWrite() bool
-	Flush(ctx context.Context) error
-	Cursor(ctx context.Context) (*pgwire.Cursor, error)
-	fmt.Stringer
+	AcquireNetConn(ctx context.Context) (net.Conn, error)
+	ReleaseNetConn() error
 	Terminater
-	Releaser
+	fmt.Stringer
 }
 
 type Frontend interface {
@@ -42,6 +40,7 @@ type Frontend interface {
 type Backend interface {
 	Conn[pgwire.ServerMessage, pgwire.ClientMessage]
 	ParameterStatuses() pgwire.ParameterStatuses
+	Releaser
 }
 
 var ErrLoopTrackingFailed = errors.New("proxy loop: tracking failed")
@@ -65,6 +64,44 @@ type Loop interface {
 }
 
 var _ ActionHandler = (*LoopState)(nil)
+
+// NEW DESIGN IDEA:
+/*
+rename Loop -> Session
+
+not sure if we still want Action stuff.
+we probably do not want Effect stuff.
+instead, we can call methods on `pos`:
+
+if pos, ok := pos.FromServer(); ok {
+	pos.Forward(ctx)
+} else if pos, ok := pos.FromClient(); ok {
+ // Or does this make mor sense?
+  session.Forward(ctx, pos)
+	// do we panic if a message isn't handled?
+	// that's the advantage of the old "return Action" approach: clear it must be handled.
+	pos.Respond(ctx, res)
+}
+
+session := proxy.NewSession(ctx, clientConn)
+// Just cleans up the session (and releases backend)
+// but does not close the client connection.
+defer session.Close()
+iter, err := session.Messages(ctx)
+if err != nil {
+  return err
+}
+	// hmm, does using seq2 actually improve thigns over a .NextMsg(ctx) method?
+	// the main idea here is just to turn things aroind so we don't have so much nested callback handler stuff.
+for pos, err := range iter {
+  if err != nil {
+		return err
+  }
+	if err := handleMessage(pos.Ctx(), session, pos); err != nil {
+		return err
+	}
+}
+*/
 
 type LoopState struct {
 	Logger          *slog.Logger

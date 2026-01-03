@@ -36,7 +36,7 @@ func (e *Err) Cause() error {
 
 func NewErr(severity Severity, code string, message string, cause error) *Err {
 	_, file, line, _ := runtime.Caller(1)
-	return &Err{
+	err := &Err{
 		ErrorResponse: pgproto3.ErrorResponse{
 			Severity: string(severity),
 			Code:     code,
@@ -47,17 +47,21 @@ func NewErr(severity Severity, code string, message string, cause error) *Err {
 		},
 		C: cause,
 	}
+	if cause != nil {
+		err.Detail = cause.Error()
+	}
+	return err
 }
 
-func NewProtocolViolation(cause error, msg Message) *Err {
+func newProtocolViolationCaller(cause error, msg Message, callerSkip int) *Err {
 	var msgStr string
 	if msg != nil {
 		msgStr = fmt.Sprintf("unexpected message %T", msg)
 	} else {
 		msgStr = "invalid protocol state"
 	}
-	_, file, line, _ := runtime.Caller(1)
-	return &Err{
+	_, file, line, _ := runtime.Caller(callerSkip + 1)
+	err := &Err{
 		ErrorResponse: pgproto3.ErrorResponse{
 			Severity: string(ErrorFatal),
 			Code:     pgerrcode.ProtocolViolation,
@@ -68,6 +72,28 @@ func NewProtocolViolation(cause error, msg Message) *Err {
 		},
 		C: cause,
 	}
+	if cause != nil {
+		err.Detail = cause.Error()
+	}
+	return err
+}
+func NewProtocolViolation(cause error, msg Message) *Err {
+	return newProtocolViolationCaller(cause, msg, 1)
+}
+
+func Expect[T Message](msg Message, err error) (T, error) {
+	var zero T
+
+	if err != nil {
+		return zero, err
+	}
+
+	if m, ok := msg.(T); ok {
+		return m, nil
+	}
+
+	err = newProtocolViolationCaller(fmt.Errorf("expected %T", zero), msg, 1)
+	return zero, err
 }
 
 var ErrUnknownMessageType = errors.New("unknown message type")

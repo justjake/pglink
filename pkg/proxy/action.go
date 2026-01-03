@@ -28,6 +28,7 @@ func (t ActionType) String() string {
 type ProxyRole string
 
 const (
+	RoleProxy  ProxyRole = "proxy"
 	RoleClient ProxyRole = "client"
 	RoleServer ProxyRole = "server"
 )

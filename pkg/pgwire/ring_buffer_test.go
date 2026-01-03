@@ -19,6 +19,8 @@ import (
 // Test Configuration
 // ============================================================================
 
+const DefaultHeadroomBytes = 8192
+
 // RingTestConfig defines a ring buffer configuration for testing.
 type RingTestConfig struct {
 	Name          string

@@ -72,8 +72,9 @@ func main() {
 		}
 
 		groups = append(groups, typeGroup{
-			prefix: config.typePrefix,
-			types:  types,
+			prefix:  config.typePrefix,
+			types:   types,
+			methods: config.methods,
 		})
 	}
 
@@ -101,6 +102,13 @@ func main() {
 type pgwireConfig struct {
 	from       string
 	typePrefix string
+	methods    []methodDef
+}
+
+type methodDef struct {
+	name       string // e.g., "ParseFrontend"
+	returnType string // e.g., "pgproto3.FrontendMessage"
+	body       string // e.g., "m.Parse()"
 }
 
 // findPgwireComment looks for a //pgwire: comment above the function
@@ -149,6 +157,16 @@ func parsePgwireComment(text string) *pgwireConfig {
 		config.typePrefix = matches[1]
 	}
 
+	// Parse -method=Name:ReturnType:Body (can appear multiple times)
+	methodRe := regexp.MustCompile(`-method=(\w+):([^:]+):([^\s]+)`)
+	for _, m := range methodRe.FindAllStringSubmatch(text, -1) {
+		config.methods = append(config.methods, methodDef{
+			name:       m[1],
+			returnType: m[2],
+			body:       m[3],
+		})
+	}
+
 	if config.from == "" || config.typePrefix == "" {
 		return nil
 	}
@@ -156,8 +174,9 @@ func parsePgwireComment(text string) *pgwireConfig {
 }
 
 type typeGroup struct {
-	prefix string
-	types  []typeInfo
+	prefix  string
+	types   []typeInfo
+	methods []methodDef
 }
 
 type typeInfo struct {
@@ -305,6 +324,9 @@ func generateCode(pkgName string, imports []string, from string, groups []typeGr
 		fmt.Fprintf(&buf, "\t%s()\n", from)
 		fmt.Fprintf(&buf, "\t%s()\n", group.prefix)
 		fmt.Fprintf(&buf, "\tMsgType() MsgType\n")
+		for _, md := range group.methods {
+			fmt.Fprintf(&buf, "\t%s() %s\n", md.name, md.returnType)
+		}
 		buf.WriteString("}\n\n")
 
 		// Compile-time checks
@@ -337,6 +359,11 @@ func generateCode(pkgName string, imports []string, from string, groups []typeGr
 
 			// Parse method
 			fmt.Fprintf(&buf, "func (m *%s) Parse() %s { return (*%s[%s])(m).Parse() }\n", newTypeName, ti.qualified, lazyType, ti.qualified)
+
+			// Additional methods from -method= flags
+			for _, md := range group.methods {
+				fmt.Fprintf(&buf, "func (m *%s) %s() %s { return %s }\n", newTypeName, md.name, md.returnType, md.body)
+			}
 
 			// Retain method
 			fmt.Fprintf(&buf, "\n// Retain returns a copy of this message with retained source bytes.\n")

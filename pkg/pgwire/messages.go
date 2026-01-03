@@ -8,6 +8,7 @@ import (
 
 type Message interface {
 	MsgType() MsgType
+	Source() RawMessageSource
 }
 
 type ClientMessage interface {

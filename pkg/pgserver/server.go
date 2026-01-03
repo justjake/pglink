@@ -34,28 +34,24 @@ var (
 type UnauthorizedConn struct {
 	// Conn is the underlying connection.
 	// It's often a [*tls.Conn] wrapping a [net.TCPConn].
-	Conn           net.Conn
-	Frontend       *pgproto3.Backend
+	FrontendConn
 	StartupMessage *pgproto3.StartupMessage
 }
 
 type AuthorizedConn struct {
-	Conn           net.Conn
-	Frontend       *pgproto3.Backend
+	FrontendConn
 	User           string
 	Database       string
 	StartupMessage *pgproto3.StartupMessage
 }
 
 type CancelConn struct {
-	Conn          net.Conn
-	Frontend      *pgproto3.Backend
+	FrontendConn
 	CancelMessage *pgproto3.CancelRequest
 }
 
 type ClientConn struct {
-	Conn              net.Conn
-	Frontend          *pgproto3.Frontend
+	FrontendConn
 	User              string
 	Database          string
 	ProcessID         pgwire.ProcessID
@@ -126,8 +122,9 @@ type ServerConfig struct {
 	CancelHandler CancelHandler
 
 	// Required. Handles the startup of the connection after authorization.
+	//
 	// On error, the connection is closed.
-	// On success, emits startup messages to the client before calling [Handler].
+	// On success,  emits startup messages to the client before calling [Handler].
 	StartupHandler StartupHandler
 
 	// Required. Handles the connection after startup.
@@ -142,6 +139,31 @@ type Server struct {
 	ServerConfig
 	ConnMap *ConnMap
 	serverTrackers
+}
+
+func NewServer(config ServerConfig) (*Server, error) {
+	if config.Addr == "" {
+		return nil, errors.New("Addr is blank")
+	}
+	if config.AuthHandler == nil {
+		return nil, errors.New("AuthHandler is required")
+	}
+	if config.CancelHandler == nil {
+		return nil, errors.New("CancelHandler is required")
+	}
+	if config.StartupHandler == nil {
+		return nil, errors.New("StartupHandler is required")
+	}
+	if config.Handler == nil {
+		return nil, errors.New("Handler is required")
+	}
+	server := &Server{ServerConfig: config}
+
+	if server.Logger == nil {
+		server.Logger = slog.Default()
+	}
+
+	return server, nil
 }
 
 // ListenAndServe listens on the TCP network address s.Addr and then
@@ -468,8 +490,10 @@ loop:
 			}
 		case *pgproto3.CancelRequest:
 			cancelConn = &CancelConn{
-				Conn:          conn,
-				Frontend:      frontend,
+				FrontendConn: FrontendConn{
+					Conn:     conn,
+					Frontend: frontend,
+				},
 				CancelMessage: msg,
 			}
 			break loop
@@ -480,8 +504,10 @@ loop:
 				break loop
 			}
 			unauthedConn = &UnauthorizedConn{
-				Conn:           conn,
-				Frontend:       frontend,
+				FrontendConn: FrontendConn{
+					Conn:     conn,
+					Frontend: frontend,
+				},
 				StartupMessage: msg,
 			}
 			break loop

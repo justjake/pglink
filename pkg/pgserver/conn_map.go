@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"iter"
 	"sync"
+
+	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 var ErrConnAlreadyExists = errors.New("connection already exists")
@@ -15,8 +17,8 @@ type ConnMap struct {
 }
 
 type ConnKey struct {
-	ProcessID ProcessID
-	SecretKey SecretKey
+	ProcessID pgwire.ProcessID
+	SecretKey pgwire.SecretKey
 }
 
 func (c *ConnMap) Get(key ConnKey) (*ClientConn, bool) {
@@ -29,7 +31,7 @@ func (c *ConnMap) Get(key ConnKey) (*ClientConn, bool) {
 func (c *ConnMap) Add(conn *ClientConn) (ConnKey, error) {
 	key := c.key(conn)
 	if _, ok := c.Get(key); ok {
-		return ConnKey{}, fmt.Errorf("%w: ProcessId=%v, SecretKey=<redacted>", ErrConnAlreadyExists, key.ProcessID)
+		return ConnKey{}, fmt.Errorf("%w: ProcessId=%v SecretKey=<redacted>", ErrConnAlreadyExists, key.ProcessID)
 	}
 	c.set(key, conn)
 	return key, nil

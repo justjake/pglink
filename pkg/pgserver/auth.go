@@ -14,6 +14,9 @@ import (
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
+// PasswordAuthorizer should verify that `conn`'s specified user is valid for the given database.
+// If so, return the credentials for the requested user.
+// Otherwise, return an error.
 type PasswordAuthorizer func(ctx context.Context, conn *UnauthorizedConn) (pgwire.UserSecretData, error)
 
 type PasswordAuthenticator struct {
@@ -29,11 +32,15 @@ func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *Una
 		return nil, fmt.Errorf("failed to set auth type: %w", err)
 	}
 
-	if err := a.sendFlush(conn.Frontend, &pgproto3.AuthenticationCleartextPassword{}); err != nil {
+	if err := conn.SendFlush(&pgproto3.AuthenticationCleartextPassword{}); err != nil {
 		return nil, err
 	}
 
-	msg, err := receiveExpected[*pgproto3.PasswordMessage](conn.Frontend)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	msg, err := pgwire.Expect[*pgwire.ClientStartupPasswordMessage](conn.Receive())
 	if err != nil {
 		return nil, err
 	}
@@ -42,14 +49,14 @@ func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *Una
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", err)
 	}
-	if subtle.ConstantTimeCompare([]byte(msg.Password), []byte(creds.Password())) != 1 {
+	if subtle.ConstantTimeCompare([]byte(msg.Parse().Password), []byte(creds.Password())) != 1 {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", nil)
 	}
+
 	return a.authSuccess(&AuthorizedConn{
-		Conn:           conn.Conn,
-		Frontend:       conn.Frontend,
+		FrontendConn:   conn.FrontendConn,
 		User:           creds.Username(),
-		Database:       conn.StartupMessage.Parameters["database"],
+		Database:       pgwire.ParameterStatuses(conn.StartupMessage.Parameters).Database(),
 		StartupMessage: conn.StartupMessage,
 	})
 }
@@ -64,11 +71,11 @@ func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *Unauthori
 		return nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
 
-	if err := a.sendFlush(conn.Frontend, &pgproto3.AuthenticationMD5Password{Salt: salt}); err != nil {
+	if err := conn.SendFlush(&pgproto3.AuthenticationMD5Password{Salt: salt}); err != nil {
 		return nil, err
 	}
 
-	msg, err := receiveExpected[*pgproto3.PasswordMessage](conn.Frontend)
+	msg, err := pgwire.Expect[*pgwire.ClientStartupPasswordMessage](conn.Receive())
 	if err != nil {
 		return nil, err
 	}
@@ -78,15 +85,14 @@ func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *Unauthori
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", err)
 	}
 
-	if subtle.ConstantTimeCompare([]byte(msg.Password), []byte(pgwire.MD5Password(creds, salt))) != 1 {
+	if subtle.ConstantTimeCompare([]byte(msg.Parse().Password), []byte(pgwire.MD5Password(creds, salt))) != 1 {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", nil)
 	}
 
 	return a.authSuccess(&AuthorizedConn{
-		Conn:           conn.Conn,
-		Frontend:       conn.Frontend,
+		FrontendConn:   conn.FrontendConn,
 		User:           creds.Username(),
-		Database:       conn.StartupMessage.Parameters["database"],
+		Database:       pgwire.ParameterStatuses(conn.StartupMessage.Parameters).Database(),
 		StartupMessage: conn.StartupMessage,
 	})
 }
@@ -107,23 +113,26 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, err
 	}
 
-	if err := a.sendFlush(conn.Frontend, &pgproto3.AuthenticationSASL{AuthMechanisms: mechanisms}); err != nil {
+	if err := conn.SendFlush(&pgproto3.AuthenticationSASL{AuthMechanisms: mechanisms}); err != nil {
 		return nil, err
 	}
 
-	clientFirstMsg, err := receiveExpected[*pgproto3.SASLInitialResponse](conn.Frontend)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	clientFirstMsg, err := pgwire.Expect[*pgwire.ClientStartupSASLInitialResponse](conn.Receive())
 	if err != nil {
 		return nil, err
 	}
 
-	mechanism := clientFirstMsg.AuthMechanism
+	mechanism := clientFirstMsg.Parse().AuthMechanism
 	if !slices.Contains(mechanisms, mechanism) {
 		err := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "unsupported SASL mechanism", nil)
 		err.Hint = fmt.Sprintf("supported mechanisms: %v", mechanisms)
 		return nil, err
 	}
 
-	cbFlag, cbType, err := scram.ParseChannelBindingFlag(string(clientFirstMsg.Data))
+	cbFlag, cbType, err := scram.ParseChannelBindingFlag(string(clientFirstMsg.Parse().Data))
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "invalid channel binding", err)
 	}
@@ -147,6 +156,9 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "unsupported channel binding type", fmt.Errorf("got flag: %c, but no TLS connection", cbFlag))
 	}
 
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	creds, err := a.PasswordAuthorizer(ctx, conn)
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", err)
@@ -169,12 +181,12 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "failed to create SCRAM server", err)
 	}
 
-	serverFirstMsg, err := scramServer.ProcessClientFirstMessage(string(clientFirstMsg.Data))
+	serverFirstMsg, err := scramServer.ProcessClientFirstMessage(string(clientFirstMsg.Parse().Data))
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "failed to process client-first-message", err)
 	}
 
-	if err := a.sendFlush(conn.Frontend, &pgproto3.AuthenticationSASLContinue{
+	if err := conn.SendFlush(&pgproto3.AuthenticationSASLContinue{
 		Data: []byte(serverFirstMsg),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to send SASL continue: %w", err)
@@ -184,45 +196,40 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 	if err := conn.Frontend.SetAuthType(pgproto3.AuthTypeSASLContinue); err != nil {
 		return nil, fmt.Errorf("failed to set auth type to SASLContinue: %w", err)
 	}
-	clientFinalMsg, err := receiveExpected[*pgproto3.SASLResponse](conn.Frontend)
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	clientFinalMsg, err := pgwire.Expect[*pgwire.ClientStartupSASLResponse](conn.Receive())
 	if err != nil {
 		return nil, err
 	}
 
-	serverFinalMsg, err := scramServer.ProcessClientFinalMessage(string(clientFinalMsg.Data))
+	serverFinalMsg, err := scramServer.ProcessClientFinalMessage(string(clientFinalMsg.Parse().Data))
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "SCRAM authentication failed", err)
 	}
 
-	if err := a.sendFlush(conn.Frontend, &pgproto3.AuthenticationSASLFinal{
+	if err := conn.SendFlush(&pgproto3.AuthenticationSASLFinal{
 		Data: []byte(serverFinalMsg),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to send SASL final: %w", err)
 	}
 
 	return a.authSuccess(&AuthorizedConn{
-		Conn:           conn.Conn,
-		Frontend:       conn.Frontend,
+		FrontendConn:   conn.FrontendConn,
 		User:           creds.Username(),
-		Database:       conn.StartupMessage.Parameters["database"],
+		Database:       pgwire.ParameterStatuses(conn.StartupMessage.Parameters).Database(),
 		StartupMessage: conn.StartupMessage,
 	})
 }
 
 func (a *PasswordAuthenticator) authSuccess(conn *AuthorizedConn) (*AuthorizedConn, error) {
-	sendErr := a.sendFlush(conn.Frontend, &pgproto3.AuthenticationOk{})
+	sendErr := conn.SendFlush(&pgproto3.AuthenticationOk{})
 	if sendErr != nil {
 		return nil, sendErr
 	}
 	return conn, nil
-}
-
-func (a *PasswordAuthenticator) sendFlush(frontend *pgproto3.Backend, msg pgproto3.BackendMessage) error {
-	frontend.Send(msg)
-	if err := frontend.Flush(); err != nil {
-		return fmt.Errorf("failed sending auth msg: %T: %w", msg, err)
-	}
-	return nil
 }
 
 func (a *PasswordAuthenticator) getSASLMechanisms(connState *tls.ConnectionState) ([]pgwire.SASLMechanism, error) {
@@ -254,21 +261,4 @@ func (a *PasswordAuthenticator) scramIterationCount() int {
 		return a.SCRAMIterationCount
 	}
 	return scram.DefaultSCRAMIterationCount
-}
-
-func receiveExpected[T pgproto3.FrontendMessage](frontend *pgproto3.Backend) (res T, err error) {
-	msg, err := frontend.Receive()
-	if err != nil {
-		var zero T
-		err = fmt.Errorf("auth: failed to receive %T: %w", zero, err)
-		return
-	}
-
-	if msg, ok := msg.(T); ok {
-		return msg, nil
-	}
-
-	var zero T
-	err = pgwire.NewProtocolViolation(fmt.Errorf("auth: expected %T", zero), pgwire.ToClient(msg))
-	return
 }

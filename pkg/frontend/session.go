@@ -1477,7 +1477,7 @@ func (s *Session) initSessionProcessState() {
 	s.state.SecretCancelKey = rand.Uint32()
 	// Start with base parameter statuses (includes standard_conforming_strings=on),
 	// then override with config defaults, then with client-provided values.
-	s.state.ParameterStatuses = maps.Clone(pgwire.BaseParameterStatuses)
+	s.state.ParameterStatuses = maps.Clone(pgwire.DefaultParameterStatuses)
 	maps.Copy(s.state.ParameterStatuses, maps.Collect(s.dbConfig.Backend.DefaultStartupParameters.All()))
 	maps.Copy(s.state.ParameterStatuses, s.startupParameters)
 
