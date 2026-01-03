@@ -22,6 +22,10 @@ type FrontendConn struct {
 }
 
 func (f *FrontendConn) Receive() (pgwire.ClientMessage, error) {
+	if f.connAcquired {
+		return nil, ErrNetConnInUse
+	}
+
 	msg, err := f.Frontend.Receive()
 	if err != nil {
 		return nil, err
@@ -35,6 +39,10 @@ func (f *FrontendConn) Receive() (pgwire.ClientMessage, error) {
 }
 
 func (f *FrontendConn) SendFlush(msg pgproto3.BackendMessage) error {
+	if f.connAcquired {
+		return ErrNetConnInUse
+	}
+
 	f.Frontend.Send(msg)
 	return f.Frontend.Flush()
 }

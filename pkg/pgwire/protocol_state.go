@@ -5,9 +5,16 @@ import (
 	"time"
 )
 
+// The PostreSQL wire protocol identifies the "backend process" a client is connected to by its ProcessID.
+// Cancellation requests are sent to a specific ProcessID authenticated by a [SecretKey].
+// Docs: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-CANCELING-REQUESTS
+//
 // This is the type used by [pgproto3.BackendKeyData].
 type ProcessID uint32
 
+// Cancellation requests are sent to a specific ProcessID authenticated by a [SecretKey].
+// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-CANCELING-REQUESTS
+//
 // This is the type used by [pgproto3.BackendKeyData].
 // However, the PostgreSQL wire protocol allows for up to 256 bytes.
 // TODO: support longer secret keys.

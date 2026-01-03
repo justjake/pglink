@@ -60,10 +60,32 @@ type ClientConn struct {
 	ExtraData         any
 }
 
-type ConnValidator func(ctx context.Context, conn net.Conn) (net.Conn, error)
+// AuthHandler authenticates and authorizes the connection by communicating with the client.
+//
+// It should return an error if the client's indicated user is not authorized to connect to the database,
+// or if the client sends invalid credentials.
+//
+// AuthHandlers should send the client the [pgproto3.AuthenticationOk] message to signal authentication success.
 type AuthHandler func(ctx context.Context, conn *UnauthorizedConn) (*AuthorizedConn, error)
+
+// CancelHandler handles cancellation request connections.
+// In PostgreSQL, cancellations are sent on new TCP connections rather than inline as a message on an existing connection.
 type CancelHandler func(ctx context.Context, conn *CancelConn) error
+
+// StartupHandler handles remaining setup for the connection after authentication.
+//
+// From the PostgreSQL documentation (https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP)
+//
+// > In this phase a backend process is being started, and the frontend is just an interested bystander. It is still possible for the startup attempt to fail (ErrorResponse) or the server to decline support for the requested minor protocol version (NegotiateProtocolVersion), but in the normal case the backend will send some ParameterStatus messages, BackendKeyData, and finally ReadyForQuery.
+// >
+// > During this phase the backend will attempt to apply any additional run-time parameter settings that were given in the startup message. If successful, these values become session defaults. An error causes ErrorResponse and exit.
+//
+// StartupHandlers do not need to explicitly send any messages to the client.
+// The server will send the appropriate messages to the client based on the StartupHandler's return value.
 type StartupHandler func(ctx context.Context, conn *AuthorizedConn) (*ClientConn, error)
+
+// ConnHandler handles successfully started client connections.
+// The client connection is closed once the handler returns.
 type ConnHandler func(ctx context.Context, conn *ClientConn) error
 
 type contextKey struct{ name string }
@@ -142,9 +164,6 @@ type Server struct {
 }
 
 func NewServer(config ServerConfig) (*Server, error) {
-	if config.Addr == "" {
-		return nil, errors.New("Addr is blank")
-	}
 	if config.AuthHandler == nil {
 		return nil, errors.New("AuthHandler is required")
 	}
@@ -157,7 +176,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.Handler == nil {
 		return nil, errors.New("Handler is required")
 	}
-	server := &Server{ServerConfig: config}
+	server := &Server{ServerConfig: config, ConnMap: &ConnMap{}}
 
 	if server.Logger == nil {
 		server.Logger = slog.Default()
@@ -500,7 +519,7 @@ loop:
 		case *pgproto3.StartupMessage:
 			c.frontend = frontend
 			if s.TLSConfig != nil && !s.TLSOptional {
-				err = pgwire.NewProtocolViolation(fmt.Errorf("%w: TLS required", ErrTLSFailed), pgwire.ToClient(msg))
+				err = pgwire.NewProtocolViolation(fmt.Errorf("%w: TLS required", ErrTLSFailed), pgwire.Client(msg))
 				break loop
 			}
 			unauthedConn = &UnauthorizedConn{
@@ -513,7 +532,7 @@ loop:
 			break loop
 		default:
 			c.frontend = frontend
-			err = pgwire.NewProtocolViolation(fmt.Errorf("unsupported startup message"), pgwire.ToClient(msg))
+			err = pgwire.NewProtocolViolation(fmt.Errorf("unsupported startup message"), pgwire.Client(msg))
 			break loop
 		}
 	}

@@ -11,6 +11,7 @@ import (
 
 var ErrConnAlreadyExists = errors.New("connection already exists")
 
+// ConnMap tracks client connections by their [pgwire.ProcessID] and [pgwire.SecretKey].
 type ConnMap struct {
 	mu    sync.RWMutex
 	conns map[ConnKey]*ClientConn
@@ -30,15 +31,19 @@ func (c *ConnMap) Get(key ConnKey) (*ClientConn, bool) {
 
 func (c *ConnMap) Add(conn *ClientConn) (ConnKey, error) {
 	key := c.key(conn)
-	if _, ok := c.Get(key); ok {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.conns[key]; ok {
 		return ConnKey{}, fmt.Errorf("%w: ProcessId=%v SecretKey=<redacted>", ErrConnAlreadyExists, key.ProcessID)
 	}
-	c.set(key, conn)
+	c.conns[key] = conn
 	return key, nil
 }
 
 func (c *ConnMap) Remove(key ConnKey) {
-	c.delete(key)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.conns, key)
 }
 
 func (c *ConnMap) Len() int {
@@ -47,7 +52,7 @@ func (c *ConnMap) Len() int {
 	return len(c.conns)
 }
 
-func (c *ConnMap) Iter() iter.Seq2[ConnKey, *ClientConn] {
+func (c *ConnMap) All() iter.Seq2[ConnKey, *ClientConn] {
 	return func(yield func(ConnKey, *ClientConn) bool) {
 		c.mu.RLock()
 		defer c.mu.RUnlock()
@@ -57,21 +62,6 @@ func (c *ConnMap) Iter() iter.Seq2[ConnKey, *ClientConn] {
 			}
 		}
 	}
-}
-
-func (c *ConnMap) set(key ConnKey, conn *ClientConn) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conns == nil {
-		c.conns = make(map[ConnKey]*ClientConn)
-	}
-	c.conns[key] = conn
-}
-
-func (c *ConnMap) delete(key ConnKey) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.conns, key)
 }
 
 func (c *ConnMap) key(conn *ClientConn) ConnKey {

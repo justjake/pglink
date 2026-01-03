@@ -21,7 +21,7 @@ type ServerMessage interface {
 	Server()
 }
 
-func ToClient(msg pgproto3.FrontendMessage) ClientMessage {
+func Client(msg pgproto3.FrontendMessage) ClientMessage {
 	if m, ok := ToClientMessage(msg); ok {
 		return m
 	} else {
@@ -85,7 +85,7 @@ func ToClientMessage(msg pgproto3.FrontendMessage) (ClientMessage, bool) {
 	return nil, false
 }
 
-func ToServer(msg pgproto3.BackendMessage) ServerMessage {
+func Server(msg pgproto3.BackendMessage) ServerMessage {
 	if m, ok := ToServerMessage(msg); ok {
 		return m
 	} else {

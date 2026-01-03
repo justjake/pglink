@@ -34,7 +34,7 @@ func (s *SessionModel) HandleParse(msg *pgwire.ClientParse) Action {
 	serverQuery := s.PreparedStatements.ForQuery(data)
 	registerEffect := s.PreparedStatements.RegisterClientNameEffect(data.Name, serverQuery)
 	if s.Backend.HasServerQuery(serverQuery) {
-		return Respond(msg, pgwire.ToServer(&pgproto3.ParseComplete{}), registerEffect)
+		return Respond(msg, pgwire.Server(&pgproto3.ParseComplete{}), registerEffect)
 	} else {
 		return RewriteAndHandleResponse(msg, serverQuery.ParseRequest(), func(res *pgwire.ServerParseComplete) Action {
 			return Forward(res, s.PreparedStatements.AddToCacheEffect(serverQuery))

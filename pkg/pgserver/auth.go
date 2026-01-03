@@ -19,6 +19,10 @@ import (
 // Otherwise, return an error.
 type PasswordAuthorizer func(ctx context.Context, conn *UnauthorizedConn) (pgwire.UserSecretData, error)
 
+// PasswordAuthenticator provides implementations of the following password-based auth methods:
+// - [PasswordAuthenticator.CleartextPassword]
+// - [PasswordAuthenticator.MD5Password]
+// - [PasswordAuthenticator.SASL]
 type PasswordAuthenticator struct {
 	PasswordAuthorizer  PasswordAuthorizer
 	SASLMechanisms      []pgwire.SASLMechanism
@@ -27,6 +31,8 @@ type PasswordAuthenticator struct {
 
 // TODO: context cancellation handling.
 
+// CleartextPassword authenticates a connection using cleartext password authentication.
+// This is insecure unless the connection is protected by TLS.
 func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *UnauthorizedConn) (*AuthorizedConn, error) {
 	if err := conn.Frontend.SetAuthType(pgproto3.AuthTypeCleartextPassword); err != nil {
 		return nil, fmt.Errorf("failed to set auth type: %w", err)
@@ -61,6 +67,9 @@ func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *Una
 	})
 }
 
+// MD5Password authenticates a connection using MD5-hashed password.
+// Each attempt uses a random salt, which provides some protection.
+// Should only be used if passwords are long random strings, or the connection is protected by TLS.
 func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *UnauthorizedConn) (*AuthorizedConn, error) {
 	if err := conn.Frontend.SetAuthType(pgproto3.AuthTypeMD5Password); err != nil {
 		return nil, fmt.Errorf("failed to set auth type: %w", err)
@@ -97,6 +106,7 @@ func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *Unauthori
 	})
 }
 
+// SASL authenticates a connection using SASL password authentication (SCRAM-SHA-256 and SCRAM-SHA-256-PLUS).
 func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn) (*AuthorizedConn, error) {
 	if err := conn.Frontend.SetAuthType(pgproto3.AuthTypeSASL); err != nil {
 		return nil, fmt.Errorf("failed to set auth type: %w", err)
@@ -128,7 +138,7 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 	mechanism := clientFirstMsg.Parse().AuthMechanism
 	if !slices.Contains(mechanisms, mechanism) {
 		err := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "unsupported SASL mechanism", nil)
-		err.Hint = fmt.Sprintf("supported mechanisms: %v", mechanisms)
+		err.Detail = fmt.Sprintf("supported mechanisms: %v", mechanisms)
 		return nil, err
 	}
 
@@ -144,7 +154,7 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 
 		if cbFlag != scram.SupportedChannelBindingFlag {
 			err := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "SCRAM-SHA-256-PLUS requires channel binding", fmt.Errorf("got flag: %c", cbFlag))
-			err.Hint = fmt.Sprintf("expected flag: %c, got: %c", scram.SupportedChannelBindingFlag, cbFlag)
+			err.Detail = fmt.Sprintf("expected flag: %c, got: %c", scram.SupportedChannelBindingFlag, cbFlag)
 			return nil, err
 		}
 
