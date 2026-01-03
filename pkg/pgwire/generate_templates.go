@@ -21,7 +21,7 @@ import (
 
 // Client message templates
 
-//pgwire: -from=Client -type=Startup -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Client -type=Startup -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isStartupModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.GSSEncRequest:
@@ -42,7 +42,7 @@ func isStartupModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//pgwire: -from=Client -type=SimpleQuery -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Client -type=SimpleQuery -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.Query:
@@ -56,7 +56,7 @@ func isSimpleQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//pgwire: -from=Client -type=ExtendedQuery -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Client -type=ExtendedQuery -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	// Extended Query flow:
@@ -135,7 +135,7 @@ func isExtendedQueryModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//pgwire: -from=Client -type=Copy -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Client -type=Copy -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isCopyModeMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CopyData:
@@ -148,7 +148,7 @@ func isCopyModeMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//pgwire: -from=Client -type=Cancel -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Client -type=Cancel -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isCancelMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CancelRequest:
@@ -157,7 +157,7 @@ func isCancelMessage(msg pgproto3.FrontendMessage) bool {
 	return false
 }
 
-//pgwire: -from=Client -type=TerminateConn -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Client -type=TerminateConn -method=ParseFrontend:pgproto3.FrontendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.Terminate:
@@ -168,7 +168,7 @@ func isTerminateConnMessage(msg pgproto3.FrontendMessage) bool {
 
 // Server message templates
 
-//pgwire: -from=Server -type=Startup -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Server -type=Startup -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isBackendStartupModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.AuthenticationCleartextPassword:
@@ -195,7 +195,7 @@ func isBackendStartupModeMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//pgwire: -from=Server -type=ExtendedQuery -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Server -type=ExtendedQuery -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isBackendExtendedQueryModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	// Extended Query mode:
@@ -225,7 +225,7 @@ func isBackendExtendedQueryModeMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//pgwire: -from=Server -type=Copy -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Server -type=Copy -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isBackendCopyModeMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.CopyInResponse:
@@ -253,7 +253,7 @@ func isBackendCopyModeMessage(msg pgproto3.BackendMessage) bool {
 
 // isBackendResponseMessage matches messages that apply to both query modes.
 //
-//pgwire: -from=Server -type=Response -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Server -type=Response -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isBackendResponseMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.ReadyForQuery:
@@ -280,7 +280,7 @@ func isBackendResponseMessage(msg pgproto3.BackendMessage) bool {
 	return false
 }
 
-//pgwire: -from=Server -type=Async -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
+// pgwire: -from=Server -type=Async -method=ParseBackend:pgproto3.BackendMessage:m.Parse() -method=Source:RawMessageSource:m.source
 func isBackendAsyncMessage(msg pgproto3.BackendMessage) bool {
 	switch msg.(type) {
 	case *pgproto3.NoticeResponse:

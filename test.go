@@ -11,7 +11,6 @@ var specs = []string{
 	"%T",
 }
 
-
 type byteType byte
 
 func (b byteType) String() string {
@@ -29,7 +28,7 @@ func debug(name string, v any) {
 	fmt.Printf("-- %s --\n", name)
 	for _, s := range specs {
 		fmt.Printf("%s: ", s)
-		fmt.Printf(s + "\n", v)
+		fmt.Printf(s+"\n", v)
 	}
 	r := reflect.ValueOf(v)
 	if r.Kind() == reflect.Func {
@@ -39,7 +38,7 @@ func debug(name string, v any) {
 }
 
 func main() {
-	likeBytes := []byteType{'a','b'}
+	likeBytes := []byteType{'a', 'b'}
 	fmt.Println(likeBytes)
 	likeBytesTyped := SliceType(likeBytes)
 	debug("SliceType", likeBytesTyped)
