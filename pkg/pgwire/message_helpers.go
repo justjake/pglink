@@ -1,6 +1,10 @@
 package pgwire
 
-import "errors"
+import (
+	"bytes"
+	"errors"
+	"io"
+)
 
 var ErrNoMessageSource = errors.New("pgwire: no message source")
 
@@ -26,7 +30,7 @@ func (m *ClientCopyData) DataSize() int {
 	}
 	if m.source != nil {
 		// Body IS the data for CopyData messages
-		return len(m.source.MessageBody())
+		return m.source.Len() - 5
 	}
 	return 0
 }
@@ -39,7 +43,7 @@ func (m *ServerCopyData) DataSize() int {
 	}
 	if m.source != nil {
 		// Body IS the data for CopyData messages
-		return len(m.source.MessageBody())
+		return m.source.Len() - 5
 	}
 	return 0
 }
@@ -49,7 +53,7 @@ func (m *ServerReadyForQuery) TxStatus() TxStatus {
 		return TxStatus(m.parsed.TxStatus)
 	}
 	if m.source != nil {
-		body := m.source.MessageBody()
+		body := m.source.Body()
 		if len(body) >= 1 {
 			return TxStatus(body[0])
 		}
@@ -59,7 +63,7 @@ func (m *ServerReadyForQuery) TxStatus() TxStatus {
 
 func (m *ClientBind) BindData() (BindData, error) {
 	if m.source != nil {
-		parser := MessageParser{m.source.MessageBody()}
+		parser := MessageParser{m.source.Body()}
 		statement, err := parser.ReadString()
 		if err != nil {
 			return BindData{}, err
@@ -80,8 +84,8 @@ func (m *ClientBind) BindData() (BindData, error) {
 type BindData struct {
 	PreparedStatement string
 	DestinationPortal string
-	Rest              []byte
-	RetainedBody      []byte
+	Rest              []byte // TODO: make io.Reader ?
+	RetainedBytes     []byte
 }
 
 func (d *BindData) SetPreparedStatement(statement string) {
@@ -89,7 +93,7 @@ func (d *BindData) SetPreparedStatement(statement string) {
 		return
 	}
 	d.PreparedStatement = statement
-	d.RetainedBody = nil
+	d.RetainedBytes = nil
 }
 
 func (d *BindData) SetDestinationPortal(portal string) {
@@ -97,32 +101,73 @@ func (d *BindData) SetDestinationPortal(portal string) {
 		return
 	}
 	d.DestinationPortal = portal
-	d.RetainedBody = nil
+	d.RetainedBytes = nil
 }
 
 func (d *BindData) SetRest(rest []byte) {
 	d.Rest = rest
-	d.RetainedBody = nil
+	d.RetainedBytes = nil
 }
 
 // BodyLen implements [RawMessageSource].
-func (d *BindData) BodyLen() int {
-	return len(d.PreparedStatement) + 1 + len(d.DestinationPortal) + 1 + len(d.Rest)
+func (d *BindData) Len() int {
+	return 5 + len(d.PreparedStatement) + 1 + len(d.DestinationPortal) + 1 + len(d.Rest)
 }
 
-// MessageBody implements [RawMessageSource].
-func (d *BindData) MessageBody() []byte {
-	if d.RetainedBody != nil {
-		return d.RetainedBody
-	}
-	encoder := MessageEncoder{make([]byte, 0, d.BodyLen())}
+func (d *BindData) appendHeader(buf []byte) []byte {
+	encoder := MessageEncoder{buf}
+	encoder.WriteByte(byte(MsgClientBind))
+	encoder.WriteInt32(int32(d.Len() - 1))
 	encoder.WriteString(d.PreparedStatement)
 	encoder.WriteString(d.DestinationPortal)
+	return encoder.Buffer
+}
+
+func (d *BindData) appendToRest(buf []byte) ([]byte, []byte) {
+	encoder := MessageEncoder{d.appendHeader(buf)}
 	restStart := len(encoder.Buffer)
 	encoder.WriteBytes(d.Rest)
-	d.RetainedBody = encoder.Buffer
-	d.Rest = d.RetainedBody[restStart:]
-	return d.RetainedBody
+	return encoder.Buffer, encoder.Buffer[restStart:]
+}
+
+func (d *BindData) AppendTo(buf []byte) ([]byte, error) {
+	if d.RetainedBytes != nil {
+		return append(buf, d.RetainedBytes...), nil
+	}
+	buf, _ = d.appendToRest(buf)
+	return buf, nil
+}
+
+func (d *BindData) Bytes() []byte {
+	if d.RetainedBytes != nil {
+		return d.RetainedBytes
+	}
+	buf, rest := d.appendToRest(make([]byte, 0, d.Len()))
+	d.Rest = rest
+	d.RetainedBytes = buf
+	return buf
+}
+
+func (d *BindData) NewReader() io.Reader {
+	if d.RetainedBytes != nil {
+		return bytes.NewReader(d.RetainedBytes)
+	}
+	header := d.appendHeader(nil)
+	return io.MultiReader(bytes.NewReader(header), bytes.NewReader(d.Rest))
+}
+
+func (d *BindData) Body() []byte {
+	return d.Bytes()[5:]
+}
+
+func (d *BindData) WriteTo(w io.Writer) (int, error) {
+	header := d.appendHeader(nil)
+	n, err := w.Write(header)
+	if err != nil {
+		return n, err
+	}
+	n2, err := w.Write(d.Rest)
+	return n + n2, err
 }
 
 // MessageType implements [RawMessageSource].
@@ -132,8 +177,16 @@ func (d *BindData) MessageType() MsgType {
 
 // Retain implements [RawMessageSource].
 func (d *BindData) Retain() RawMessageSource {
-	_ = d.MessageBody()
+	_ = d.Bytes()
 	return d
 }
 
 var _ RawMessageSource = (*BindData)(nil)
+
+func WriteMsg(dest io.Writer, msg Message) (int, error) {
+	if source := msg.Source(); source != nil {
+		n, err := io.Copy(dest, source.NewReader())
+		return int(n), err
+	}
+	return 0, ErrNoMessageSource
+}

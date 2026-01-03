@@ -2,6 +2,7 @@ package pgwire
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -163,7 +164,7 @@ func (c *Cursor) AsClient() (ClientMessage, error) {
 	if c.clientFlyweights == nil {
 		panic("AsClient called on server cursor")
 	}
-	return c.clientFlyweights.Parse(c)
+	return c.clientFlyweights.Parse(&c.RingMsg)
 }
 
 // AsServer returns the current message as a ServerMessage using flyweights.
@@ -173,7 +174,7 @@ func (c *Cursor) AsServer() (ServerMessage, error) {
 	if c.serverFlyweights == nil {
 		panic("AsServer called on client cursor")
 	}
-	return c.serverFlyweights.Parse(c)
+	return c.serverFlyweights.Parse(&c.RingMsg)
 }
 
 func (c *Cursor) String() string {
@@ -193,9 +194,6 @@ func (c *Cursor) Stats() CursorStats {
 		Pending:  pending,
 	}
 }
-
-// Compile-time check that Cursor implements RawMessageSource
-var _ RawMessageSource = (*Cursor)(nil)
 
 // RingRange represents a range of messages in a RingBuffer.
 // Range contains [start, end) (end is exclusive, and not in the range).
@@ -254,6 +252,16 @@ func (r *RingRange) Slice(start, end int64) *RingRange {
 		capacity: r.capacity,
 		ring:     r.ring,
 	}
+}
+
+func (r *RingRange) Touches(other *RingRange) bool {
+	return r.startIdx <= other.endIdx && other.startIdx <= r.endIdx
+}
+
+func (r *RingRange) Extend(other *RingRange) *RingRange {
+	r.endIdx = max(r.endIdx, other.endIdx)
+	r.startIdx = min(r.startIdx, other.startIdx)
+	return r
 }
 
 func (r *RingRange) Ring() *RingBuffer {
@@ -351,6 +359,41 @@ type RingMsg struct {
 	in     *RingRange
 }
 
+// AppendTo implements [RawMessageSource].
+func (r *RingMsg) AppendTo(buf []byte) ([]byte, error) {
+	r.panicUnlessValid()
+	if r.in.ring.isStreaming(r.msgIdx) {
+		return nil, errors.New("streaming message")
+	}
+	return append(buf, r.Bytes()...), nil
+}
+
+// Body implements [RawMessageSource].
+func (r *RingMsg) Body() []byte {
+	return r.in.ring.MessageBody(r.msgIdx)
+}
+
+// Bytes implements [RawMessageSource].
+func (r *RingMsg) Bytes() []byte {
+	return r.in.ring.MessageBytes(r.msgIdx)
+}
+
+// Len implements [RawMessageSource].
+func (r *RingMsg) Len() int {
+	return int(r.MessageLen())
+}
+
+// NewReader implements [RawMessageSource].
+func (r *RingMsg) NewReader() io.Reader {
+	return r.in.Slice(r.msgIdx, r.msgIdx+1).NewReader()
+}
+
+// WriteTo implements [RawMessageSource].
+func (r *RingMsg) WriteTo(w io.Writer) (int, error) {
+	n, err := r.in.ring.WriteMessage(r.msgIdx, w)
+	return int(n), err
+}
+
 func (r *RingMsg) MsgIdx() int64 {
 	return r.msgIdx
 }
@@ -390,10 +433,7 @@ func (r *RingMsg) BodyLen() int {
 }
 
 func (r *RingMsg) Retain() RawMessageSource {
-	return RawBody{
-		Type: r.MessageType(),
-		Body: slices.Clone(r.MessageBody()),
-	}
+	return RawBody{slices.Clone(r.Bytes())}
 }
 
 func (r *RingMsg) String() string {

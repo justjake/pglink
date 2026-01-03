@@ -52,12 +52,14 @@ type Session struct {
 	clientRingBuffer *pgwire.RingBuffer
 	clientCursor     *pgwire.Cursor
 	clientPos        pos
+	crq              pgwire.WriteQueue
 
 	backendConn       Backend
 	backendNetConn    net.Conn
 	backendRingBuffer *pgwire.RingBuffer
 	backendCursor     *pgwire.Cursor
 	backendPos        pos
+	bwq               pgwire.WriteQueue
 
 	// TODO: write queues
 	// TODO: flush
@@ -137,12 +139,14 @@ func (s *Session) Close(ctx context.Context) error {
 
 // Flush flushes pending writes to the client and backend.
 func (s *Session) Flush(ctx context.Context) error {
-	if err := s.FlushBackend(ctx); err != nil {
-		return fmt.Errorf("failed to flush backend: %w", err)
+	s.assertNotClosed()
+
+	if err := s.flush(ctx, RoleServer); err != nil {
+		return err
 	}
 
-	if err := s.FlushClient(ctx); err != nil {
-		return fmt.Errorf("failed to flush client: %w", err)
+	if err := s.flush(ctx, RoleClient); err != nil {
+		return err
 	}
 
 	return nil
@@ -151,13 +155,45 @@ func (s *Session) Flush(ctx context.Context) error {
 // FlushBackend flushes pending writes to the backend.
 func (s *Session) FlushBackend(ctx context.Context) error {
 	s.assertNotClosed()
-	panic("not implemented")
+	return s.flush(ctx, RoleServer)
 }
 
 // FlushClient flushes pending writes to the client.
 func (s *Session) FlushClient(ctx context.Context) error {
 	s.assertNotClosed()
-	panic("not implemented")
+	return s.flush(ctx, RoleClient)
+}
+
+func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
+	writeQueue := s.writeQueue(dest)
+	if writeQueue.IsEmpty() {
+		return nil
+	}
+
+	if dest == RoleServer {
+		if _, err := s.AcquireBackend(ctx); err != nil {
+			return fmt.Errorf("flush %s: %w", dest, err)
+		}
+	}
+
+	netConn := s.netConn(dest)
+	if netConn == nil {
+		return fmt.Errorf("flush %s: %w", dest, ErrBackendNotAcquired)
+	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := netConn.SetWriteDeadline(deadline); err != nil {
+			return fmt.Errorf("flush %s: failed to set write deadline: %w", dest, err)
+		}
+		defer netConn.SetWriteDeadline(time.Time{})
+	}
+
+	_, err := writeQueue.WriteTo(netConn)
+	if err != nil {
+		return fmt.Errorf("flush %s: %w", dest, err)
+	}
+	writeQueue.Clear()
+	return nil
 }
 
 // Backend returns the currently acquired backend, or nil if no backend is acquired.
@@ -220,6 +256,22 @@ func (s *Session) ReleaseBackend(ctx context.Context) error {
 	return nil
 }
 
+func (s *Session) QueueSend(msg pgwire.Message) error {
+	s.assertNotClosed()
+	writeQueue := s.writeQueue(dest(msg))
+	if source := msg.Source(); source != nil {
+		return writeQueue.WriteRawMsg(source)
+	}
+	if msg.IsParsed() {
+		return writeQueue.WriteMsg(msg.ParseAny())
+	}
+	return fmt.Errorf("message appears blank: %T", msg)
+}
+
+func (s *Session) ClearQueue(dest ProxyRole) {
+	s.writeQueue(dest).Clear()
+}
+
 func (s *Session) releaseClient(ctx context.Context) error {
 	if err := s.Flush(ctx); err != nil {
 		return fmt.Errorf("failed to release client: flush: %w", err)
@@ -256,6 +308,7 @@ func (s *Session) getClientPos() *pos {
 	s.clientPos.action = nil
 	s.clientPos.ctx = s.waitCtx()
 	s.clientPos.from = RoleClient
+	s.clientPos.RingMsg = &s.clientCursor.RingMsg
 	s.clientPos.Cursor = s.clientCursor
 	s.clientPos.logger = s.Logger().With(
 		"from", RoleClient,
@@ -270,6 +323,7 @@ func (s *Session) getBackendPos() *pos {
 	s.backendPos.action = nil
 	s.backendPos.ctx = s.waitCtx()
 	s.backendPos.from = RoleServer
+	s.backendPos.RingMsg = &s.backendCursor.RingMsg
 	s.backendPos.Cursor = s.backendCursor
 	s.backendPos.logger = s.Logger().With(
 		"from", RoleServer,
@@ -571,6 +625,21 @@ func (s *Session) applyAction(pos *pos, useDefaultAction bool) error {
 	panic("not implemented")
 }
 
+func (s *Session) writeQueue(dest ProxyRole) *pgwire.WriteQueue {
+	if dest == RoleServer {
+		return &s.bwq
+	} else {
+		return &s.crq
+	}
+}
+
+func (s *Session) netConn(dest ProxyRole) net.Conn {
+	if dest == RoleServer {
+		return s.backendNetConn
+	} else {
+		return s.clientNetConn
+	}
+}
 func releaseRingBuffer(ringBuffer **pgwire.RingBuffer) error {
 	if ringBuffer == nil {
 		return nil
@@ -596,4 +665,12 @@ func releaseNetConn(netConn *net.Conn, releaser interface{ ReleaseNetConn() erro
 	*netConn = nil
 
 	return nil
+}
+
+func dest(msg pgwire.Message) ProxyRole {
+	if _, ok := msg.(pgwire.ClientMessage); ok {
+		return RoleServer
+	} else {
+		return RoleClient
+	}
 }

@@ -1,8 +1,10 @@
 package pgwire
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -15,21 +17,30 @@ type RawMessageSource interface {
 	// MessageType returns the message type identifier.
 	MessageType() MsgType
 
-	// MessageBody returns the message body bytes (after 5-byte header).
+	// Size of message in bytes, including 5-byte header.
+	Len() int
+
+	// Returns the message as encoded bytes.
 	// This may allocate if the bytes need to be copied (e.g., ring buffer wraparound).
 	// Only call this when you need to parse the message.
 	//
 	// May panic if the message is enormous.
 	// TODO: return []byte, error
-	MessageBody() []byte
+	Bytes() []byte
 
-	// BodyLen returns the length of the message body without copying.
-	// This is useful for tracking bytes transferred without allocation.
-	BodyLen() int
+	// Returns the message body bytes, excluding the 5-byte header.
+	Body() []byte
+
+	// Returns a a new io.Reader that reads the message bytes.
+	NewReader() io.Reader
+
+	// Writes the message to the writer.
+	WriteTo(w io.Writer) (int, error)
+
+	// AppendTo appends the message to the buffer, returning the new buffer slice.
+	AppendTo(buf []byte) ([]byte, error)
 
 	// Retain returns an owned copy of this message source that is safe to keep
-	// beyond the current iteration. For already-owned sources like RawBody,
-	// this returns the receiver. For borrowed sources like Cursor, this copies the bytes.
 	Retain() RawMessageSource
 }
 
@@ -37,28 +48,22 @@ type RawMessageSource interface {
 // It can be forwarded directly without parsing.
 // RawBody implements RawMessageSource.
 type RawBody struct {
-	Type MsgType // Message type identifier
-	Body []byte  // Message body (after 5-byte header: type + length)
+	Slice []byte
 }
 
 // IsZero returns true if this RawBody has no data.
 func (r RawBody) IsZero() bool {
-	return r.Body == nil
+	return r.Slice == nil
 }
 
 // MessageType implements RawMessageSource.
 func (r RawBody) MessageType() MsgType {
-	return r.Type
-}
-
-// MessageBody implements RawMessageSource.
-func (r RawBody) MessageBody() []byte {
-	return r.Body
+	return MsgType(r.Slice[0])
 }
 
 // BodyLen implements RawMessageSource.
-func (r RawBody) BodyLen() int {
-	return len(r.Body)
+func (r RawBody) Len() int {
+	return len(r.Slice)
 }
 
 // Retain implements RawMessageSource. Since RawBody already owns its bytes,
@@ -67,9 +72,24 @@ func (r RawBody) Retain() RawMessageSource {
 	return r
 }
 
-// Len returns the total wire length of the message (header + body).
-func (r RawBody) Len() int {
-	return 5 + len(r.Body)
+func (r RawBody) Bytes() []byte {
+	return r.Slice
+}
+
+func (r RawBody) Body() []byte {
+	return r.Slice[5:]
+}
+
+func (r RawBody) NewReader() io.Reader {
+	return bytes.NewReader(r.Slice)
+}
+
+func (r RawBody) WriteTo(w io.Writer) (int, error) {
+	return w.Write(r.Slice)
+}
+
+func (r RawBody) AppendTo(buf []byte) ([]byte, error) {
+	return append(buf, r.Slice...), nil
 }
 
 // decodeBackendMessage decodes raw bytes into a pgproto3.BackendMessage.
@@ -77,13 +97,13 @@ func (r RawBody) Len() int {
 func decodeBackendMessage(raw RawBody) (pgproto3.BackendMessage, error) {
 	// Create the appropriate message type based on message type
 	var msg pgproto3.BackendMessage
-	switch raw.Type {
+	switch raw.MessageType() {
 	case MsgServerAuth:
 		// Authentication messages - need to peek at first 4 bytes
-		if len(raw.Body) < 4 {
+		if raw.Len() < 4+5 {
 			return nil, fmt.Errorf("authentication message too short")
 		}
-		authType := binary.BigEndian.Uint32(raw.Body[0:4])
+		authType := binary.BigEndian.Uint32(raw.Body()[0:4])
 		switch authType {
 		case 0:
 			msg = &pgproto3.AuthenticationOk{}
@@ -149,11 +169,11 @@ func decodeBackendMessage(raw RawBody) (pgproto3.BackendMessage, error) {
 	case MsgServerReadyForQuery:
 		msg = &pgproto3.ReadyForQuery{}
 	default:
-		return nil, fmt.Errorf("unknown backend message type: %c", raw.Type)
+		return nil, fmt.Errorf("unknown backend message type: %c", raw.MessageType())
 	}
 
 	// Decode the body
-	if err := msg.Decode(raw.Body); err != nil {
+	if err := msg.Decode(raw.Body()); err != nil {
 		return nil, fmt.Errorf("decode %T: %w", msg, err)
 	}
 
@@ -177,10 +197,7 @@ func (m *FromServer[T]) Parse() T {
 		return m.parsed
 	}
 	// Lazily extract body bytes from source
-	raw := RawBody{
-		Type: m.source.MessageType(),
-		Body: m.source.MessageBody(),
-	}
+	raw := RawBody{m.source.Bytes()}
 	msg, err := decodeBackendMessage(raw)
 	if err != nil {
 		panic(fmt.Sprintf("FromServer.Parse: %v", err))
@@ -224,10 +241,7 @@ func (m *FromClient[T]) Parse() T {
 		return m.parsed
 	}
 	// Lazily extract body bytes from source
-	raw := RawBody{
-		Type: m.source.MessageType(),
-		Body: m.source.MessageBody(),
-	}
+	raw := RawBody{m.source.Bytes()}
 	msg, err := decodeFrontendMessage(raw)
 	if err != nil {
 		panic(fmt.Sprintf("FromClient.Parse: %v", err))
@@ -271,32 +285,26 @@ func ClientParsed[T pgproto3.FrontendMessage](msg T) *FromClient[T] {
 // EncodeBackendMessage encodes a pgproto3.BackendMessage to RawBody.
 func EncodeBackendMessage(msg pgproto3.BackendMessage) RawBody {
 	encoded, err := msg.Encode(nil)
-	if err != nil || len(encoded) < 5 {
+	if err != nil {
 		return RawBody{}
 	}
-	return RawBody{
-		Type: MsgType(encoded[0]),
-		Body: encoded[5:], // Skip the 5-byte header (type + length)
-	}
+	return RawBody{encoded}
 }
 
 // EncodeFrontendMessage encodes a pgproto3.FrontendMessage to RawBody.
 func EncodeFrontendMessage(msg pgproto3.FrontendMessage) RawBody {
 	encoded, err := msg.Encode(nil)
-	if err != nil || len(encoded) < 5 {
+	if err != nil {
 		return RawBody{}
 	}
-	return RawBody{
-		Type: MsgType(encoded[0]),
-		Body: encoded[5:], // Skip the 5-byte header (type + length)
-	}
+	return RawBody{encoded}
 }
 
 // decodeFrontendMessage decodes raw bytes into a pgproto3.FrontendMessage.
 // The returned message is newly allocated.
 func decodeFrontendMessage(raw RawBody) (pgproto3.FrontendMessage, error) {
 	var msg pgproto3.FrontendMessage
-	switch raw.Type {
+	switch raw.MessageType() {
 	case MsgClientBind:
 		msg = &pgproto3.Bind{}
 	case MsgClientClose:
@@ -328,10 +336,10 @@ func decodeFrontendMessage(raw RawBody) (pgproto3.FrontendMessage, error) {
 	case MsgClientTerminate:
 		msg = &pgproto3.Terminate{}
 	default:
-		return nil, fmt.Errorf("unknown frontend message type: %c", raw.Type)
+		return nil, fmt.Errorf("unknown frontend message type: %c", raw.MessageType())
 	}
 
-	if err := msg.Decode(raw.Body); err != nil {
+	if err := msg.Decode(raw.Body()); err != nil {
 		return nil, fmt.Errorf("decode %T: %w", msg, err)
 	}
 

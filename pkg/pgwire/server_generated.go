@@ -16,6 +16,8 @@ type ServerStartup interface {
 	MsgType() MsgType
 	ParseBackend() pgproto3.BackendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -43,7 +45,9 @@ func (m *ServerAuthenticationCleartextPassword) Parse() *pgproto3.Authentication
 func (m *ServerAuthenticationCleartextPassword) ParseBackend() pgproto3.BackendMessage {
 	return m.Parse()
 }
-func (m *ServerAuthenticationCleartextPassword) Source() RawMessageSource { return m.source }
+func (m *ServerAuthenticationCleartextPassword) Source() RawMessageSource   { return m.source }
+func (m *ServerAuthenticationCleartextPassword) IsParsed() bool             { return m.isParsed }
+func (m *ServerAuthenticationCleartextPassword) ParseAny() pgproto3.Message { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -63,6 +67,8 @@ func (m *ServerAuthenticationGSS) Parse() *pgproto3.AuthenticationGSS {
 }
 func (m *ServerAuthenticationGSS) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerAuthenticationGSS) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationGSS) IsParsed() bool                        { return m.isParsed }
+func (m *ServerAuthenticationGSS) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -82,6 +88,8 @@ func (m *ServerAuthenticationGSSContinue) Parse() *pgproto3.AuthenticationGSSCon
 }
 func (m *ServerAuthenticationGSSContinue) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerAuthenticationGSSContinue) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationGSSContinue) IsParsed() bool                        { return m.isParsed }
+func (m *ServerAuthenticationGSSContinue) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -101,6 +109,8 @@ func (m *ServerAuthenticationMD5Password) Parse() *pgproto3.AuthenticationMD5Pas
 }
 func (m *ServerAuthenticationMD5Password) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerAuthenticationMD5Password) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationMD5Password) IsParsed() bool                        { return m.isParsed }
+func (m *ServerAuthenticationMD5Password) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -120,6 +130,8 @@ func (m *ServerAuthenticationOk) Parse() *pgproto3.AuthenticationOk {
 }
 func (m *ServerAuthenticationOk) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerAuthenticationOk) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationOk) IsParsed() bool                        { return m.isParsed }
+func (m *ServerAuthenticationOk) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -139,6 +151,8 @@ func (m *ServerAuthenticationSASL) Parse() *pgproto3.AuthenticationSASL {
 }
 func (m *ServerAuthenticationSASL) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerAuthenticationSASL) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationSASL) IsParsed() bool                        { return m.isParsed }
+func (m *ServerAuthenticationSASL) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -158,6 +172,8 @@ func (m *ServerAuthenticationSASLContinue) Parse() *pgproto3.AuthenticationSASLC
 }
 func (m *ServerAuthenticationSASLContinue) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerAuthenticationSASLContinue) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationSASLContinue) IsParsed() bool                        { return m.isParsed }
+func (m *ServerAuthenticationSASLContinue) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -177,6 +193,8 @@ func (m *ServerAuthenticationSASLFinal) Parse() *pgproto3.AuthenticationSASLFina
 }
 func (m *ServerAuthenticationSASLFinal) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerAuthenticationSASLFinal) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationSASLFinal) IsParsed() bool                        { return m.isParsed }
+func (m *ServerAuthenticationSASLFinal) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -197,6 +215,8 @@ func (m *ServerBackendKeyData) Parse() *pgproto3.BackendKeyData {
 }
 func (m *ServerBackendKeyData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerBackendKeyData) Source() RawMessageSource              { return m.source }
+func (m *ServerBackendKeyData) IsParsed() bool                        { return m.isParsed }
+func (m *ServerBackendKeyData) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -396,6 +416,8 @@ type ServerExtendedQuery interface {
 	MsgType() MsgType
 	ParseBackend() pgproto3.BackendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -420,6 +442,8 @@ func (m *ServerParseComplete) Parse() *pgproto3.ParseComplete {
 }
 func (m *ServerParseComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerParseComplete) Source() RawMessageSource              { return m.source }
+func (m *ServerParseComplete) IsParsed() bool                        { return m.isParsed }
+func (m *ServerParseComplete) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -439,6 +463,8 @@ func (m *ServerBindComplete) Parse() *pgproto3.BindComplete {
 }
 func (m *ServerBindComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerBindComplete) Source() RawMessageSource              { return m.source }
+func (m *ServerBindComplete) IsParsed() bool                        { return m.isParsed }
+func (m *ServerBindComplete) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -458,6 +484,8 @@ func (m *ServerParameterDescription) Parse() *pgproto3.ParameterDescription {
 }
 func (m *ServerParameterDescription) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerParameterDescription) Source() RawMessageSource              { return m.source }
+func (m *ServerParameterDescription) IsParsed() bool                        { return m.isParsed }
+func (m *ServerParameterDescription) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -477,6 +505,8 @@ func (m *ServerRowDescription) Parse() *pgproto3.RowDescription {
 }
 func (m *ServerRowDescription) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerRowDescription) Source() RawMessageSource              { return m.source }
+func (m *ServerRowDescription) IsParsed() bool                        { return m.isParsed }
+func (m *ServerRowDescription) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -494,6 +524,8 @@ func (t *ServerNoData) MsgType() MsgType                      { return t.source.
 func (m *ServerNoData) Parse() *pgproto3.NoData               { return (*FromServer[*pgproto3.NoData])(m).Parse() }
 func (m *ServerNoData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerNoData) Source() RawMessageSource              { return m.source }
+func (m *ServerNoData) IsParsed() bool                        { return m.isParsed }
+func (m *ServerNoData) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -514,6 +546,8 @@ func (m *ServerPortalSuspended) Parse() *pgproto3.PortalSuspended {
 }
 func (m *ServerPortalSuspended) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerPortalSuspended) Source() RawMessageSource              { return m.source }
+func (m *ServerPortalSuspended) IsParsed() bool                        { return m.isParsed }
+func (m *ServerPortalSuspended) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -533,6 +567,8 @@ func (m *ServerCloseComplete) Parse() *pgproto3.CloseComplete {
 }
 func (m *ServerCloseComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerCloseComplete) Source() RawMessageSource              { return m.source }
+func (m *ServerCloseComplete) IsParsed() bool                        { return m.isParsed }
+func (m *ServerCloseComplete) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -704,6 +740,8 @@ type ServerCopy interface {
 	MsgType() MsgType
 	ParseBackend() pgproto3.BackendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -728,6 +766,8 @@ func (m *ServerCopyInResponse) Parse() *pgproto3.CopyInResponse {
 }
 func (m *ServerCopyInResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerCopyInResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyInResponse) IsParsed() bool                        { return m.isParsed }
+func (m *ServerCopyInResponse) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -749,6 +789,8 @@ func (m *ServerCopyOutResponse) Parse() *pgproto3.CopyOutResponse {
 }
 func (m *ServerCopyOutResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerCopyOutResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyOutResponse) IsParsed() bool                        { return m.isParsed }
+func (m *ServerCopyOutResponse) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -768,6 +810,8 @@ func (m *ServerCopyBothResponse) Parse() *pgproto3.CopyBothResponse {
 }
 func (m *ServerCopyBothResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerCopyBothResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyBothResponse) IsParsed() bool                        { return m.isParsed }
+func (m *ServerCopyBothResponse) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -787,6 +831,8 @@ func (m *ServerCopyData) Parse() *pgproto3.CopyData {
 }
 func (m *ServerCopyData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerCopyData) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyData) IsParsed() bool                        { return m.isParsed }
+func (m *ServerCopyData) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -806,6 +852,8 @@ func (m *ServerCopyDone) Parse() *pgproto3.CopyDone {
 }
 func (m *ServerCopyDone) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerCopyDone) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyDone) IsParsed() bool                        { return m.isParsed }
+func (m *ServerCopyDone) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -949,6 +997,8 @@ type ServerResponse interface {
 	MsgType() MsgType
 	ParseBackend() pgproto3.BackendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -974,6 +1024,8 @@ func (m *ServerReadyForQuery) Parse() *pgproto3.ReadyForQuery {
 }
 func (m *ServerReadyForQuery) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerReadyForQuery) Source() RawMessageSource              { return m.source }
+func (m *ServerReadyForQuery) IsParsed() bool                        { return m.isParsed }
+func (m *ServerReadyForQuery) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -993,6 +1045,8 @@ func (m *ServerCommandComplete) Parse() *pgproto3.CommandComplete {
 }
 func (m *ServerCommandComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerCommandComplete) Source() RawMessageSource              { return m.source }
+func (m *ServerCommandComplete) IsParsed() bool                        { return m.isParsed }
+func (m *ServerCommandComplete) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -1010,6 +1064,8 @@ func (t *ServerDataRow) MsgType() MsgType                      { return t.source
 func (m *ServerDataRow) Parse() *pgproto3.DataRow              { return (*FromServer[*pgproto3.DataRow])(m).Parse() }
 func (m *ServerDataRow) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerDataRow) Source() RawMessageSource              { return m.source }
+func (m *ServerDataRow) IsParsed() bool                        { return m.isParsed }
+func (m *ServerDataRow) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -1029,6 +1085,8 @@ func (m *ServerEmptyQueryResponse) Parse() *pgproto3.EmptyQueryResponse {
 }
 func (m *ServerEmptyQueryResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerEmptyQueryResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerEmptyQueryResponse) IsParsed() bool                        { return m.isParsed }
+func (m *ServerEmptyQueryResponse) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -1048,6 +1106,8 @@ func (m *ServerErrorResponse) Parse() *pgproto3.ErrorResponse {
 }
 func (m *ServerErrorResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerErrorResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerErrorResponse) IsParsed() bool                        { return m.isParsed }
+func (m *ServerErrorResponse) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -1067,6 +1127,8 @@ func (m *ServerFunctionCallResponse) Parse() *pgproto3.FunctionCallResponse {
 }
 func (m *ServerFunctionCallResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerFunctionCallResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerFunctionCallResponse) IsParsed() bool                        { return m.isParsed }
+func (m *ServerFunctionCallResponse) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -1224,6 +1286,8 @@ type ServerAsync interface {
 	MsgType() MsgType
 	ParseBackend() pgproto3.BackendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -1244,6 +1308,8 @@ func (m *ServerNoticeResponse) Parse() *pgproto3.NoticeResponse {
 }
 func (m *ServerNoticeResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerNoticeResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerNoticeResponse) IsParsed() bool                        { return m.isParsed }
+func (m *ServerNoticeResponse) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -1263,6 +1329,8 @@ func (m *ServerNotificationResponse) Parse() *pgproto3.NotificationResponse {
 }
 func (m *ServerNotificationResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerNotificationResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerNotificationResponse) IsParsed() bool                        { return m.isParsed }
+func (m *ServerNotificationResponse) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -1282,6 +1350,8 @@ func (m *ServerParameterStatus) Parse() *pgproto3.ParameterStatus {
 }
 func (m *ServerParameterStatus) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerParameterStatus) Source() RawMessageSource              { return m.source }
+func (m *ServerParameterStatus) IsParsed() bool                        { return m.isParsed }
+func (m *ServerParameterStatus) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.

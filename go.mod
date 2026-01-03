@@ -7,11 +7,13 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.0
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
-	github.com/cybergarage/go-sasl v1.2.6
 	github.com/exaring/otelpgx v0.6.0
+	github.com/gammazero/deque v1.2.0
 	github.com/gogo/protobuf v1.3.2
+	github.com/golang-auth/go-channelbinding v1.1.0
 	github.com/golang/snappy v1.0.0
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
+	github.com/jackc/pgio v1.0.0
 	github.com/jackc/pgmock v0.0.0-20210724152146-4ad1a8207f65
 	github.com/jackc/pgproto3/v2 v2.1.1
 	github.com/jackc/pgx/v5 v5.7.7-0.20251214134032-4c1308c14b2e
@@ -64,13 +66,11 @@ require (
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/golang-auth/go-channelbinding v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/grafana/regexp v0.0.0-20250905093917-f7b3be9d1853 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
 	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
-	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

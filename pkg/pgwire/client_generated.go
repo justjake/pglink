@@ -16,6 +16,8 @@ type ClientStartup interface {
 	MsgType() MsgType
 	ParseFrontend() pgproto3.FrontendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -40,6 +42,8 @@ func (m *ClientGSSEncRequest) Parse() *pgproto3.GSSEncRequest {
 }
 func (m *ClientGSSEncRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientGSSEncRequest) Source() RawMessageSource                { return m.source }
+func (m *ClientGSSEncRequest) IsParsed() bool                          { return m.isParsed }
+func (m *ClientGSSEncRequest) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -59,6 +63,8 @@ func (m *ClientGSSResponse) Parse() *pgproto3.GSSResponse {
 }
 func (m *ClientGSSResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientGSSResponse) Source() RawMessageSource                { return m.source }
+func (m *ClientGSSResponse) IsParsed() bool                          { return m.isParsed }
+func (m *ClientGSSResponse) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -78,6 +84,8 @@ func (m *ClientPasswordMessage) Parse() *pgproto3.PasswordMessage {
 }
 func (m *ClientPasswordMessage) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientPasswordMessage) Source() RawMessageSource                { return m.source }
+func (m *ClientPasswordMessage) IsParsed() bool                          { return m.isParsed }
+func (m *ClientPasswordMessage) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -97,6 +105,8 @@ func (m *ClientSASLInitialResponse) Parse() *pgproto3.SASLInitialResponse {
 }
 func (m *ClientSASLInitialResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientSASLInitialResponse) Source() RawMessageSource                { return m.source }
+func (m *ClientSASLInitialResponse) IsParsed() bool                          { return m.isParsed }
+func (m *ClientSASLInitialResponse) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -116,6 +126,8 @@ func (m *ClientSASLResponse) Parse() *pgproto3.SASLResponse {
 }
 func (m *ClientSASLResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientSASLResponse) Source() RawMessageSource                { return m.source }
+func (m *ClientSASLResponse) IsParsed() bool                          { return m.isParsed }
+func (m *ClientSASLResponse) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -135,6 +147,8 @@ func (m *ClientSSLRequest) Parse() *pgproto3.SSLRequest {
 }
 func (m *ClientSSLRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientSSLRequest) Source() RawMessageSource                { return m.source }
+func (m *ClientSSLRequest) IsParsed() bool                          { return m.isParsed }
+func (m *ClientSSLRequest) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -154,6 +168,8 @@ func (m *ClientStartupMessage) Parse() *pgproto3.StartupMessage {
 }
 func (m *ClientStartupMessage) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientStartupMessage) Source() RawMessageSource                { return m.source }
+func (m *ClientStartupMessage) IsParsed() bool                          { return m.isParsed }
+func (m *ClientStartupMessage) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -325,6 +341,8 @@ type ClientSimpleQuery interface {
 	MsgType() MsgType
 	ParseFrontend() pgproto3.FrontendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -343,6 +361,8 @@ func (t *ClientQuery) MsgType() MsgType                        { return t.source
 func (m *ClientQuery) Parse() *pgproto3.Query                  { return (*FromClient[*pgproto3.Query])(m).Parse() }
 func (m *ClientQuery) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientQuery) Source() RawMessageSource                { return m.source }
+func (m *ClientQuery) IsParsed() bool                          { return m.isParsed }
+func (m *ClientQuery) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -362,6 +382,8 @@ func (m *ClientFunctionCall) Parse() *pgproto3.FunctionCall {
 }
 func (m *ClientFunctionCall) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientFunctionCall) Source() RawMessageSource                { return m.source }
+func (m *ClientFunctionCall) IsParsed() bool                          { return m.isParsed }
+func (m *ClientFunctionCall) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -463,6 +485,8 @@ type ClientExtendedQuery interface {
 	MsgType() MsgType
 	ParseFrontend() pgproto3.FrontendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -485,6 +509,8 @@ func (t *ClientParse) MsgType() MsgType                        { return t.source
 func (m *ClientParse) Parse() *pgproto3.Parse                  { return (*FromClient[*pgproto3.Parse])(m).Parse() }
 func (m *ClientParse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientParse) Source() RawMessageSource                { return m.source }
+func (m *ClientParse) IsParsed() bool                          { return m.isParsed }
+func (m *ClientParse) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -502,6 +528,8 @@ func (t *ClientBind) MsgType() MsgType                        { return t.source.
 func (m *ClientBind) Parse() *pgproto3.Bind                   { return (*FromClient[*pgproto3.Bind])(m).Parse() }
 func (m *ClientBind) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientBind) Source() RawMessageSource                { return m.source }
+func (m *ClientBind) IsParsed() bool                          { return m.isParsed }
+func (m *ClientBind) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -526,6 +554,8 @@ func (t *ClientExecute) MsgType() MsgType                        { return t.sour
 func (m *ClientExecute) Parse() *pgproto3.Execute                { return (*FromClient[*pgproto3.Execute])(m).Parse() }
 func (m *ClientExecute) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientExecute) Source() RawMessageSource                { return m.source }
+func (m *ClientExecute) IsParsed() bool                          { return m.isParsed }
+func (m *ClientExecute) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -558,6 +588,8 @@ func (t *ClientSync) MsgType() MsgType                        { return t.source.
 func (m *ClientSync) Parse() *pgproto3.Sync                   { return (*FromClient[*pgproto3.Sync])(m).Parse() }
 func (m *ClientSync) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientSync) Source() RawMessageSource                { return m.source }
+func (m *ClientSync) IsParsed() bool                          { return m.isParsed }
+func (m *ClientSync) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -596,6 +628,8 @@ func (m *ClientDescribe) Parse() *pgproto3.Describe {
 }
 func (m *ClientDescribe) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientDescribe) Source() RawMessageSource                { return m.source }
+func (m *ClientDescribe) IsParsed() bool                          { return m.isParsed }
+func (m *ClientDescribe) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -615,6 +649,8 @@ func (t *ClientClose) MsgType() MsgType                        { return t.source
 func (m *ClientClose) Parse() *pgproto3.Close                  { return (*FromClient[*pgproto3.Close])(m).Parse() }
 func (m *ClientClose) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientClose) Source() RawMessageSource                { return m.source }
+func (m *ClientClose) IsParsed() bool                          { return m.isParsed }
+func (m *ClientClose) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -638,6 +674,8 @@ func (t *ClientFlush) MsgType() MsgType                        { return t.source
 func (m *ClientFlush) Parse() *pgproto3.Flush                  { return (*FromClient[*pgproto3.Flush])(m).Parse() }
 func (m *ClientFlush) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientFlush) Source() RawMessageSource                { return m.source }
+func (m *ClientFlush) IsParsed() bool                          { return m.isParsed }
+func (m *ClientFlush) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -809,6 +847,8 @@ type ClientCopy interface {
 	MsgType() MsgType
 	ParseFrontend() pgproto3.FrontendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -829,6 +869,8 @@ func (m *ClientCopyData) Parse() *pgproto3.CopyData {
 }
 func (m *ClientCopyData) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientCopyData) Source() RawMessageSource                { return m.source }
+func (m *ClientCopyData) IsParsed() bool                          { return m.isParsed }
+func (m *ClientCopyData) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -848,6 +890,8 @@ func (m *ClientCopyDone) Parse() *pgproto3.CopyDone {
 }
 func (m *ClientCopyDone) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientCopyDone) Source() RawMessageSource                { return m.source }
+func (m *ClientCopyDone) IsParsed() bool                          { return m.isParsed }
+func (m *ClientCopyDone) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -867,6 +911,8 @@ func (m *ClientCopyFail) Parse() *pgproto3.CopyFail {
 }
 func (m *ClientCopyFail) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientCopyFail) Source() RawMessageSource                { return m.source }
+func (m *ClientCopyFail) IsParsed() bool                          { return m.isParsed }
+func (m *ClientCopyFail) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -982,6 +1028,8 @@ type ClientCancel interface {
 	MsgType() MsgType
 	ParseFrontend() pgproto3.FrontendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -1000,6 +1048,8 @@ func (m *ClientCancelRequest) Parse() *pgproto3.CancelRequest {
 }
 func (m *ClientCancelRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientCancelRequest) Source() RawMessageSource                { return m.source }
+func (m *ClientCancelRequest) IsParsed() bool                          { return m.isParsed }
+func (m *ClientCancelRequest) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
@@ -1087,6 +1137,8 @@ type ClientTerminateConn interface {
 	MsgType() MsgType
 	ParseFrontend() pgproto3.FrontendMessage
 	Source() RawMessageSource
+	IsParsed() bool
+	ParseAny() pgproto3.Message
 }
 
 // Compile-time checks that all wrapper types implement the interface.
@@ -1105,6 +1157,8 @@ func (m *ClientTerminate) Parse() *pgproto3.Terminate {
 }
 func (m *ClientTerminate) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientTerminate) Source() RawMessageSource                { return m.source }
+func (m *ClientTerminate) IsParsed() bool                          { return m.isParsed }
+func (m *ClientTerminate) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.

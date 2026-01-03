@@ -56,7 +56,8 @@ type Pos interface {
 }
 
 type pos struct {
-	*pgwire.Cursor
+	*pgwire.RingMsg
+	Cursor *pgwire.Cursor
 	from   ProxyRole
 	action Action
 	logger *slog.Logger
@@ -80,9 +81,13 @@ func (p *pos) Action() Action {
 	return p.action
 }
 
+func (p *pos) AsClient() (pgwire.ClientMessage, error) {
+	return p.Cursor.AsClient()
+}
+
 // ClientMsg implements [Pos].
 func (p *pos) ClientMsg() pgwire.ClientMessage {
-	msg, err := p.Cursor.AsClient()
+	msg, err := p.AsClient()
 	if err != nil {
 		panic(err)
 	}
@@ -91,12 +96,12 @@ func (p *pos) ClientMsg() pgwire.ClientMessage {
 
 // From implements [Pos].
 func (p *pos) From() ProxyRole {
-	panic("unimplemented")
+	return p.from
 }
 
 // FromMsgIdx implements [Pos].
 func (p *pos) FromMsgIdx() int64 {
-	return p.RingMsg.MsgIdx()
+	return p.Cursor.MsgIdx()
 }
 
 // Logger implements [Pos].
@@ -104,9 +109,13 @@ func (p *pos) Logger() *slog.Logger {
 	return p.logger
 }
 
+func (p *pos) AsServer() (pgwire.ServerMessage, error) {
+	return p.Cursor.AsServer()
+}
+
 // ServerMsg implements [Pos].
 func (p *pos) ServerMsg() pgwire.ServerMessage {
-	msg, err := p.Cursor.AsServer()
+	msg, err := p.AsServer()
 	if err != nil {
 		panic(err)
 	}
@@ -125,7 +134,7 @@ func (p *pos) Ctx() context.Context {
 // String implements [Pos].
 // Subtle: this method shadows the method (RingMsg).String of pos.RingMsg.
 func (p *pos) String() string {
-	return fmt.Sprintf("Pos{%v %v}", p.From(), p.RingMsg)
+	return fmt.Sprintf("Pos{%v %v}", p.From(), &p.Cursor.RingMsg)
 }
 
 // unwrap implements [Pos].

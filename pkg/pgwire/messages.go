@@ -9,6 +9,8 @@ import (
 type Message interface {
 	MsgType() MsgType
 	Source() RawMessageSource
+	ParseAny() pgproto3.Message
+	IsParsed() bool
 }
 
 type ClientMessage interface {

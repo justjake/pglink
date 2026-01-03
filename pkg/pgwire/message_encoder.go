@@ -43,9 +43,8 @@ func (e *MessageEncoder) End(sp int) error {
 }
 
 func (e *MessageEncoder) WriteMessage(msg RawMessageSource) error {
-	sp := e.Start(msg.MessageType())
-	e.WriteBytes(msg.MessageBody())
-	return e.End(sp)
+	e.WriteBytes(msg.Bytes())
+	return nil
 }
 
 // Copyright (c) 2019 Jack Christensen

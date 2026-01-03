@@ -807,6 +807,15 @@ func (r *RingBuffer) MessageLen(msgIdx int64) int64 {
 	return r.MessageEnd(msgIdx) - r.MessageOffset(msgIdx)
 }
 
+func (r *RingBuffer) MessageBytes(msgIdx int64) []byte {
+	if r.isStreaming(msgIdx) {
+		panic("MessageBytes called on streaming message - message too large to buffer")
+	}
+	start := r.MessageOffset(msgIdx)
+	end := r.MessageEnd(msgIdx)
+	return r.readRange(start, end)
+}
+
 // MessageBody returns the body bytes for message at msgIdx (excluding 5-byte header).
 // Panics if the message is streaming (too large to buffer).
 // This may allocate if the message wraps around the ring buffer.
@@ -814,9 +823,7 @@ func (r *RingBuffer) MessageBody(msgIdx int64) []byte {
 	if r.isStreaming(msgIdx) {
 		panic("MessageBody called on streaming message - message too large to buffer")
 	}
-	start := r.MessageOffset(msgIdx) + 5 // Skip header
-	end := r.MessageEnd(msgIdx)
-	return r.readRange(start, end)
+	return r.MessageBytes(msgIdx)[5:]
 }
 
 // readRange reads bytes from start to end (exclusive), handling wraparound.
