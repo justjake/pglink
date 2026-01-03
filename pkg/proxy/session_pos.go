@@ -205,7 +205,7 @@ func (p *pos) unwrap() *pos {
 
 func (p *pos) tryMarkHandled(action string) error {
 	if p.handled {
-		return fmt.Errorf("cannot %s: %w: %s", action, ErrPosAlreadyHandled, p.String())
+		return fmt.Errorf("cannot %s: %w: %v", action, ErrPosAlreadyHandled, p)
 	}
 	p.handled = true
 	return nil
@@ -213,7 +213,7 @@ func (p *pos) tryMarkHandled(action string) error {
 
 func (p *pos) notHandledError() error {
 	if !p.handled {
-		return fmt.Errorf("%w: %s", ErrPosNotHandled, p.String())
+		return fmt.Errorf("%w: %v", ErrPosNotHandled, p)
 	}
 	return nil
 }

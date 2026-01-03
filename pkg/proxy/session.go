@@ -259,16 +259,26 @@ func (s *Session) ReleaseBackend(ctx context.Context) error {
 	return nil
 }
 
+// QueueSendBytes queues writing bytes to dest.
+func (s *Session) QueueSendBytes(dest ProxyRole, bytes []byte) error {
+	// TODO: track write
+	s.assertNotClosed()
+	_, err := s.writeQueue(dest).Write(bytes)
+	return err
+}
+
 // QueueSend queues a message to be sent to its destination.
 // Messages from the backend are queued to the client.
 // Messages from the client are queued to the backend. During flush, backend will be acquired if needed.
 func (s *Session) QueueSend(msg pgwire.Message) error {
+	// TODO: track write
 	s.assertNotClosed()
 	writeQueue := s.writeQueue(dest(msg))
 	return writeQueue.WriteMsg(msg)
 }
 
 func (s *Session) QueueSendPos(pos Pos) error {
+	// TODO: track write
 	s.assertNotClosed()
 	writeQueue := s.writeQueue(pos.From().Flipped())
 	return writeQueue.WriteRingMsg(pos.unwrap().RingMsg)
@@ -312,32 +322,12 @@ func (s *Session) getCursor(from ProxyRole) *pgwire.Cursor {
 }
 
 func (s *Session) getClientPos() *pos {
-	s.clientPos.action = nil
-	s.clientPos.ctx = s.waitCtx()
-	s.clientPos.from = RoleClient
-	s.clientPos.RingMsg = &s.clientCursor.RingMsg
-	s.clientPos.Cursor = s.clientCursor
-	s.clientPos.logger = s.Logger().With(
-		"from", RoleClient,
-		"cursor", s.clientCursor.String(),
-		"idx", s.clientCursor.MsgIdx(),
-		"type", s.clientCursor.MessageType(),
-	)
+	s.clientPos.reset(s.clientCursor, RoleClient)
 	return &s.clientPos
 }
 
 func (s *Session) getBackendPos() *pos {
-	s.backendPos.action = nil
-	s.backendPos.ctx = s.waitCtx()
-	s.backendPos.from = RoleServer
-	s.backendPos.RingMsg = &s.backendCursor.RingMsg
-	s.backendPos.Cursor = s.backendCursor
-	s.backendPos.logger = s.Logger().With(
-		"from", RoleServer,
-		"cursor", s.backendCursor.String(),
-		"idx", s.backendCursor.MsgIdx(),
-		"type", s.backendCursor.MessageType(),
-	)
+	s.backendPos.reset(s.backendCursor, RoleServer)
 	return &s.backendPos
 }
 
@@ -629,14 +619,15 @@ func (s *Session) yieldSinglePos(yield func(*pos, error) bool, pos *pos, err err
 }
 
 func (s *Session) beforeReadPos(pos *pos) error {
+	// TODO: track read
 	return nil
 }
 
 func (s *Session) afterReadPos(pos *pos, loopContinues bool) error {
-	action := pos.Action()
-	pos.action = nil
-	_ = action
-	panic("not implemented")
+	if loopContinues {
+		return pos.notHandledError()
+	}
+	return nil
 }
 
 func (s *Session) writeQueue(dest ProxyRole) *pgwire.WriteQueue {

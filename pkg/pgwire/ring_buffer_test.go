@@ -305,8 +305,8 @@ func TestRingBuffer_NewDefault(t *testing.T) {
 	// and produces a usable buffer with reasonable sizes
 	ring := NewRingBuffer(RingBufferConfig{})
 
-	if ring.MessageBytes <= 0 {
-		t.Errorf("MessageBytes should be positive, got %d", ring.MessageBytes)
+	if ring.RingBufferConfig.MessageBytes <= 0 {
+		t.Errorf("MessageBytes should be positive, got %d", ring.RingBufferConfig.MessageBytes)
 	}
 	if ring.MessageCount <= 0 {
 		t.Errorf("MessageCount should be positive, got %d", ring.MessageCount)
@@ -321,8 +321,8 @@ func TestRingBuffer_NewWithConfig(t *testing.T) {
 	forEachConfig(t, func(t *testing.T, cfg RingTestConfig) {
 		ring := cfg.NewRing()
 
-		if ring.MessageBytes != cfg.MessageBytes {
-			t.Errorf("MessageBytes = %d, want %d", ring.MessageBytes, cfg.MessageBytes)
+		if ring.RingBufferConfig.MessageBytes != cfg.MessageBytes {
+			t.Errorf("MessageBytes = %d, want %d", ring.RingBufferConfig.MessageBytes, cfg.MessageBytes)
 		}
 		if ring.MessageCount != cfg.MessageCount {
 			t.Errorf("MessageCount = %d, want %d", ring.MessageCount, cfg.MessageCount)
@@ -398,7 +398,7 @@ func TestRingBuffer_SingleClientMessage(t *testing.T) {
 		// Verify body matches
 		encoded, _ := msg.Encode(nil)
 		wantBody := encoded[5:] // Skip header
-		assertBytesEqual(t, results[0].Body, wantBody)
+		assertBytesEqual(t, results[0].Body(), wantBody)
 	})
 }
 
@@ -420,7 +420,7 @@ func TestRingBuffer_SingleServerMessage(t *testing.T) {
 		// Verify body matches
 		encoded, _ := msg.Encode(nil)
 		wantBody := encoded[5:] // Skip header
-		assertBytesEqual(t, results[0].Body, wantBody)
+		assertBytesEqual(t, results[0].Body(), wantBody)
 	})
 }
 
@@ -604,7 +604,7 @@ readLoop:
 		assertMessageType(t, result, MsgClientQuery)
 		encoded, _ := msgs[i].Encode(nil)
 		wantBody := encoded[5:]
-		assertBytesEqual(t, result.Body, wantBody)
+		assertBytesEqual(t, result.Body(), wantBody)
 	}
 }
 
@@ -1088,7 +1088,7 @@ func TestRingBuffer_AllClientMessageTypes(t *testing.T) {
 				// Verify body matches
 				encoded, _ := msgs[i].Encode(nil)
 				wantBody := encoded[5:]
-				assertBytesEqual(t, result.Body, wantBody)
+				assertBytesEqual(t, result.Body(), wantBody)
 			})
 		}
 	})
@@ -1149,11 +1149,11 @@ func TestRingBuffer_AllServerMessageTypes(t *testing.T) {
 
 		// Just verify we got the right number and can parse them all
 		for i, result := range results {
-			t.Run(MsgName.Get(result.Type), func(t *testing.T) {
+			t.Run(MsgName.Get(result.MessageType()), func(t *testing.T) {
 				// Verify body matches
 				encoded, _ := msgs[i].Encode(nil)
 				wantBody := encoded[5:]
-				assertBytesEqual(t, result.Body, wantBody)
+				assertBytesEqual(t, result.Body(), wantBody)
 			})
 		}
 	})
@@ -1293,7 +1293,9 @@ func TestCursor_NextMsg(t *testing.T) {
 		count := 0
 		for cursor.NextMsg() {
 			count++
-			assertMessageType(t, cursor, MsgClientQuery)
+			if cursor.MessageType() != MsgClientQuery {
+				t.Errorf("MessageType = %c, want %c", cursor.MessageType(), MsgClientQuery)
+			}
 		}
 
 		if count != 3 {
@@ -1464,7 +1466,7 @@ func TestCursor_Retain(t *testing.T) {
 		assertMessageType(t, rawBody, MsgClientQuery)
 		encoded, _ := msg.Encode(nil)
 		wantBody := encoded[5:]
-		assertBytesEqual(t, rawBody.Body, wantBody)
+		assertBytesEqual(t, rawBody.Body(), wantBody)
 	})
 }
 
@@ -1789,21 +1791,21 @@ func TestRingMsg_Retain_Independent(t *testing.T) {
 
 		// Retain the message
 		retained := cursor.Retain().(SliceMsg)
-		originalBody := slices.Clone(retained.Body)
+		originalBody := slices.Clone(retained.Body())
 
 		// Verify retained is a separate copy - not sharing underlying array
-		if &retained.Body[0] == &cursor.MessageBody()[0] {
+		if &retained.Body()[0] == &cursor.MessageBody()[0] {
 			t.Error("retained body shares memory with cursor - should be independent")
 		}
 
 		// Retained should match the original
-		if !bytes.Equal(retained.Body, originalBody) {
+		if !bytes.Equal(retained.Body(), originalBody) {
 			t.Error("retained message body doesn't match original")
 		}
 
 		// Verify message type is correct
-		if retained.Type != MsgClientQuery {
-			t.Errorf("retained type = %c, want %c", retained.Type, MsgClientQuery)
+		if retained.MessageType() != MsgClientQuery {
+			t.Errorf("retained type = %c, want %c", retained.MessageType(), MsgClientQuery)
 		}
 	})
 }
@@ -2143,8 +2145,8 @@ func TestRingBuffer_NewWithSameBuffers(t *testing.T) {
 		ring2 := ring1.NewWithSameBuffers()
 
 		// Verify config is preserved
-		if ring2.MessageBytes != ring1.MessageBytes {
-			t.Errorf("MessageBytes = %d, want %d", ring2.MessageBytes, ring1.MessageBytes)
+		if ring2.RingBufferConfig.MessageBytes != ring1.RingBufferConfig.MessageBytes {
+			t.Errorf("MessageBytes = %d, want %d", ring2.RingBufferConfig.MessageBytes, ring1.RingBufferConfig.MessageBytes)
 		}
 		if ring2.MessageCount != ring1.MessageCount {
 			t.Errorf("MessageCount = %d, want %d", ring2.MessageCount, ring1.MessageCount)

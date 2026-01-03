@@ -377,7 +377,7 @@ func (r *RingBuffer) Running() bool {
 func (r *RingBuffer) String() string {
 	published := atomic.LoadInt64(&r.publishedMsgs)
 	return fmt.Sprintf("RingBuffer{%dKB/%d msgs=%d %p}",
-		r.MessageBytes/1024, r.MessageCount, published, r)
+		r.RingBufferConfig.MessageBytes/1024, r.MessageCount, published, r)
 }
 
 // ReadFrom reads PostgreSQL wire protocol messages from src until EOF or error.
