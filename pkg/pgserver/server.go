@@ -3,6 +3,7 @@ package pgserver
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,6 +37,14 @@ type UnauthorizedConn struct {
 	// It's often a [*tls.Conn] wrapping a [net.TCPConn].
 	FrontendConn
 	StartupMessage *pgproto3.StartupMessage
+	// TLSState is the TLS connection state, or nil if the connection is not TLS.
+	TLSState *tls.ConnectionState
+	// ServerTLSCertificate is the server's TLS certificate used for this connection.
+	// This is needed for tls-server-end-point channel binding.
+	// It will be nil if:
+	// - The connection is not TLS
+	// - Multiple certificates are configured without GetCertificate
+	ServerTLSCertificate *x509.Certificate
 }
 
 type AuthorizedConn struct {
@@ -365,6 +374,7 @@ type conn struct {
 	raw      net.Conn
 	conn     net.Conn
 	tls      *tls.Conn
+	tlsCert  *x509.Certificate // Server cert used for this connection (captured from GetCertificate)
 	state    atomic.Uint32
 	server   *Server
 	ready    *ClientConn
@@ -522,12 +532,38 @@ loop:
 				err = pgwire.NewProtocolViolation(fmt.Errorf("%w: TLS required", ErrTLSFailed), pgwire.Client(msg))
 				break loop
 			}
+
+			// Build TLS info for the connection
+			var tlsState *tls.ConnectionState
+			var serverCert *x509.Certificate
+			if c.tls != nil {
+				state := c.tls.ConnectionState()
+				tlsState = &state
+
+				// Use captured cert if available (from wrapped GetCertificate)
+				if c.tlsCert != nil {
+					serverCert = c.tlsCert
+				} else if s.TLSConfig != nil && len(s.TLSConfig.Certificates) == 1 {
+					// Single cert configured, we know which one was used
+					cert := &s.TLSConfig.Certificates[0]
+					if cert.Leaf != nil {
+						serverCert = cert.Leaf
+					} else if len(cert.Certificate) > 0 {
+						serverCert, _ = x509.ParseCertificate(cert.Certificate[0])
+					}
+				}
+				// If multiple certs and no GetCertificate, serverCert stays nil.
+				// tls-server-end-point channel binding will fail with a clear error.
+			}
+
 			unauthedConn = &UnauthorizedConn{
 				FrontendConn: FrontendConn{
 					Conn:     conn,
 					Frontend: frontend,
 				},
-				StartupMessage: msg,
+				StartupMessage:       msg,
+				TLSState:             tlsState,
+				ServerTLSCertificate: serverCert,
 			}
 			break loop
 		default:
@@ -549,7 +585,28 @@ func (c *conn) updateToTLS(ctx context.Context, conn net.Conn) (*tls.Conn, error
 	if c.tls != nil {
 		return nil, fmt.Errorf("%w: TLS already established", ErrTLSFailed)
 	}
-	tlsConn := tls.Server(conn, c.server.TLSConfig)
+
+	tlsConfig := c.server.TLSConfig
+
+	// Wrap GetCertificate if user provided one, so we can capture which cert was selected.
+	// This is needed for tls-server-end-point channel binding.
+	if tlsConfig.GetCertificate != nil {
+		tlsConfig = tlsConfig.Clone()
+		originalGetCert := tlsConfig.GetCertificate
+		tlsConfig.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			cert, err := originalGetCert(hello)
+			if cert != nil && err == nil {
+				if cert.Leaf != nil {
+					c.tlsCert = cert.Leaf
+				} else if len(cert.Certificate) > 0 {
+					c.tlsCert, _ = x509.ParseCertificate(cert.Certificate[0])
+				}
+			}
+			return cert, err
+		}
+	}
+
+	tlsConn := tls.Server(conn, tlsConfig)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		return nil, fmt.Errorf("%w: handshake failed: %w", ErrTLSFailed, err)
 	}

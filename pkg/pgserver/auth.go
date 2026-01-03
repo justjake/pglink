@@ -112,11 +112,8 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, fmt.Errorf("failed to set auth type: %w", err)
 	}
 
-	var connState *tls.ConnectionState
-	if tlsConn, ok := conn.Conn.(*tls.Conn); ok {
-		state := tlsConn.ConnectionState()
-		connState = &state
-	}
+	// Use TLS state from UnauthorizedConn (set during connection setup)
+	connState := conn.TLSState
 
 	mechanisms, err := a.getSASLMechanisms(connState)
 	if err != nil {
@@ -142,7 +139,7 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, err
 	}
 
-	cbFlag, cbType, err := scram.ParseChannelBindingFlag(string(clientFirstMsg.Parse().Data))
+	cbFlag, cbTypeStr, err := scram.ParseChannelBindingFlag(string(clientFirstMsg.Parse().Data))
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "invalid channel binding", err)
 	}
@@ -158,12 +155,12 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 			return nil, err
 		}
 
-		if cbType != scram.ChannelBindingTLSExporter.String() && cbType != scram.ChannelBindingTLSUnique.String() {
-			return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "unsupported channel binding type", fmt.Errorf("got type: %s", cbType))
+		// Validate channel binding type (now supports tls-server-end-point, tls-exporter, tls-unique)
+		if _, ok := scram.ParseChannelBindingType(cbTypeStr); !ok {
+			return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "unsupported channel binding type", fmt.Errorf("got type: %s", cbTypeStr))
 		}
 	} else if cbFlag == 'p' {
-		// TODO: are we doing it right?
-		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "unsupported channel binding type", fmt.Errorf("got flag: %c, but no TLS connection", cbFlag))
+		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "channel binding requested but mechanism is not PLUS", fmt.Errorf("got flag: %c", cbFlag))
 	}
 
 	if ctx.Err() != nil {
@@ -176,12 +173,13 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 
 	var scramServer scram.Server
 	if mechanism == pgwire.SASLMechanismSCRAMSHA256Plus {
-		cbData, tlsCbType, err := scram.ChannelBindingData(connState)
+		// Parse the channel binding type (already validated above)
+		cbType, _ := scram.ParseChannelBindingType(cbTypeStr)
+
+		// Compute channel binding data using the requested type
+		cbData, err := scram.ChannelBindingData(connState, conn.ServerTLSCertificate, cbType)
 		if err != nil {
-			return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "failed to get channel binding data", err)
-		}
-		if tlsCbType.String() != cbType {
-			return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "channel binding type mismatch", fmt.Errorf("suggested: %v, got: %s", tlsCbType, cbType))
+			return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "failed to compute channel binding data", err)
 		}
 		scramServer, err = scram.NewSCRAMServerPlus(creds, a.scramIterationCount(), cbData)
 	} else {

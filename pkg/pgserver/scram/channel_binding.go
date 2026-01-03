@@ -2,59 +2,73 @@ package scram
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+
+	cb "github.com/golang-auth/go-channelbinding"
 )
 
 // ChannelBindingType represents the type of channel binding to use.
-type ChannelBindingType int
+type ChannelBindingType string
 
 const (
 	// ChannelBindingNone means no channel binding is used.
-	ChannelBindingNone ChannelBindingType = iota
+	ChannelBindingNone ChannelBindingType = ""
 	// ChannelBindingTLSUnique uses tls-unique channel binding (deprecated in TLS 1.3).
-	ChannelBindingTLSUnique
+	ChannelBindingTLSUnique ChannelBindingType = "tls-unique"
 	// ChannelBindingTLSExporter uses tls-exporter channel binding (TLS 1.3+).
-	ChannelBindingTLSExporter
+	ChannelBindingTLSExporter ChannelBindingType = "tls-exporter"
+	// ChannelBindingTLSServerEndPoint uses tls-server-end-point channel binding (RFC 5929).
+	// This is the default channel binding type used by PostgreSQL/libpq.
+	ChannelBindingTLSServerEndPoint ChannelBindingType = "tls-server-end-point"
 )
 
 func (t ChannelBindingType) String() string {
-	switch t {
-	case ChannelBindingNone:
-		return "none"
-	case ChannelBindingTLSUnique:
-		return "tls-unique"
-	case ChannelBindingTLSExporter:
-		return "tls-exporter"
+	return string(t)
+}
+
+// ParseChannelBindingType validates and converts a string to ChannelBindingType.
+// Returns the type and true if valid, or empty string and false if invalid.
+func ParseChannelBindingType(s string) (ChannelBindingType, bool) {
+	switch s {
+	case "tls-server-end-point":
+		return ChannelBindingTLSServerEndPoint, true
+	case "tls-exporter":
+		return ChannelBindingTLSExporter, true
+	case "tls-unique":
+		return ChannelBindingTLSUnique, true
 	default:
-		panic(fmt.Sprintf("invalid channel binding type: %d", t))
+		return ChannelBindingNone, false
 	}
 }
 
-// getChannelBindingData extracts channel binding data from a TLS connection state.
-// For TLS 1.3+, it uses tls-exporter; for earlier versions, it uses tls-unique.
-func ChannelBindingData(tlsState *tls.ConnectionState) ([]byte, ChannelBindingType, error) {
+// ChannelBindingData computes channel binding data for the requested type.
+// serverCert is required for tls-server-end-point, can be nil for other types.
+func ChannelBindingData(
+	tlsState *tls.ConnectionState,
+	serverCert *x509.Certificate,
+	requestedType ChannelBindingType,
+) ([]byte, error) {
 	if tlsState == nil {
-		return nil, ChannelBindingNone, nil
+		return nil, fmt.Errorf("TLS connection required for channel binding")
 	}
 
-	// TLS 1.3 uses tls-exporter
-	if tlsState.Version >= tls.VersionTLS13 {
-		// The label and context are per RFC 9266
-		data, err := tlsState.ExportKeyingMaterial("EXPORTER-Channel-Binding", nil, 32)
-		if err != nil {
-			return nil, ChannelBindingNone, fmt.Errorf("failed to export keying material: %w", err)
+	var libType cb.TLSChannelBindingType
+	switch requestedType {
+	case ChannelBindingTLSServerEndPoint:
+		libType = cb.TLSChannelBindingEndpoint
+		if serverCert == nil {
+			return nil, fmt.Errorf("server certificate required for tls-server-end-point channel binding")
 		}
-		return data, ChannelBindingTLSExporter, nil
+	case ChannelBindingTLSExporter:
+		libType = cb.TLSChannelBindingExporter
+	case ChannelBindingTLSUnique:
+		libType = cb.TLSChannelBindingUnique
+	default:
+		return nil, fmt.Errorf("unsupported channel binding type: %s", requestedType)
 	}
 
-	// TLS 1.2 and earlier use tls-unique (the finished message)
-	// Note: tls-unique is not available in Go's TLS package directly
-	// We need to use the TLSUnique field from ConnectionState
-	if len(tlsState.TLSUnique) > 0 {
-		return tlsState.TLSUnique, ChannelBindingTLSUnique, nil
-	}
-
-	return nil, ChannelBindingNone, nil
+	return cb.MakeTLSChannelBinding(*tlsState, serverCert, libType)
 }
 
 const (
