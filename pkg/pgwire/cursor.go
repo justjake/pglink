@@ -259,8 +259,11 @@ func (r *RingRange) Touches(other *RingRange) bool {
 }
 
 func (r *RingRange) Extend(other *RingRange) *RingRange {
-	r.endIdx = max(r.endIdx, other.endIdx)
-	r.startIdx = min(r.startIdx, other.startIdx)
+	if other.ring != r.ring {
+		panic(fmt.Sprintf("cannot extend %s with %s: different rings", r, other))
+	}
+	r.SetStart(min(r.startIdx, other.startIdx))
+	r.SetEnd(max(r.endIdx, other.endIdx))
 	return r
 }
 
@@ -359,6 +362,15 @@ type RingMsg struct {
 	in     *RingRange
 }
 
+func (r *RingMsg) ToRange() *RingRange {
+	return &RingRange{
+		startIdx: r.msgIdx,
+		endIdx:   r.msgIdx + 1,
+		capacity: r.in.capacity,
+		ring:     r.in.ring,
+	}
+}
+
 // AppendTo implements [RawMessageSource].
 func (r *RingMsg) AppendTo(buf []byte) ([]byte, error) {
 	r.panicUnlessValid()
@@ -433,7 +445,7 @@ func (r *RingMsg) BodyLen() int {
 }
 
 func (r *RingMsg) Retain() RawMessageSource {
-	return RawBody{slices.Clone(r.Bytes())}
+	return SliceMsg{slices.Clone(r.Bytes())}
 }
 
 func (r *RingMsg) String() string {

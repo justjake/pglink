@@ -229,7 +229,7 @@ func (fw *ServerFlyweights) Parse(source RawMessageSource) (ServerMessage, error
 
 // parseAuth handles the 'R' authentication message subtypes.
 func (fw *ServerFlyweights) parseAuth(source RawMessageSource) (ServerMessage, error) {
-	body := source.MessageBody()
+	body := source.Body()
 
 	if len(body) < 4 {
 		return nil, fmt.Errorf("authentication message too short")

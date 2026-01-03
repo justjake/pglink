@@ -44,57 +44,65 @@ type RawMessageSource interface {
 	Retain() RawMessageSource
 }
 
-// RawBody holds unparsed PostgreSQL wire protocol message bytes.
+// SliceMsg holds unparsed PostgreSQL wire protocol message bytes.
 // It can be forwarded directly without parsing.
-// RawBody implements RawMessageSource.
-type RawBody struct {
+// SliceMsg implements RawMessageSource.
+type SliceMsg struct {
 	Slice []byte
 }
 
+func SliceFromBody(t MsgType, body []byte) SliceMsg {
+	encoder := MessageEncoder{make([]byte, 0, 5+len(body))}
+	sp := encoder.Start(t)
+	encoder.WriteBytes(body)
+	encoder.End(sp)
+	return SliceMsg{encoder.Buffer}
+}
+
 // IsZero returns true if this RawBody has no data.
-func (r RawBody) IsZero() bool {
+func (r SliceMsg) IsZero() bool {
 	return r.Slice == nil
 }
 
 // MessageType implements RawMessageSource.
-func (r RawBody) MessageType() MsgType {
+func (r SliceMsg) MessageType() MsgType {
 	return MsgType(r.Slice[0])
 }
 
 // BodyLen implements RawMessageSource.
-func (r RawBody) Len() int {
+func (r SliceMsg) Len() int {
 	return len(r.Slice)
 }
 
 // Retain implements RawMessageSource. Since RawBody already owns its bytes,
 // it returns itself.
-func (r RawBody) Retain() RawMessageSource {
+func (r SliceMsg) Retain() RawMessageSource {
 	return r
 }
 
-func (r RawBody) Bytes() []byte {
+func (r SliceMsg) Bytes() []byte {
 	return r.Slice
 }
 
-func (r RawBody) Body() []byte {
+func (r SliceMsg) Body() []byte {
 	return r.Slice[5:]
 }
 
-func (r RawBody) NewReader() io.Reader {
+func (r SliceMsg) NewReader() io.Reader {
 	return bytes.NewReader(r.Slice)
 }
 
-func (r RawBody) WriteTo(w io.Writer) (int, error) {
+func (r SliceMsg) WriteTo(w io.Writer) (int, error) {
 	return w.Write(r.Slice)
 }
 
-func (r RawBody) AppendTo(buf []byte) ([]byte, error) {
+func (r SliceMsg) AppendTo(buf []byte) ([]byte, error) {
 	return append(buf, r.Slice...), nil
 }
 
 // decodeBackendMessage decodes raw bytes into a pgproto3.BackendMessage.
 // The returned message is newly allocated.
-func decodeBackendMessage(raw RawBody) (pgproto3.BackendMessage, error) {
+func decodeBackendMessage(raw SliceMsg) (pgproto3.BackendMessage, error) {
 	// Create the appropriate message type based on message type
 	var msg pgproto3.BackendMessage
 	switch raw.MessageType() {
@@ -197,7 +205,7 @@ func (m *FromServer[T]) Parse() T {
 		return m.parsed
 	}
 	// Lazily extract body bytes from source
-	raw := RawBody{m.source.Bytes()}
+	raw := SliceMsg{m.source.Bytes()}
 	msg, err := decodeBackendMessage(raw)
 	if err != nil {
 		panic(fmt.Sprintf("FromServer.Parse: %v", err))
@@ -241,7 +249,7 @@ func (m *FromClient[T]) Parse() T {
 		return m.parsed
 	}
 	// Lazily extract body bytes from source
-	raw := RawBody{m.source.Bytes()}
+	raw := SliceMsg{m.source.Bytes()}
 	msg, err := decodeFrontendMessage(raw)
 	if err != nil {
 		panic(fmt.Sprintf("FromClient.Parse: %v", err))
@@ -283,26 +291,26 @@ func ClientParsed[T pgproto3.FrontendMessage](msg T) *FromClient[T] {
 }
 
 // EncodeBackendMessage encodes a pgproto3.BackendMessage to RawBody.
-func EncodeBackendMessage(msg pgproto3.BackendMessage) RawBody {
+func EncodeBackendMessage(msg pgproto3.BackendMessage) SliceMsg {
 	encoded, err := msg.Encode(nil)
 	if err != nil {
-		return RawBody{}
+		return SliceMsg{}
 	}
-	return RawBody{encoded}
+	return SliceMsg{encoded}
 }
 
 // EncodeFrontendMessage encodes a pgproto3.FrontendMessage to RawBody.
-func EncodeFrontendMessage(msg pgproto3.FrontendMessage) RawBody {
+func EncodeFrontendMessage(msg pgproto3.FrontendMessage) SliceMsg {
 	encoded, err := msg.Encode(nil)
 	if err != nil {
-		return RawBody{}
+		return SliceMsg{}
 	}
-	return RawBody{encoded}
+	return SliceMsg{encoded}
 }
 
 // decodeFrontendMessage decodes raw bytes into a pgproto3.FrontendMessage.
 // The returned message is newly allocated.
-func decodeFrontendMessage(raw RawBody) (pgproto3.FrontendMessage, error) {
+func decodeFrontendMessage(raw SliceMsg) (pgproto3.FrontendMessage, error) {
 	var msg pgproto3.FrontendMessage
 	switch raw.MessageType() {
 	case MsgClientBind:

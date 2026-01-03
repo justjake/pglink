@@ -184,7 +184,7 @@ var _ net.Conn = (*TestConn)(nil)
 
 // readAllMessages reads all messages from a ring buffer via cursor.
 // Returns the retained messages as RawBody slices.
-func readAllMessages(t *testing.T, ring *RingBuffer, isClient bool) []RawBody {
+func readAllMessages(t *testing.T, ring *RingBuffer, isClient bool) []SliceMsg {
 	t.Helper()
 
 	var cursor *Cursor
@@ -194,7 +194,7 @@ func readAllMessages(t *testing.T, ring *RingBuffer, isClient bool) []RawBody {
 		cursor = NewServerCursor(ring)
 	}
 
-	var results []RawBody
+	var results []SliceMsg
 	timeout := time.After(5 * time.Second)
 
 	for {
@@ -208,7 +208,7 @@ func readAllMessages(t *testing.T, ring *RingBuffer, isClient bool) []RawBody {
 		if gotBatch {
 			// Read all messages in this batch
 			for cursor.NextMsg() {
-				retained := cursor.Retain().(RawBody)
+				retained := cursor.Retain().(SliceMsg)
 				results = append(results, retained)
 			}
 			continue
@@ -222,7 +222,7 @@ func readAllMessages(t *testing.T, ring *RingBuffer, isClient bool) []RawBody {
 			// Try one more time to get remaining messages
 			if gotBatch, _ := cursor.TryNextBatch(); gotBatch {
 				for cursor.NextMsg() {
-					retained := cursor.Retain().(RawBody)
+					retained := cursor.Retain().(SliceMsg)
 					results = append(results, retained)
 				}
 			}
@@ -556,7 +556,7 @@ func TestRingBuffer_DataWraparound(t *testing.T) {
 	ring.StartNetConnReader(ctx, conn)
 
 	cursor := NewClientCursor(ring)
-	var results []RawBody
+	var results []SliceMsg
 
 	timeout := time.After(5 * time.Second)
 readLoop:
@@ -571,7 +571,7 @@ readLoop:
 				cursor.endIdx = published
 				cursor.msgIdx = cursor.startIdx - 1
 				for cursor.NextMsg() {
-					results = append(results, cursor.Retain().(RawBody))
+					results = append(results, cursor.Retain().(SliceMsg))
 				}
 			}
 			break readLoop
@@ -585,7 +585,7 @@ readLoop:
 			cursor.msgIdx = cursor.startIdx - 1
 
 			for cursor.NextMsg() {
-				results = append(results, cursor.Retain().(RawBody))
+				results = append(results, cursor.Retain().(SliceMsg))
 			}
 
 			// Release consumed messages to free space for writer
@@ -641,7 +641,7 @@ func TestRingBuffer_HeaderWraparound(t *testing.T) {
 	ring.StartNetConnReader(ctx, conn)
 
 	cursor := NewClientCursor(ring)
-	var results []RawBody
+	var results []SliceMsg
 	timeout := time.After(5 * time.Second)
 
 readLoop:
@@ -656,7 +656,7 @@ readLoop:
 				cursor.endIdx = published
 				cursor.msgIdx = cursor.startIdx - 1
 				for cursor.NextMsg() {
-					results = append(results, cursor.Retain().(RawBody))
+					results = append(results, cursor.Retain().(SliceMsg))
 				}
 			}
 			break readLoop
@@ -670,7 +670,7 @@ readLoop:
 			cursor.msgIdx = cursor.startIdx - 1
 
 			for cursor.NextMsg() {
-				results = append(results, cursor.Retain().(RawBody))
+				results = append(results, cursor.Retain().(SliceMsg))
 			}
 
 			// Release consumed messages to free space
@@ -1455,7 +1455,7 @@ func TestCursor_Retain(t *testing.T) {
 		retained := cursor.Retain()
 
 		// Should be a RawBody
-		rawBody, ok := retained.(RawBody)
+		rawBody, ok := retained.(SliceMsg)
 		if !ok {
 			t.Fatalf("expected RawBody, got %T", retained)
 		}
@@ -1788,7 +1788,7 @@ func TestRingMsg_Retain_Independent(t *testing.T) {
 		cursor.NextMsg()
 
 		// Retain the message
-		retained := cursor.Retain().(RawBody)
+		retained := cursor.Retain().(SliceMsg)
 		originalBody := slices.Clone(retained.Body)
 
 		// Verify retained is a separate copy - not sharing underlying array

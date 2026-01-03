@@ -19,7 +19,9 @@ var noHealthCheckChan = make(chan time.Time)
 
 // SessionConfig configures a [Session].
 type SessionConfig struct {
+	// The client. Required.
 	Frontend Frontend
+
 	// Function to acquire a [Backend] connection.
 	// Should perform whatever setup is needed on a backend before it can be used for this session.
 	AcquireBackend func(ctx context.Context) (Backend, error)
@@ -31,6 +33,7 @@ type SessionConfig struct {
 	// If not set, defaults to 1 second.
 	HealthCheckPeriod time.Duration
 
+	// If not set, defaults to slog.Default().
 	Logger *slog.Logger
 
 	// Optional: sets ring buffer size.
@@ -256,18 +259,22 @@ func (s *Session) ReleaseBackend(ctx context.Context) error {
 	return nil
 }
 
+// QueueSend queues a message to be sent to its destination.
+// Messages from the backend are queued to the client.
+// Messages from the client are queued to the backend. During flush, backend will be acquired if needed.
 func (s *Session) QueueSend(msg pgwire.Message) error {
 	s.assertNotClosed()
 	writeQueue := s.writeQueue(dest(msg))
-	if source := msg.Source(); source != nil {
-		return writeQueue.WriteRawMsg(source)
-	}
-	if msg.IsParsed() {
-		return writeQueue.WriteMsg(msg.ParseAny())
-	}
-	return fmt.Errorf("message appears blank: %T", msg)
+	return writeQueue.WriteMsg(msg)
 }
 
+func (s *Session) QueueSendPos(pos Pos) error {
+	s.assertNotClosed()
+	writeQueue := s.writeQueue(pos.From().Flipped())
+	return writeQueue.WriteRingMsg(pos.unwrap().RingMsg)
+}
+
+// ClearQueue clears the write queue for the given destination.
 func (s *Session) ClearQueue(dest ProxyRole) {
 	s.writeQueue(dest).Clear()
 }
@@ -605,8 +612,11 @@ func (s *Session) yieldSinglePos(yield func(*pos, error) bool, pos *pos, err err
 		return yield(pos, err)
 	}
 
+	if err := s.beforeReadPos(pos); err != nil {
+		return yield(pos, err)
+	}
 	loop = yield(pos, nil)
-	err = s.applyAction(pos, loop)
+	err = s.afterReadPos(pos, loop)
 	if err != nil {
 		if loop {
 			loop = yield(pos, err)
@@ -618,7 +628,11 @@ func (s *Session) yieldSinglePos(yield func(*pos, error) bool, pos *pos, err err
 	return loop
 }
 
-func (s *Session) applyAction(pos *pos, useDefaultAction bool) error {
+func (s *Session) beforeReadPos(pos *pos) error {
+	return nil
+}
+
+func (s *Session) afterReadPos(pos *pos, loopContinues bool) error {
 	action := pos.Action()
 	pos.action = nil
 	_ = action

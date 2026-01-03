@@ -2,6 +2,7 @@ package pgwire
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 
 	"github.com/gammazero/deque"
@@ -32,7 +33,17 @@ func (q *WriteQueue) Write(bytes []byte) (int, error) {
 	return q.getByteSlot().Write(bytes)
 }
 
-func (q *WriteQueue) WriteMsg(msg pgproto3.Message) error {
+func (q *WriteQueue) WriteMsg(msg Message) error {
+	if msg.Source() != nil {
+		return q.WriteRawMsg(msg.Source())
+	}
+	if msg.IsParsed() {
+		return q.WriteParsedMsg(msg.ParseAny())
+	}
+	return fmt.Errorf("message appears blank: %T", msg)
+}
+
+func (q *WriteQueue) WriteParsedMsg(msg pgproto3.Message) error {
 	item := q.getByteSlot()
 	buf := item.AvailableBuffer()
 	buf, err := msg.Encode(buf)
@@ -55,30 +66,19 @@ func (q *WriteQueue) WriteRawMsg(msg RawMessageSource) error {
 }
 
 func (q *WriteQueue) WriteRingMsg(r *RingMsg) error {
-	item := q.getRingSlot()
-	if item.Empty() {
-		item.SetStart(r.MsgIdx())
-		item.SetEndInclusive(r.MsgIdx())
-	} else if item.End() == r.MsgIdx() {
-		item.SetEndInclusive(r.MsgIdx())
-	} else {
-		item = &q.pushItem().suffix
-		item.SetStart(r.MsgIdx())
-		item.SetEndInclusive(r.MsgIdx())
-	}
-	return nil
+	return q.WriteRingRange(r.ToRange())
 }
 
 func (q *WriteQueue) WriteRingRange(r *RingRange) error {
 	item := q.getRingSlot()
 	if item.Empty() {
-		item.SetStart(r.Start())
-		item.SetEnd(r.End())
-	} else if item.End() == r.Start() {
+		*item = *r
+	} else if item.End() == r.Start() && item.ring == r.ring {
 		item.Extend(r)
 	} else {
 		q.pushItem().suffix = *r
 	}
+	// TODO: error unless item is valid
 	return nil
 }
 

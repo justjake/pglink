@@ -30,6 +30,6 @@ func ReduceSessionMessages[S any](ctx context.Context, session *Session, reducer
 			state = newState.State
 		}
 
-		pos.SetAction(newState.Action)
+		// pos.SetAction(newState.Action)
 	}
 }

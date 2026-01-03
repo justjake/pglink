@@ -2,14 +2,20 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
+var ErrPosAlreadyHandled = errors.New("pos already handled")
+var ErrPosNotHandled = errors.New("pos not handled")
+var ErrWrongDestination = errors.New("wrong destination")
+
 // Pos represents a position in a message stream of a proxy [Session].
 // Pos is only valid until the next call to [Session.Next].
+// Each pos must be handled with an action, or skipped.
 type Pos interface {
 	// Identifies if the message is from the client, or the backend.
 	From() ProxyRole
@@ -29,13 +35,23 @@ type Pos interface {
 	ServerMsg() pgwire.ServerMessage
 	AsServer() (pgwire.ServerMessage, error)
 
-	// Set the action to handle this message.
-	// TODO: should we be imperative instead?
-	// TODO: just have action methods like .Forward(ctx) instead?
-	SetAction(action Action)
-	// Get the action to handle this message.
-	// The default action is to forward the message.
-	Action() Action
+	// Mark this message as handled without taking any action.
+	// Returns an error if the message has already been handled.
+	Skip() error
+	// Forward the message to the destination.
+	// If the destination is the backend, an optional response handler can be provided.
+	// Returns an error if the message has already been handled.
+	Forward() error
+	// Replace the message with a new message for the destination.
+	// Returns an error if the rewritten message is for the source.
+	// Returns an error if the message has already been handled.
+	Rewrite(rewritten pgwire.Message) error
+	// Respond to the message with a message for the source.
+	// Returns an error if the response is for the destination.
+	// Returns an error if the message has already been handled.
+	Respond(response pgwire.Message) error
+	// Returns true if the message has been handled by any action above.
+	Handled() bool
 
 	// Logger annotated with position information.
 	Logger() *slog.Logger
@@ -56,15 +72,26 @@ type Pos interface {
 }
 
 type pos struct {
+	session *Session
 	*pgwire.RingMsg
-	Cursor *pgwire.Cursor
-	from   ProxyRole
-	action Action
-	logger *slog.Logger
-	ctx    context.Context
+	Cursor     *pgwire.Cursor
+	from       ProxyRole
+	action     Action
+	baseLogger *slog.Logger
+	logger     *slog.Logger
+	ctx        context.Context
+	handled    bool
 }
 
-var _ Pos = (*pos)(nil)
+// var _ Pos = (*pos)(nil)
+
+func (p *pos) reset(cursor *pgwire.Cursor, from ProxyRole) {
+	p.Cursor = cursor
+	p.RingMsg = &cursor.RingMsg
+	p.from = from
+	p.logger = nil
+	p.handled = false
+}
 
 // FromClient implements [Pos].
 func (p *pos) FromClient() bool {
@@ -74,11 +101,6 @@ func (p *pos) FromClient() bool {
 // FromServer implements [Pos].
 func (p *pos) FromServer() bool {
 	return p.from == RoleServer
-}
-
-// Action implements [Pos].
-func (p *pos) Action() Action {
-	return p.action
 }
 
 func (p *pos) AsClient() (pgwire.ClientMessage, error) {
@@ -106,6 +128,15 @@ func (p *pos) FromMsgIdx() int64 {
 
 // Logger implements [Pos].
 func (p *pos) Logger() *slog.Logger {
+	if p.logger != nil {
+		return p.logger
+	}
+	p.logger = p.baseLogger.With(
+		"from", p.from,
+		"cursor", p.Cursor.String(),
+		"idx", p.Cursor.MsgIdx(),
+		"type", p.Cursor.MessageType(),
+	)
 	return p.logger
 }
 
@@ -122,9 +153,39 @@ func (p *pos) ServerMsg() pgwire.ServerMessage {
 	return msg
 }
 
-// SetAction implements [Pos].
-func (p *pos) SetAction(action Action) {
-	p.action = action
+func (p *pos) Skip() error {
+	return p.tryMarkHandled("skip")
+}
+
+func (p *pos) Forward() error {
+	if err := p.tryMarkHandled("forward"); err != nil {
+		return err
+	}
+	return p.session.QueueSendPos(p)
+}
+
+func (p *pos) Respond(response pgwire.Message) error {
+	if dest(response) != p.from {
+		return fmt.Errorf("cannot respond: %w: %T -> %v != %v", ErrWrongDestination, response, dest(response), p.from)
+	}
+	if err := p.tryMarkHandled("respond"); err != nil {
+		return err
+	}
+	return p.session.QueueSend(response)
+}
+
+func (p *pos) Rewrite(rewritten pgwire.Message) error {
+	if dest(rewritten) != p.from.Flipped() {
+		return fmt.Errorf("cannot rewrite: %w: %T -> %v != %v", ErrWrongDestination, rewritten, dest(rewritten), p.from.Flipped())
+	}
+	if err := p.tryMarkHandled("rewrite"); err != nil {
+		return err
+	}
+	return p.session.QueueSend(rewritten)
+}
+
+func (p *pos) Handled() bool {
+	return p.handled
 }
 
 func (p *pos) Ctx() context.Context {
@@ -140,4 +201,19 @@ func (p *pos) String() string {
 // unwrap implements [Pos].
 func (p *pos) unwrap() *pos {
 	return p
+}
+
+func (p *pos) tryMarkHandled(action string) error {
+	if p.handled {
+		return fmt.Errorf("cannot %s: %w: %s", action, ErrPosAlreadyHandled, p.String())
+	}
+	p.handled = true
+	return nil
+}
+
+func (p *pos) notHandledError() error {
+	if !p.handled {
+		return fmt.Errorf("%w: %s", ErrPosNotHandled, p.String())
+	}
+	return nil
 }

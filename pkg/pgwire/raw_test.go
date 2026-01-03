@@ -10,12 +10,12 @@ import (
 func TestRawBody_Len(t *testing.T) {
 	tests := []struct {
 		name string
-		raw  RawBody
+		raw  SliceMsg
 		want int
 	}{
-		{"empty body", RawBody{Type: 'Z', Body: nil}, 5},
-		{"single byte", RawBody{Type: 'Z', Body: []byte{'I'}}, 6},
-		{"multi byte", RawBody{Type: 'D', Body: make([]byte, 100)}, 105},
+		{"empty body", SliceFromBody('Z', nil), 5},
+		{"single byte", SliceFromBody('Z', []byte{'I'}), 6},
+		{"multi byte", SliceFromBody('D', make([]byte, 100)), 105},
 	}
 
 	for _, tt := range tests {
@@ -30,13 +30,13 @@ func TestRawBody_Len(t *testing.T) {
 func TestDecodeBackendMessage(t *testing.T) {
 	tests := []struct {
 		name    string
-		raw     RawBody
+		raw     SliceMsg
 		check   func(t *testing.T, msg pgproto3.BackendMessage)
 		wantErr bool
 	}{
 		{
 			name: "ReadyForQuery idle",
-			raw:  RawBody{Type: 'Z', Body: []byte{'I'}},
+			raw:  SliceFromBody('Z', []byte{'I'}),
 			check: func(t *testing.T, msg pgproto3.BackendMessage) {
 				rfq, ok := msg.(*pgproto3.ReadyForQuery)
 				if !ok {
@@ -49,7 +49,7 @@ func TestDecodeBackendMessage(t *testing.T) {
 		},
 		{
 			name: "ReadyForQuery in transaction",
-			raw:  RawBody{Type: 'Z', Body: []byte{'T'}},
+			raw:  SliceFromBody('Z', []byte{'T'}),
 			check: func(t *testing.T, msg pgproto3.BackendMessage) {
 				rfq := msg.(*pgproto3.ReadyForQuery)
 				if rfq.TxStatus != 'T' {
@@ -59,7 +59,7 @@ func TestDecodeBackendMessage(t *testing.T) {
 		},
 		{
 			name: "CommandComplete",
-			raw:  RawBody{Type: 'C', Body: append([]byte("SELECT 1"), 0)},
+			raw:  SliceFromBody('C', append([]byte("SELECT 1"), 0)),
 			check: func(t *testing.T, msg pgproto3.BackendMessage) {
 				cc, ok := msg.(*pgproto3.CommandComplete)
 				if !ok {
@@ -72,7 +72,7 @@ func TestDecodeBackendMessage(t *testing.T) {
 		},
 		{
 			name: "AuthenticationOk",
-			raw:  RawBody{Type: 'R', Body: []byte{0, 0, 0, 0}},
+			raw:  SliceFromBody('R', []byte{0, 0, 0, 0}),
 			check: func(t *testing.T, msg pgproto3.BackendMessage) {
 				_, ok := msg.(*pgproto3.AuthenticationOk)
 				if !ok {
@@ -82,10 +82,10 @@ func TestDecodeBackendMessage(t *testing.T) {
 		},
 		{
 			name: "ParameterStatus",
-			raw: RawBody{Type: 'S', Body: func() []byte {
+			raw: SliceFromBody('S', func() []byte {
 				// name\0value\0
 				return append(append([]byte("client_encoding"), 0), append([]byte("UTF8"), 0)...)
-			}()},
+			}()),
 			check: func(t *testing.T, msg pgproto3.BackendMessage) {
 				ps, ok := msg.(*pgproto3.ParameterStatus)
 				if !ok {
@@ -101,12 +101,12 @@ func TestDecodeBackendMessage(t *testing.T) {
 		},
 		{
 			name:    "unknown type",
-			raw:     RawBody{Type: 0xFF, Body: nil},
+			raw:     SliceFromBody(0xFF, nil),
 			wantErr: true,
 		},
 		{
 			name:    "auth too short",
-			raw:     RawBody{Type: 'R', Body: []byte{0, 0}},
+			raw:     SliceFromBody('R', []byte{0, 0}),
 			wantErr: true,
 		},
 	}
@@ -131,13 +131,13 @@ func TestDecodeBackendMessage(t *testing.T) {
 func TestDecodeFrontendMessage(t *testing.T) {
 	tests := []struct {
 		name    string
-		raw     RawBody
+		raw     SliceMsg
 		check   func(t *testing.T, msg pgproto3.FrontendMessage)
 		wantErr bool
 	}{
 		{
 			name: "Query",
-			raw:  RawBody{Type: 'Q', Body: append([]byte("SELECT 1"), 0)},
+			raw:  SliceFromBody('Q', append([]byte("SELECT 1"), 0)),
 			check: func(t *testing.T, msg pgproto3.FrontendMessage) {
 				q, ok := msg.(*pgproto3.Query)
 				if !ok {
@@ -150,7 +150,7 @@ func TestDecodeFrontendMessage(t *testing.T) {
 		},
 		{
 			name: "Sync",
-			raw:  RawBody{Type: 'S', Body: nil},
+			raw:  SliceFromBody('S', nil),
 			check: func(t *testing.T, msg pgproto3.FrontendMessage) {
 				_, ok := msg.(*pgproto3.Sync)
 				if !ok {
@@ -160,7 +160,7 @@ func TestDecodeFrontendMessage(t *testing.T) {
 		},
 		{
 			name: "Terminate",
-			raw:  RawBody{Type: 'X', Body: nil},
+			raw:  SliceFromBody('X', nil),
 			check: func(t *testing.T, msg pgproto3.FrontendMessage) {
 				_, ok := msg.(*pgproto3.Terminate)
 				if !ok {
@@ -170,13 +170,13 @@ func TestDecodeFrontendMessage(t *testing.T) {
 		},
 		{
 			name: "Parse",
-			raw: RawBody{Type: 'P', Body: func() []byte {
+			raw: SliceFromBody('P', func() []byte {
 				// name\0query\0numParams(2 bytes)
 				b := append([]byte("stmt1"), 0)
 				b = append(b, append([]byte("SELECT $1"), 0)...)
 				b = append(b, 0, 0) // 0 parameter types
 				return b
-			}()},
+			}()),
 			check: func(t *testing.T, msg pgproto3.FrontendMessage) {
 				p, ok := msg.(*pgproto3.Parse)
 				if !ok {
@@ -192,7 +192,7 @@ func TestDecodeFrontendMessage(t *testing.T) {
 		},
 		{
 			name:    "unknown type",
-			raw:     RawBody{Type: 0xFF, Body: nil},
+			raw:     SliceFromBody(0xFF, nil),
 			wantErr: true,
 		},
 	}
@@ -216,7 +216,7 @@ func TestDecodeFrontendMessage(t *testing.T) {
 
 func TestFromServer(t *testing.T) {
 	t.Run("parse from raw", func(t *testing.T) {
-		raw := RawBody{Type: 'Z', Body: []byte{'I'}}
+		raw := SliceFromBody('Z', []byte{'I'})
 		lazy := FromServer[*pgproto3.ReadyForQuery]{source: raw}
 
 		msg := lazy.Parse()
@@ -242,11 +242,11 @@ func TestFromServer(t *testing.T) {
 	})
 
 	t.Run("source accessor", func(t *testing.T) {
-		raw := RawBody{Type: 'Z', Body: []byte{'E'}}
+		raw := SliceFromBody('Z', []byte{'E'})
 		lazy := FromServer[*pgproto3.ReadyForQuery]{source: raw}
 
 		gotSource := lazy.Source()
-		if gotSource.MessageType() != 'Z' || !bytes.Equal(gotSource.MessageBody(), []byte{'E'}) {
+		if gotSource.MessageType() != 'Z' || !bytes.Equal(gotSource.Body(), []byte{'E'}) {
 			t.Errorf("Source() = %v, want %v", gotSource, raw)
 		}
 	})
@@ -254,7 +254,7 @@ func TestFromServer(t *testing.T) {
 
 func TestFromClient(t *testing.T) {
 	t.Run("parse from raw", func(t *testing.T) {
-		raw := RawBody{Type: 'Q', Body: append([]byte("SELECT 1"), 0)}
+		raw := SliceFromBody('Q', append([]byte("SELECT 1"), 0))
 		lazy := FromClient[*pgproto3.Query]{source: raw}
 
 		msg := lazy.Parse()

@@ -42,4 +42,5 @@ func (t *ParameterStatusTracker) TrackEffect(msg pgwire.Message) pure.Effect {
 			t.TrackNow(msg)
 		}))
 	}
+	return nil
 }
