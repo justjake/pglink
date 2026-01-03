@@ -19,31 +19,31 @@ func TestToClientMessage(t *testing.T) {
 		{
 			name:     "StartupMessage",
 			input:    &pgproto3.StartupMessage{ProtocolVersion: 196608, Parameters: map[string]string{"user": "test"}},
-			wantType: "*ClientStartupStartupMessage",
+			wantType: "*ClientStartupMessage",
 			wantOk:   true,
 		},
 		{
 			name:     "SSLRequest",
 			input:    &pgproto3.SSLRequest{},
-			wantType: "*ClientStartupSSLRequest",
+			wantType: "*ClientSSLRequest",
 			wantOk:   true,
 		},
 		{
 			name:     "PasswordMessage",
 			input:    &pgproto3.PasswordMessage{Password: "secret"},
-			wantType: "*ClientStartupPasswordMessage",
+			wantType: "*ClientPasswordMessage",
 			wantOk:   true,
 		},
 		{
 			name:     "SASLInitialResponse",
 			input:    &pgproto3.SASLInitialResponse{AuthMechanism: "SCRAM-SHA-256"},
-			wantType: "*ClientStartupSASLInitialResponse",
+			wantType: "*ClientSASLInitialResponse",
 			wantOk:   true,
 		},
 		{
 			name:     "SASLResponse",
 			input:    &pgproto3.SASLResponse{Data: []byte("response")},
-			wantType: "*ClientStartupSASLResponse",
+			wantType: "*ClientSASLResponse",
 			wantOk:   true,
 		},
 
@@ -51,13 +51,13 @@ func TestToClientMessage(t *testing.T) {
 		{
 			name:     "Query",
 			input:    &pgproto3.Query{String: "SELECT 1"},
-			wantType: "*ClientSimpleQueryQuery",
+			wantType: "*ClientQuery",
 			wantOk:   true,
 		},
 		{
 			name:     "FunctionCall",
 			input:    &pgproto3.FunctionCall{Function: 123},
-			wantType: "*ClientSimpleQueryFunctionCall",
+			wantType: "*ClientFunctionCall",
 			wantOk:   true,
 		},
 
@@ -65,43 +65,43 @@ func TestToClientMessage(t *testing.T) {
 		{
 			name:     "Parse",
 			input:    &pgproto3.Parse{Name: "stmt1", Query: "SELECT $1"},
-			wantType: "*ClientExtendedQueryParse",
+			wantType: "*ClientParse",
 			wantOk:   true,
 		},
 		{
 			name:     "Bind",
 			input:    &pgproto3.Bind{DestinationPortal: "p1", PreparedStatement: "stmt1"},
-			wantType: "*ClientExtendedQueryBind",
+			wantType: "*ClientBind",
 			wantOk:   true,
 		},
 		{
 			name:     "Execute",
 			input:    &pgproto3.Execute{Portal: "p1", MaxRows: 0},
-			wantType: "*ClientExtendedQueryExecute",
+			wantType: "*ClientExecute",
 			wantOk:   true,
 		},
 		{
 			name:     "Describe",
 			input:    &pgproto3.Describe{ObjectType: 'S', Name: "stmt1"},
-			wantType: "*ClientExtendedQueryDescribe",
+			wantType: "*ClientDescribe",
 			wantOk:   true,
 		},
 		{
 			name:     "Close",
 			input:    &pgproto3.Close{ObjectType: 'S', Name: "stmt1"},
-			wantType: "*ClientExtendedQueryClose",
+			wantType: "*ClientClose",
 			wantOk:   true,
 		},
 		{
 			name:     "Sync",
 			input:    &pgproto3.Sync{},
-			wantType: "*ClientExtendedQuerySync",
+			wantType: "*ClientSync",
 			wantOk:   true,
 		},
 		{
 			name:     "Flush",
 			input:    &pgproto3.Flush{},
-			wantType: "*ClientExtendedQueryFlush",
+			wantType: "*ClientFlush",
 			wantOk:   true,
 		},
 
@@ -109,19 +109,19 @@ func TestToClientMessage(t *testing.T) {
 		{
 			name:     "CopyData",
 			input:    &pgproto3.CopyData{Data: []byte("data")},
-			wantType: "*ClientCopyCopyData",
+			wantType: "*ClientCopyData",
 			wantOk:   true,
 		},
 		{
 			name:     "CopyDone",
 			input:    &pgproto3.CopyDone{},
-			wantType: "*ClientCopyCopyDone",
+			wantType: "*ClientCopyDone",
 			wantOk:   true,
 		},
 		{
 			name:     "CopyFail",
 			input:    &pgproto3.CopyFail{Message: "error"},
-			wantType: "*ClientCopyCopyFail",
+			wantType: "*ClientCopyFail",
 			wantOk:   true,
 		},
 
@@ -129,7 +129,7 @@ func TestToClientMessage(t *testing.T) {
 		{
 			name:     "CancelRequest",
 			input:    &pgproto3.CancelRequest{ProcessID: 123, SecretKey: 456},
-			wantType: "*ClientCancelCancelRequest",
+			wantType: "*ClientCancelRequest",
 			wantOk:   true,
 		},
 
@@ -137,7 +137,7 @@ func TestToClientMessage(t *testing.T) {
 		{
 			name:     "Terminate",
 			input:    &pgproto3.Terminate{},
-			wantType: "*ClientTerminateConnTerminate",
+			wantType: "*ClientTerminate",
 			wantOk:   true,
 		},
 	}
@@ -172,43 +172,43 @@ func TestToServerMessage(t *testing.T) {
 		{
 			name:     "AuthenticationOk",
 			input:    &pgproto3.AuthenticationOk{},
-			wantType: "*ServerStartupAuthenticationOk",
+			wantType: "*ServerAuthenticationOk",
 			wantOk:   true,
 		},
 		{
 			name:     "AuthenticationCleartextPassword",
 			input:    &pgproto3.AuthenticationCleartextPassword{},
-			wantType: "*ServerStartupAuthenticationCleartextPassword",
+			wantType: "*ServerAuthenticationCleartextPassword",
 			wantOk:   true,
 		},
 		{
 			name:     "AuthenticationMD5Password",
 			input:    &pgproto3.AuthenticationMD5Password{Salt: [4]byte{1, 2, 3, 4}},
-			wantType: "*ServerStartupAuthenticationMD5Password",
+			wantType: "*ServerAuthenticationMD5Password",
 			wantOk:   true,
 		},
 		{
 			name:     "AuthenticationSASL",
 			input:    &pgproto3.AuthenticationSASL{AuthMechanisms: []string{"SCRAM-SHA-256"}},
-			wantType: "*ServerStartupAuthenticationSASL",
+			wantType: "*ServerAuthenticationSASL",
 			wantOk:   true,
 		},
 		{
 			name:     "AuthenticationSASLContinue",
 			input:    &pgproto3.AuthenticationSASLContinue{Data: []byte("data")},
-			wantType: "*ServerStartupAuthenticationSASLContinue",
+			wantType: "*ServerAuthenticationSASLContinue",
 			wantOk:   true,
 		},
 		{
 			name:     "AuthenticationSASLFinal",
 			input:    &pgproto3.AuthenticationSASLFinal{Data: []byte("data")},
-			wantType: "*ServerStartupAuthenticationSASLFinal",
+			wantType: "*ServerAuthenticationSASLFinal",
 			wantOk:   true,
 		},
 		{
 			name:     "BackendKeyData",
 			input:    &pgproto3.BackendKeyData{ProcessID: 123, SecretKey: 456},
-			wantType: "*ServerStartupBackendKeyData",
+			wantType: "*ServerBackendKeyData",
 			wantOk:   true,
 		},
 
@@ -216,31 +216,31 @@ func TestToServerMessage(t *testing.T) {
 		{
 			name:     "ReadyForQuery",
 			input:    &pgproto3.ReadyForQuery{TxStatus: 'I'},
-			wantType: "*ServerResponseReadyForQuery",
+			wantType: "*ServerReadyForQuery",
 			wantOk:   true,
 		},
 		{
 			name:     "CommandComplete",
 			input:    &pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")},
-			wantType: "*ServerResponseCommandComplete",
+			wantType: "*ServerCommandComplete",
 			wantOk:   true,
 		},
 		{
 			name:     "DataRow",
 			input:    &pgproto3.DataRow{Values: [][]byte{[]byte("1")}},
-			wantType: "*ServerResponseDataRow",
+			wantType: "*ServerDataRow",
 			wantOk:   true,
 		},
 		{
 			name:     "EmptyQueryResponse",
 			input:    &pgproto3.EmptyQueryResponse{},
-			wantType: "*ServerResponseEmptyQueryResponse",
+			wantType: "*ServerEmptyQueryResponse",
 			wantOk:   true,
 		},
 		{
 			name:     "ErrorResponse",
 			input:    &pgproto3.ErrorResponse{Severity: "ERROR", Code: "42000", Message: "test error"},
-			wantType: "*ServerResponseErrorResponse",
+			wantType: "*ServerErrorResponse",
 			wantOk:   true,
 		},
 
@@ -248,43 +248,43 @@ func TestToServerMessage(t *testing.T) {
 		{
 			name:     "ParseComplete",
 			input:    &pgproto3.ParseComplete{},
-			wantType: "*ServerExtendedQueryParseComplete",
+			wantType: "*ServerParseComplete",
 			wantOk:   true,
 		},
 		{
 			name:     "BindComplete",
 			input:    &pgproto3.BindComplete{},
-			wantType: "*ServerExtendedQueryBindComplete",
+			wantType: "*ServerBindComplete",
 			wantOk:   true,
 		},
 		{
 			name:     "CloseComplete",
 			input:    &pgproto3.CloseComplete{},
-			wantType: "*ServerExtendedQueryCloseComplete",
+			wantType: "*ServerCloseComplete",
 			wantOk:   true,
 		},
 		{
 			name:     "ParameterDescription",
 			input:    &pgproto3.ParameterDescription{ParameterOIDs: []uint32{23}},
-			wantType: "*ServerExtendedQueryParameterDescription",
+			wantType: "*ServerParameterDescription",
 			wantOk:   true,
 		},
 		{
 			name:     "RowDescription",
 			input:    &pgproto3.RowDescription{Fields: []pgproto3.FieldDescription{{Name: []byte("col1")}}},
-			wantType: "*ServerExtendedQueryRowDescription",
+			wantType: "*ServerRowDescription",
 			wantOk:   true,
 		},
 		{
 			name:     "NoData",
 			input:    &pgproto3.NoData{},
-			wantType: "*ServerExtendedQueryNoData",
+			wantType: "*ServerNoData",
 			wantOk:   true,
 		},
 		{
 			name:     "PortalSuspended",
 			input:    &pgproto3.PortalSuspended{},
-			wantType: "*ServerExtendedQueryPortalSuspended",
+			wantType: "*ServerPortalSuspended",
 			wantOk:   true,
 		},
 
@@ -292,25 +292,25 @@ func TestToServerMessage(t *testing.T) {
 		{
 			name:     "CopyInResponse",
 			input:    &pgproto3.CopyInResponse{OverallFormat: 0},
-			wantType: "*ServerCopyCopyInResponse",
+			wantType: "*ServerCopyInResponse",
 			wantOk:   true,
 		},
 		{
 			name:     "CopyOutResponse",
 			input:    &pgproto3.CopyOutResponse{OverallFormat: 0},
-			wantType: "*ServerCopyCopyOutResponse",
+			wantType: "*ServerCopyOutResponse",
 			wantOk:   true,
 		},
 		{
 			name:     "CopyData",
 			input:    &pgproto3.CopyData{Data: []byte("data")},
-			wantType: "*ServerCopyCopyData",
+			wantType: "*ServerCopyData",
 			wantOk:   true,
 		},
 		{
 			name:     "CopyDone",
 			input:    &pgproto3.CopyDone{},
-			wantType: "*ServerCopyCopyDone",
+			wantType: "*ServerCopyDone",
 			wantOk:   true,
 		},
 
@@ -318,19 +318,19 @@ func TestToServerMessage(t *testing.T) {
 		{
 			name:     "NoticeResponse",
 			input:    &pgproto3.NoticeResponse{Severity: "WARNING", Message: "test"},
-			wantType: "*ServerAsyncNoticeResponse",
+			wantType: "*ServerNoticeResponse",
 			wantOk:   true,
 		},
 		{
 			name:     "NotificationResponse",
 			input:    &pgproto3.NotificationResponse{PID: 123, Channel: "test", Payload: "data"},
-			wantType: "*ServerAsyncNotificationResponse",
+			wantType: "*ServerNotificationResponse",
 			wantOk:   true,
 		},
 		{
 			name:     "ParameterStatus",
 			input:    &pgproto3.ParameterStatus{Name: "server_version", Value: "15.0"},
-			wantType: "*ServerAsyncParameterStatus",
+			wantType: "*ServerParameterStatus",
 			wantOk:   true,
 		},
 	}

@@ -133,9 +133,15 @@ func findPgwireComment(file *ast.File, funcDecl *ast.FuncDecl) *pgwireConfig {
 	}
 
 	// Check if the closest comment group has a pgwire directive
+	// Handle both "//pgwire:" and "// pgwire:" formats
 	for _, c := range closestGroup.List {
-		if strings.HasPrefix(c.Text, "//pgwire:") {
-			text := strings.TrimPrefix(c.Text, "//pgwire:")
+		text := c.Text
+		if strings.HasPrefix(text, "//pgwire:") {
+			text = strings.TrimPrefix(text, "//pgwire:")
+			return parsePgwireComment(text)
+		}
+		if strings.HasPrefix(text, "// pgwire:") {
+			text = strings.TrimPrefix(text, "// pgwire:")
 			return parsePgwireComment(text)
 		}
 	}
@@ -333,14 +339,14 @@ func generateCode(pkgName string, imports []string, from string, groups []typeGr
 		buf.WriteString("// Compile-time checks that all wrapper types implement the interface.\n")
 		buf.WriteString("var (\n")
 		for _, ti := range group.types {
-			newTypeName := from + group.prefix + ti.shortName
+			newTypeName := typeName(from, ti.shortName)
 			fmt.Fprintf(&buf, "\t_ %s = (*%s)(nil)\n", interfaceName, newTypeName)
 		}
 		buf.WriteString(")\n\n")
 
 		// Type definitions
 		for _, ti := range group.types {
-			newTypeName := from + group.prefix + ti.shortName
+			newTypeName := typeName(from, ti.shortName)
 
 			if len(ti.comments) > 0 {
 				for _, comment := range ti.comments {
@@ -391,7 +397,7 @@ func generateCode(pkgName string, imports []string, from string, groups []typeGr
 		fmt.Fprintf(&buf, "func %s(msg %s) (%s, bool) {\n", funcName, inputType(from), interfaceName)
 		buf.WriteString("\tswitch m := msg.(type) {\n")
 		for _, ti := range group.types {
-			newTypeName := from + group.prefix + ti.shortName
+			newTypeName := typeName(from, ti.shortName)
 			fmt.Fprintf(&buf, "\tcase %s:\n", ti.qualified)
 			fmt.Fprintf(&buf, "\t\treturn (*%s)(%s(m)), true\n", newTypeName, newLazyFunc)
 		}
@@ -430,6 +436,12 @@ func inputType(from string) string {
 	return "pgproto3.BackendMessage"
 }
 
+// typeName generates the wrapper type name for a message type.
+// e.g., typeName("Client", "GSSEncRequest") -> "ClientGSSEncRequest"
+func typeName(from, shortName string) string {
+	return from + shortName
+}
+
 func generateGroupHandlers(buf *bytes.Buffer, from, prefix, interfaceName string, types []typeInfo) {
 	handlersName := from + prefix + "Handlers"
 
@@ -438,7 +450,7 @@ func generateGroupHandlers(buf *bytes.Buffer, from, prefix, interfaceName string
 	fmt.Fprintf(buf, "type %s[T any] struct {\n", handlersName)
 	fmt.Fprintf(buf, "\tDefault func(msg %s) (T, error)\n", interfaceName)
 	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
+		newTypeName := typeName(from, ti.shortName)
 		fmt.Fprintf(buf, "\t%s func(msg *%s) (T, error)\n", ti.shortName, newTypeName)
 	}
 	buf.WriteString("}\n\n")
@@ -455,7 +467,7 @@ func generateGroupHandlers(buf *bytes.Buffer, from, prefix, interfaceName string
 	buf.WriteString("\t}\n")
 	buf.WriteString("\tswitch msg := msg.(type) {\n")
 	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
+		newTypeName := typeName(from, ti.shortName)
 		fmt.Fprintf(buf, "\tcase *%s:\n", newTypeName)
 		fmt.Fprintf(buf, "\t\tif h.%s != nil {\n", ti.shortName)
 		fmt.Fprintf(buf, "\t\t\treturn h.%s(msg)\n", ti.shortName)
@@ -479,7 +491,7 @@ func generateGroupHandlers(buf *bytes.Buffer, from, prefix, interfaceName string
 	fmt.Fprintf(buf, "type %s[Arg, Result any] struct {\n", handlersCtxName)
 	fmt.Fprintf(buf, "\tDefault func(ctx context.Context, msg %s, arg Arg) (Result, error)\n", interfaceName)
 	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
+		newTypeName := typeName(from, ti.shortName)
 		fmt.Fprintf(buf, "\t%s func(ctx context.Context, msg *%s, arg Arg) (Result, error)\n", ti.shortName, newTypeName)
 	}
 	buf.WriteString("}\n\n")
@@ -496,7 +508,7 @@ func generateGroupHandlers(buf *bytes.Buffer, from, prefix, interfaceName string
 	buf.WriteString("\t}\n")
 	buf.WriteString("\tswitch msg := msg.(type) {\n")
 	for _, ti := range types {
-		newTypeName := from + prefix + ti.shortName
+		newTypeName := typeName(from, ti.shortName)
 		fmt.Fprintf(buf, "\tcase *%s:\n", newTypeName)
 		fmt.Fprintf(buf, "\t\tif h.%s != nil {\n", ti.shortName)
 		fmt.Fprintf(buf, "\t\t\treturn h.%s(ctx, msg, arg)\n", ti.shortName)

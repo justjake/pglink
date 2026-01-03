@@ -95,11 +95,11 @@ func (f *RequestFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandlers {
 		},
 		Server: FlowUpdateServerHandlers{
 			Response: func(msg ServerResponse) bool {
-				if _, ok := msg.(*ServerResponseReadyForQuery); ok {
+				if _, ok := msg.(*ServerReadyForQuery); ok {
 					f.isComplete = true
 					return false // Flow complete
 				}
-				if errResp, ok := msg.(*ServerResponseErrorResponse); ok {
+				if errResp, ok := msg.(*ServerErrorResponse); ok {
 					if f.OnError != nil {
 						f.OnError(f, errResp.Parse())
 					}
@@ -195,25 +195,25 @@ func (f *RequestFlow) IsComplete() bool {
 // This exactly mirrors PgBouncer's pop_outstanding_request behavior.
 func responseMatchesRequest(msg ServerMessage, requestType MsgType) bool {
 	switch msg.(type) {
-	case *ServerExtendedQueryParseComplete:
+	case *ServerParseComplete:
 		return requestType == MsgClientParse
-	case *ServerExtendedQueryBindComplete:
+	case *ServerBindComplete:
 		return requestType == MsgClientBind
-	case *ServerExtendedQueryCloseComplete:
+	case *ServerCloseComplete:
 		return requestType == MsgClientClose
-	case *ServerExtendedQueryNoData, *ServerExtendedQueryRowDescription, *ServerExtendedQueryParameterDescription:
+	case *ServerNoData, *ServerRowDescription, *ServerParameterDescription:
 		return requestType == MsgClientDescribe
-	case *ServerResponseCommandComplete:
+	case *ServerCommandComplete:
 		return requestType == MsgClientQuery || requestType == MsgClientExecute
-	case *ServerResponseEmptyQueryResponse:
+	case *ServerEmptyQueryResponse:
 		return requestType == MsgClientQuery || requestType == MsgClientExecute
-	case *ServerExtendedQueryPortalSuspended:
+	case *ServerPortalSuspended:
 		return requestType == MsgClientExecute
-	case *ServerResponseReadyForQuery:
+	case *ServerReadyForQuery:
 		return requestType == MsgClientSync || requestType == MsgClientQuery || requestType == MsgClientFunc
-	case *ServerResponseFunctionCallResponse:
+	case *ServerFunctionCallResponse:
 		return requestType == MsgClientFunc
-	case *ServerResponseErrorResponse:
+	case *ServerErrorResponse:
 		return true // ErrorResponse can match any request
 	default:
 		return false

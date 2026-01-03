@@ -7,7 +7,7 @@ import (
 )
 
 type ExtendedQueryFlow struct {
-	Err *pgwire.ServerResponseErrorResponse
+	Err *pgwire.ServerErrorResponse
 }
 
 func NewExtendedQueryFlowTracker(onComplete FlowCompleteHandler[ExtendedQueryFlow]) FlowTracker[ExtendedQueryFlow] {
@@ -25,12 +25,12 @@ func waitingForExtendedQueryRequest(ctx context.Context, state FlowState[Extende
 
 func extendedQueryActive(ctx context.Context, state FlowState[ExtendedQueryFlow], msg pgwire.Message) (bool, FlowState[ExtendedQueryFlow], FlowReducer[ExtendedQueryFlow], error) {
 	switch msg := msg.(type) {
-	case *pgwire.ServerResponseErrorResponse:
+	case *pgwire.ServerErrorResponse:
 		errorResponse := msg.Retain()
 		state.Flow.Err = &errorResponse
 		return true, state, extendedQueryActive, nil
 
-	case *pgwire.ServerResponseReadyForQuery:
+	case *pgwire.ServerReadyForQuery:
 		return true, EndedFlowState(state), waitingForExtendedQueryRequest, nil
 	}
 

@@ -20,199 +20,189 @@ type ServerStartup interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ServerStartup = (*ServerStartupAuthenticationCleartextPassword)(nil)
-	_ ServerStartup = (*ServerStartupAuthenticationGSS)(nil)
-	_ ServerStartup = (*ServerStartupAuthenticationGSSContinue)(nil)
-	_ ServerStartup = (*ServerStartupAuthenticationMD5Password)(nil)
-	_ ServerStartup = (*ServerStartupAuthenticationOk)(nil)
-	_ ServerStartup = (*ServerStartupAuthenticationSASL)(nil)
-	_ ServerStartup = (*ServerStartupAuthenticationSASLContinue)(nil)
-	_ ServerStartup = (*ServerStartupAuthenticationSASLFinal)(nil)
-	_ ServerStartup = (*ServerStartupBackendKeyData)(nil)
+	_ ServerStartup = (*ServerAuthenticationCleartextPassword)(nil)
+	_ ServerStartup = (*ServerAuthenticationGSS)(nil)
+	_ ServerStartup = (*ServerAuthenticationGSSContinue)(nil)
+	_ ServerStartup = (*ServerAuthenticationMD5Password)(nil)
+	_ ServerStartup = (*ServerAuthenticationOk)(nil)
+	_ ServerStartup = (*ServerAuthenticationSASL)(nil)
+	_ ServerStartup = (*ServerAuthenticationSASLContinue)(nil)
+	_ ServerStartup = (*ServerAuthenticationSASLFinal)(nil)
+	_ ServerStartup = (*ServerBackendKeyData)(nil)
 )
 
-// ServerStartupAuthenticationCleartextPassword wraps *pgproto3.AuthenticationCleartextPassword from the server.
-type ServerStartupAuthenticationCleartextPassword FromServer[*pgproto3.AuthenticationCleartextPassword]
+// ServerAuthenticationCleartextPassword wraps *pgproto3.AuthenticationCleartextPassword from the server.
+type ServerAuthenticationCleartextPassword FromServer[*pgproto3.AuthenticationCleartextPassword]
 
-func (*ServerStartupAuthenticationCleartextPassword) Server()  {}
-func (*ServerStartupAuthenticationCleartextPassword) Startup() {}
-func (t *ServerStartupAuthenticationCleartextPassword) MsgType() MsgType {
-	return t.source.MessageType()
-}
-func (m *ServerStartupAuthenticationCleartextPassword) Parse() *pgproto3.AuthenticationCleartextPassword {
+func (*ServerAuthenticationCleartextPassword) Server()            {}
+func (*ServerAuthenticationCleartextPassword) Startup()           {}
+func (t *ServerAuthenticationCleartextPassword) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerAuthenticationCleartextPassword) Parse() *pgproto3.AuthenticationCleartextPassword {
 	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(m).Parse()
 }
-func (m *ServerStartupAuthenticationCleartextPassword) ParseBackend() pgproto3.BackendMessage {
+func (m *ServerAuthenticationCleartextPassword) ParseBackend() pgproto3.BackendMessage {
 	return m.Parse()
 }
-func (m *ServerStartupAuthenticationCleartextPassword) Source() RawMessageSource { return m.source }
+func (m *ServerAuthenticationCleartextPassword) Source() RawMessageSource { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupAuthenticationCleartextPassword) Retain() ServerStartupAuthenticationCleartextPassword {
+func (m ServerAuthenticationCleartextPassword) Retain() ServerAuthenticationCleartextPassword {
 	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationCleartextPassword])(&m).retainFields()
-	return ServerStartupAuthenticationCleartextPassword{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerAuthenticationCleartextPassword{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ServerStartupAuthenticationGSS wraps *pgproto3.AuthenticationGSS from the server.
-type ServerStartupAuthenticationGSS FromServer[*pgproto3.AuthenticationGSS]
+// ServerAuthenticationGSS wraps *pgproto3.AuthenticationGSS from the server.
+type ServerAuthenticationGSS FromServer[*pgproto3.AuthenticationGSS]
 
-func (*ServerStartupAuthenticationGSS) Server()            {}
-func (*ServerStartupAuthenticationGSS) Startup()           {}
-func (t *ServerStartupAuthenticationGSS) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerStartupAuthenticationGSS) Parse() *pgproto3.AuthenticationGSS {
+func (*ServerAuthenticationGSS) Server()            {}
+func (*ServerAuthenticationGSS) Startup()           {}
+func (t *ServerAuthenticationGSS) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerAuthenticationGSS) Parse() *pgproto3.AuthenticationGSS {
 	return (*FromServer[*pgproto3.AuthenticationGSS])(m).Parse()
 }
-func (m *ServerStartupAuthenticationGSS) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerStartupAuthenticationGSS) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationGSS) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerAuthenticationGSS) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupAuthenticationGSS) Retain() ServerStartupAuthenticationGSS {
+func (m ServerAuthenticationGSS) Retain() ServerAuthenticationGSS {
 	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationGSS])(&m).retainFields()
-	return ServerStartupAuthenticationGSS{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerAuthenticationGSS{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ServerStartupAuthenticationGSSContinue wraps *pgproto3.AuthenticationGSSContinue from the server.
-type ServerStartupAuthenticationGSSContinue FromServer[*pgproto3.AuthenticationGSSContinue]
+// ServerAuthenticationGSSContinue wraps *pgproto3.AuthenticationGSSContinue from the server.
+type ServerAuthenticationGSSContinue FromServer[*pgproto3.AuthenticationGSSContinue]
 
-func (*ServerStartupAuthenticationGSSContinue) Server()            {}
-func (*ServerStartupAuthenticationGSSContinue) Startup()           {}
-func (t *ServerStartupAuthenticationGSSContinue) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerStartupAuthenticationGSSContinue) Parse() *pgproto3.AuthenticationGSSContinue {
+func (*ServerAuthenticationGSSContinue) Server()            {}
+func (*ServerAuthenticationGSSContinue) Startup()           {}
+func (t *ServerAuthenticationGSSContinue) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerAuthenticationGSSContinue) Parse() *pgproto3.AuthenticationGSSContinue {
 	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(m).Parse()
 }
-func (m *ServerStartupAuthenticationGSSContinue) ParseBackend() pgproto3.BackendMessage {
-	return m.Parse()
-}
-func (m *ServerStartupAuthenticationGSSContinue) Source() RawMessageSource { return m.source }
+func (m *ServerAuthenticationGSSContinue) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerAuthenticationGSSContinue) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupAuthenticationGSSContinue) Retain() ServerStartupAuthenticationGSSContinue {
+func (m ServerAuthenticationGSSContinue) Retain() ServerAuthenticationGSSContinue {
 	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationGSSContinue])(&m).retainFields()
-	return ServerStartupAuthenticationGSSContinue{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerAuthenticationGSSContinue{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ServerStartupAuthenticationMD5Password wraps *pgproto3.AuthenticationMD5Password from the server.
-type ServerStartupAuthenticationMD5Password FromServer[*pgproto3.AuthenticationMD5Password]
+// ServerAuthenticationMD5Password wraps *pgproto3.AuthenticationMD5Password from the server.
+type ServerAuthenticationMD5Password FromServer[*pgproto3.AuthenticationMD5Password]
 
-func (*ServerStartupAuthenticationMD5Password) Server()            {}
-func (*ServerStartupAuthenticationMD5Password) Startup()           {}
-func (t *ServerStartupAuthenticationMD5Password) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerStartupAuthenticationMD5Password) Parse() *pgproto3.AuthenticationMD5Password {
+func (*ServerAuthenticationMD5Password) Server()            {}
+func (*ServerAuthenticationMD5Password) Startup()           {}
+func (t *ServerAuthenticationMD5Password) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerAuthenticationMD5Password) Parse() *pgproto3.AuthenticationMD5Password {
 	return (*FromServer[*pgproto3.AuthenticationMD5Password])(m).Parse()
 }
-func (m *ServerStartupAuthenticationMD5Password) ParseBackend() pgproto3.BackendMessage {
-	return m.Parse()
-}
-func (m *ServerStartupAuthenticationMD5Password) Source() RawMessageSource { return m.source }
+func (m *ServerAuthenticationMD5Password) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerAuthenticationMD5Password) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupAuthenticationMD5Password) Retain() ServerStartupAuthenticationMD5Password {
+func (m ServerAuthenticationMD5Password) Retain() ServerAuthenticationMD5Password {
 	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationMD5Password])(&m).retainFields()
-	return ServerStartupAuthenticationMD5Password{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerAuthenticationMD5Password{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ServerStartupAuthenticationOk wraps *pgproto3.AuthenticationOk from the server.
-type ServerStartupAuthenticationOk FromServer[*pgproto3.AuthenticationOk]
+// ServerAuthenticationOk wraps *pgproto3.AuthenticationOk from the server.
+type ServerAuthenticationOk FromServer[*pgproto3.AuthenticationOk]
 
-func (*ServerStartupAuthenticationOk) Server()            {}
-func (*ServerStartupAuthenticationOk) Startup()           {}
-func (t *ServerStartupAuthenticationOk) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerStartupAuthenticationOk) Parse() *pgproto3.AuthenticationOk {
+func (*ServerAuthenticationOk) Server()            {}
+func (*ServerAuthenticationOk) Startup()           {}
+func (t *ServerAuthenticationOk) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerAuthenticationOk) Parse() *pgproto3.AuthenticationOk {
 	return (*FromServer[*pgproto3.AuthenticationOk])(m).Parse()
 }
-func (m *ServerStartupAuthenticationOk) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerStartupAuthenticationOk) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationOk) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerAuthenticationOk) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupAuthenticationOk) Retain() ServerStartupAuthenticationOk {
+func (m ServerAuthenticationOk) Retain() ServerAuthenticationOk {
 	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationOk])(&m).retainFields()
-	return ServerStartupAuthenticationOk{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerAuthenticationOk{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ServerStartupAuthenticationSASL wraps *pgproto3.AuthenticationSASL from the server.
-type ServerStartupAuthenticationSASL FromServer[*pgproto3.AuthenticationSASL]
+// ServerAuthenticationSASL wraps *pgproto3.AuthenticationSASL from the server.
+type ServerAuthenticationSASL FromServer[*pgproto3.AuthenticationSASL]
 
-func (*ServerStartupAuthenticationSASL) Server()            {}
-func (*ServerStartupAuthenticationSASL) Startup()           {}
-func (t *ServerStartupAuthenticationSASL) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerStartupAuthenticationSASL) Parse() *pgproto3.AuthenticationSASL {
+func (*ServerAuthenticationSASL) Server()            {}
+func (*ServerAuthenticationSASL) Startup()           {}
+func (t *ServerAuthenticationSASL) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerAuthenticationSASL) Parse() *pgproto3.AuthenticationSASL {
 	return (*FromServer[*pgproto3.AuthenticationSASL])(m).Parse()
 }
-func (m *ServerStartupAuthenticationSASL) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerStartupAuthenticationSASL) Source() RawMessageSource              { return m.source }
+func (m *ServerAuthenticationSASL) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerAuthenticationSASL) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupAuthenticationSASL) Retain() ServerStartupAuthenticationSASL {
+func (m ServerAuthenticationSASL) Retain() ServerAuthenticationSASL {
 	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationSASL])(&m).retainFields()
-	return ServerStartupAuthenticationSASL{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerAuthenticationSASL{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ServerStartupAuthenticationSASLContinue wraps *pgproto3.AuthenticationSASLContinue from the server.
-type ServerStartupAuthenticationSASLContinue FromServer[*pgproto3.AuthenticationSASLContinue]
+// ServerAuthenticationSASLContinue wraps *pgproto3.AuthenticationSASLContinue from the server.
+type ServerAuthenticationSASLContinue FromServer[*pgproto3.AuthenticationSASLContinue]
 
-func (*ServerStartupAuthenticationSASLContinue) Server()            {}
-func (*ServerStartupAuthenticationSASLContinue) Startup()           {}
-func (t *ServerStartupAuthenticationSASLContinue) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerStartupAuthenticationSASLContinue) Parse() *pgproto3.AuthenticationSASLContinue {
+func (*ServerAuthenticationSASLContinue) Server()            {}
+func (*ServerAuthenticationSASLContinue) Startup()           {}
+func (t *ServerAuthenticationSASLContinue) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerAuthenticationSASLContinue) Parse() *pgproto3.AuthenticationSASLContinue {
 	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(m).Parse()
 }
-func (m *ServerStartupAuthenticationSASLContinue) ParseBackend() pgproto3.BackendMessage {
-	return m.Parse()
-}
-func (m *ServerStartupAuthenticationSASLContinue) Source() RawMessageSource { return m.source }
+func (m *ServerAuthenticationSASLContinue) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerAuthenticationSASLContinue) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupAuthenticationSASLContinue) Retain() ServerStartupAuthenticationSASLContinue {
+func (m ServerAuthenticationSASLContinue) Retain() ServerAuthenticationSASLContinue {
 	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationSASLContinue])(&m).retainFields()
-	return ServerStartupAuthenticationSASLContinue{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerAuthenticationSASLContinue{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ServerStartupAuthenticationSASLFinal wraps *pgproto3.AuthenticationSASLFinal from the server.
-type ServerStartupAuthenticationSASLFinal FromServer[*pgproto3.AuthenticationSASLFinal]
+// ServerAuthenticationSASLFinal wraps *pgproto3.AuthenticationSASLFinal from the server.
+type ServerAuthenticationSASLFinal FromServer[*pgproto3.AuthenticationSASLFinal]
 
-func (*ServerStartupAuthenticationSASLFinal) Server()            {}
-func (*ServerStartupAuthenticationSASLFinal) Startup()           {}
-func (t *ServerStartupAuthenticationSASLFinal) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerStartupAuthenticationSASLFinal) Parse() *pgproto3.AuthenticationSASLFinal {
+func (*ServerAuthenticationSASLFinal) Server()            {}
+func (*ServerAuthenticationSASLFinal) Startup()           {}
+func (t *ServerAuthenticationSASLFinal) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerAuthenticationSASLFinal) Parse() *pgproto3.AuthenticationSASLFinal {
 	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(m).Parse()
 }
-func (m *ServerStartupAuthenticationSASLFinal) ParseBackend() pgproto3.BackendMessage {
-	return m.Parse()
-}
-func (m *ServerStartupAuthenticationSASLFinal) Source() RawMessageSource { return m.source }
+func (m *ServerAuthenticationSASLFinal) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerAuthenticationSASLFinal) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupAuthenticationSASLFinal) Retain() ServerStartupAuthenticationSASLFinal {
+func (m ServerAuthenticationSASLFinal) Retain() ServerAuthenticationSASLFinal {
 	src, parsed, isParsed := (*FromServer[*pgproto3.AuthenticationSASLFinal])(&m).retainFields()
-	return ServerStartupAuthenticationSASLFinal{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerAuthenticationSASLFinal{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Secret key data for cancel requests.
 // This should be already captured when we establish the connection.
-type ServerStartupBackendKeyData FromServer[*pgproto3.BackendKeyData]
+type ServerBackendKeyData FromServer[*pgproto3.BackendKeyData]
 
-func (*ServerStartupBackendKeyData) Server()            {}
-func (*ServerStartupBackendKeyData) Startup()           {}
-func (t *ServerStartupBackendKeyData) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerStartupBackendKeyData) Parse() *pgproto3.BackendKeyData {
+func (*ServerBackendKeyData) Server()            {}
+func (*ServerBackendKeyData) Startup()           {}
+func (t *ServerBackendKeyData) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerBackendKeyData) Parse() *pgproto3.BackendKeyData {
 	return (*FromServer[*pgproto3.BackendKeyData])(m).Parse()
 }
-func (m *ServerStartupBackendKeyData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerStartupBackendKeyData) Source() RawMessageSource              { return m.source }
+func (m *ServerBackendKeyData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerBackendKeyData) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerStartupBackendKeyData) Retain() ServerStartupBackendKeyData {
+func (m ServerBackendKeyData) Retain() ServerBackendKeyData {
 	src, parsed, isParsed := (*FromServer[*pgproto3.BackendKeyData])(&m).retainFields()
-	return ServerStartupBackendKeyData{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerBackendKeyData{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToServerStartup converts a pgproto3.BackendMessage to a ServerStartup if it matches one of the known types.
@@ -220,23 +210,23 @@ func (m ServerStartupBackendKeyData) Retain() ServerStartupBackendKeyData {
 func ToServerStartup(msg pgproto3.BackendMessage) (ServerStartup, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.AuthenticationCleartextPassword:
-		return (*ServerStartupAuthenticationCleartextPassword)(ServerParsed(m)), true
+		return (*ServerAuthenticationCleartextPassword)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationGSS:
-		return (*ServerStartupAuthenticationGSS)(ServerParsed(m)), true
+		return (*ServerAuthenticationGSS)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationGSSContinue:
-		return (*ServerStartupAuthenticationGSSContinue)(ServerParsed(m)), true
+		return (*ServerAuthenticationGSSContinue)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationMD5Password:
-		return (*ServerStartupAuthenticationMD5Password)(ServerParsed(m)), true
+		return (*ServerAuthenticationMD5Password)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationOk:
-		return (*ServerStartupAuthenticationOk)(ServerParsed(m)), true
+		return (*ServerAuthenticationOk)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASL:
-		return (*ServerStartupAuthenticationSASL)(ServerParsed(m)), true
+		return (*ServerAuthenticationSASL)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASLContinue:
-		return (*ServerStartupAuthenticationSASLContinue)(ServerParsed(m)), true
+		return (*ServerAuthenticationSASLContinue)(ServerParsed(m)), true
 	case *pgproto3.AuthenticationSASLFinal:
-		return (*ServerStartupAuthenticationSASLFinal)(ServerParsed(m)), true
+		return (*ServerAuthenticationSASLFinal)(ServerParsed(m)), true
 	case *pgproto3.BackendKeyData:
-		return (*ServerStartupBackendKeyData)(ServerParsed(m)), true
+		return (*ServerBackendKeyData)(ServerParsed(m)), true
 	}
 	return nil, false
 }
@@ -244,15 +234,15 @@ func ToServerStartup(msg pgproto3.BackendMessage) (ServerStartup, bool) {
 // ServerStartupHandlers provides type-safe handlers for each ServerStartup variant.
 type ServerStartupHandlers[T any] struct {
 	Default                         func(msg ServerStartup) (T, error)
-	AuthenticationCleartextPassword func(msg *ServerStartupAuthenticationCleartextPassword) (T, error)
-	AuthenticationGSS               func(msg *ServerStartupAuthenticationGSS) (T, error)
-	AuthenticationGSSContinue       func(msg *ServerStartupAuthenticationGSSContinue) (T, error)
-	AuthenticationMD5Password       func(msg *ServerStartupAuthenticationMD5Password) (T, error)
-	AuthenticationOk                func(msg *ServerStartupAuthenticationOk) (T, error)
-	AuthenticationSASL              func(msg *ServerStartupAuthenticationSASL) (T, error)
-	AuthenticationSASLContinue      func(msg *ServerStartupAuthenticationSASLContinue) (T, error)
-	AuthenticationSASLFinal         func(msg *ServerStartupAuthenticationSASLFinal) (T, error)
-	BackendKeyData                  func(msg *ServerStartupBackendKeyData) (T, error)
+	AuthenticationCleartextPassword func(msg *ServerAuthenticationCleartextPassword) (T, error)
+	AuthenticationGSS               func(msg *ServerAuthenticationGSS) (T, error)
+	AuthenticationGSSContinue       func(msg *ServerAuthenticationGSSContinue) (T, error)
+	AuthenticationMD5Password       func(msg *ServerAuthenticationMD5Password) (T, error)
+	AuthenticationOk                func(msg *ServerAuthenticationOk) (T, error)
+	AuthenticationSASL              func(msg *ServerAuthenticationSASL) (T, error)
+	AuthenticationSASLContinue      func(msg *ServerAuthenticationSASLContinue) (T, error)
+	AuthenticationSASLFinal         func(msg *ServerAuthenticationSASLFinal) (T, error)
+	BackendKeyData                  func(msg *ServerBackendKeyData) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -265,47 +255,47 @@ func (h ServerStartupHandlers[T]) HandleDefault(msg ServerStartup, defaultHandle
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerStartupAuthenticationCleartextPassword:
+	case *ServerAuthenticationCleartextPassword:
 		if h.AuthenticationCleartextPassword != nil {
 			return h.AuthenticationCleartextPassword(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerStartupAuthenticationGSS:
+	case *ServerAuthenticationGSS:
 		if h.AuthenticationGSS != nil {
 			return h.AuthenticationGSS(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerStartupAuthenticationGSSContinue:
+	case *ServerAuthenticationGSSContinue:
 		if h.AuthenticationGSSContinue != nil {
 			return h.AuthenticationGSSContinue(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerStartupAuthenticationMD5Password:
+	case *ServerAuthenticationMD5Password:
 		if h.AuthenticationMD5Password != nil {
 			return h.AuthenticationMD5Password(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerStartupAuthenticationOk:
+	case *ServerAuthenticationOk:
 		if h.AuthenticationOk != nil {
 			return h.AuthenticationOk(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerStartupAuthenticationSASL:
+	case *ServerAuthenticationSASL:
 		if h.AuthenticationSASL != nil {
 			return h.AuthenticationSASL(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerStartupAuthenticationSASLContinue:
+	case *ServerAuthenticationSASLContinue:
 		if h.AuthenticationSASLContinue != nil {
 			return h.AuthenticationSASLContinue(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerStartupAuthenticationSASLFinal:
+	case *ServerAuthenticationSASLFinal:
 		if h.AuthenticationSASLFinal != nil {
 			return h.AuthenticationSASLFinal(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerStartupBackendKeyData:
+	case *ServerBackendKeyData:
 		if h.BackendKeyData != nil {
 			return h.BackendKeyData(msg)
 		}
@@ -323,15 +313,15 @@ func (h ServerStartupHandlers[T]) Handle(msg ServerStartup) (T, error) {
 // ServerStartupHandlersCtx provides type-safe handlers with context and an argument for each ServerStartup variant.
 type ServerStartupHandlersCtx[Arg, Result any] struct {
 	Default                         func(ctx context.Context, msg ServerStartup, arg Arg) (Result, error)
-	AuthenticationCleartextPassword func(ctx context.Context, msg *ServerStartupAuthenticationCleartextPassword, arg Arg) (Result, error)
-	AuthenticationGSS               func(ctx context.Context, msg *ServerStartupAuthenticationGSS, arg Arg) (Result, error)
-	AuthenticationGSSContinue       func(ctx context.Context, msg *ServerStartupAuthenticationGSSContinue, arg Arg) (Result, error)
-	AuthenticationMD5Password       func(ctx context.Context, msg *ServerStartupAuthenticationMD5Password, arg Arg) (Result, error)
-	AuthenticationOk                func(ctx context.Context, msg *ServerStartupAuthenticationOk, arg Arg) (Result, error)
-	AuthenticationSASL              func(ctx context.Context, msg *ServerStartupAuthenticationSASL, arg Arg) (Result, error)
-	AuthenticationSASLContinue      func(ctx context.Context, msg *ServerStartupAuthenticationSASLContinue, arg Arg) (Result, error)
-	AuthenticationSASLFinal         func(ctx context.Context, msg *ServerStartupAuthenticationSASLFinal, arg Arg) (Result, error)
-	BackendKeyData                  func(ctx context.Context, msg *ServerStartupBackendKeyData, arg Arg) (Result, error)
+	AuthenticationCleartextPassword func(ctx context.Context, msg *ServerAuthenticationCleartextPassword, arg Arg) (Result, error)
+	AuthenticationGSS               func(ctx context.Context, msg *ServerAuthenticationGSS, arg Arg) (Result, error)
+	AuthenticationGSSContinue       func(ctx context.Context, msg *ServerAuthenticationGSSContinue, arg Arg) (Result, error)
+	AuthenticationMD5Password       func(ctx context.Context, msg *ServerAuthenticationMD5Password, arg Arg) (Result, error)
+	AuthenticationOk                func(ctx context.Context, msg *ServerAuthenticationOk, arg Arg) (Result, error)
+	AuthenticationSASL              func(ctx context.Context, msg *ServerAuthenticationSASL, arg Arg) (Result, error)
+	AuthenticationSASLContinue      func(ctx context.Context, msg *ServerAuthenticationSASLContinue, arg Arg) (Result, error)
+	AuthenticationSASLFinal         func(ctx context.Context, msg *ServerAuthenticationSASLFinal, arg Arg) (Result, error)
+	BackendKeyData                  func(ctx context.Context, msg *ServerBackendKeyData, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -344,47 +334,47 @@ func (h ServerStartupHandlersCtx[Arg, Result]) HandleDefault(ctx context.Context
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerStartupAuthenticationCleartextPassword:
+	case *ServerAuthenticationCleartextPassword:
 		if h.AuthenticationCleartextPassword != nil {
 			return h.AuthenticationCleartextPassword(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationGSS:
+	case *ServerAuthenticationGSS:
 		if h.AuthenticationGSS != nil {
 			return h.AuthenticationGSS(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationGSSContinue:
+	case *ServerAuthenticationGSSContinue:
 		if h.AuthenticationGSSContinue != nil {
 			return h.AuthenticationGSSContinue(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationMD5Password:
+	case *ServerAuthenticationMD5Password:
 		if h.AuthenticationMD5Password != nil {
 			return h.AuthenticationMD5Password(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationOk:
+	case *ServerAuthenticationOk:
 		if h.AuthenticationOk != nil {
 			return h.AuthenticationOk(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationSASL:
+	case *ServerAuthenticationSASL:
 		if h.AuthenticationSASL != nil {
 			return h.AuthenticationSASL(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationSASLContinue:
+	case *ServerAuthenticationSASLContinue:
 		if h.AuthenticationSASLContinue != nil {
 			return h.AuthenticationSASLContinue(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationSASLFinal:
+	case *ServerAuthenticationSASLFinal:
 		if h.AuthenticationSASLFinal != nil {
 			return h.AuthenticationSASLFinal(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupBackendKeyData:
+	case *ServerBackendKeyData:
 		if h.BackendKeyData != nil {
 			return h.BackendKeyData(ctx, msg, arg)
 		}
@@ -410,149 +400,145 @@ type ServerExtendedQuery interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ServerExtendedQuery = (*ServerExtendedQueryParseComplete)(nil)
-	_ ServerExtendedQuery = (*ServerExtendedQueryBindComplete)(nil)
-	_ ServerExtendedQuery = (*ServerExtendedQueryParameterDescription)(nil)
-	_ ServerExtendedQuery = (*ServerExtendedQueryRowDescription)(nil)
-	_ ServerExtendedQuery = (*ServerExtendedQueryNoData)(nil)
-	_ ServerExtendedQuery = (*ServerExtendedQueryPortalSuspended)(nil)
-	_ ServerExtendedQuery = (*ServerExtendedQueryCloseComplete)(nil)
+	_ ServerExtendedQuery = (*ServerParseComplete)(nil)
+	_ ServerExtendedQuery = (*ServerBindComplete)(nil)
+	_ ServerExtendedQuery = (*ServerParameterDescription)(nil)
+	_ ServerExtendedQuery = (*ServerRowDescription)(nil)
+	_ ServerExtendedQuery = (*ServerNoData)(nil)
+	_ ServerExtendedQuery = (*ServerPortalSuspended)(nil)
+	_ ServerExtendedQuery = (*ServerCloseComplete)(nil)
 )
 
 // Response to Parse.
-type ServerExtendedQueryParseComplete FromServer[*pgproto3.ParseComplete]
+type ServerParseComplete FromServer[*pgproto3.ParseComplete]
 
-func (*ServerExtendedQueryParseComplete) Server()            {}
-func (*ServerExtendedQueryParseComplete) ExtendedQuery()     {}
-func (t *ServerExtendedQueryParseComplete) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerExtendedQueryParseComplete) Parse() *pgproto3.ParseComplete {
+func (*ServerParseComplete) Server()            {}
+func (*ServerParseComplete) ExtendedQuery()     {}
+func (t *ServerParseComplete) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerParseComplete) Parse() *pgproto3.ParseComplete {
 	return (*FromServer[*pgproto3.ParseComplete])(m).Parse()
 }
-func (m *ServerExtendedQueryParseComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerExtendedQueryParseComplete) Source() RawMessageSource              { return m.source }
+func (m *ServerParseComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerParseComplete) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerExtendedQueryParseComplete) Retain() ServerExtendedQueryParseComplete {
+func (m ServerParseComplete) Retain() ServerParseComplete {
 	src, parsed, isParsed := (*FromServer[*pgproto3.ParseComplete])(&m).retainFields()
-	return ServerExtendedQueryParseComplete{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerParseComplete{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to Bind.
-type ServerExtendedQueryBindComplete FromServer[*pgproto3.BindComplete]
+type ServerBindComplete FromServer[*pgproto3.BindComplete]
 
-func (*ServerExtendedQueryBindComplete) Server()            {}
-func (*ServerExtendedQueryBindComplete) ExtendedQuery()     {}
-func (t *ServerExtendedQueryBindComplete) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerExtendedQueryBindComplete) Parse() *pgproto3.BindComplete {
+func (*ServerBindComplete) Server()            {}
+func (*ServerBindComplete) ExtendedQuery()     {}
+func (t *ServerBindComplete) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerBindComplete) Parse() *pgproto3.BindComplete {
 	return (*FromServer[*pgproto3.BindComplete])(m).Parse()
 }
-func (m *ServerExtendedQueryBindComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerExtendedQueryBindComplete) Source() RawMessageSource              { return m.source }
+func (m *ServerBindComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerBindComplete) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerExtendedQueryBindComplete) Retain() ServerExtendedQueryBindComplete {
+func (m ServerBindComplete) Retain() ServerBindComplete {
 	src, parsed, isParsed := (*FromServer[*pgproto3.BindComplete])(&m).retainFields()
-	return ServerExtendedQueryBindComplete{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerBindComplete{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to Describe of prepared statement.
-type ServerExtendedQueryParameterDescription FromServer[*pgproto3.ParameterDescription]
+type ServerParameterDescription FromServer[*pgproto3.ParameterDescription]
 
-func (*ServerExtendedQueryParameterDescription) Server()            {}
-func (*ServerExtendedQueryParameterDescription) ExtendedQuery()     {}
-func (t *ServerExtendedQueryParameterDescription) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerExtendedQueryParameterDescription) Parse() *pgproto3.ParameterDescription {
+func (*ServerParameterDescription) Server()            {}
+func (*ServerParameterDescription) ExtendedQuery()     {}
+func (t *ServerParameterDescription) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerParameterDescription) Parse() *pgproto3.ParameterDescription {
 	return (*FromServer[*pgproto3.ParameterDescription])(m).Parse()
 }
-func (m *ServerExtendedQueryParameterDescription) ParseBackend() pgproto3.BackendMessage {
-	return m.Parse()
-}
-func (m *ServerExtendedQueryParameterDescription) Source() RawMessageSource { return m.source }
+func (m *ServerParameterDescription) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerParameterDescription) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerExtendedQueryParameterDescription) Retain() ServerExtendedQueryParameterDescription {
+func (m ServerParameterDescription) Retain() ServerParameterDescription {
 	src, parsed, isParsed := (*FromServer[*pgproto3.ParameterDescription])(&m).retainFields()
-	return ServerExtendedQueryParameterDescription{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerParameterDescription{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to Describe of portal or statement that returns data.
-type ServerExtendedQueryRowDescription FromServer[*pgproto3.RowDescription]
+type ServerRowDescription FromServer[*pgproto3.RowDescription]
 
-func (*ServerExtendedQueryRowDescription) Server()            {}
-func (*ServerExtendedQueryRowDescription) ExtendedQuery()     {}
-func (t *ServerExtendedQueryRowDescription) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerExtendedQueryRowDescription) Parse() *pgproto3.RowDescription {
+func (*ServerRowDescription) Server()            {}
+func (*ServerRowDescription) ExtendedQuery()     {}
+func (t *ServerRowDescription) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerRowDescription) Parse() *pgproto3.RowDescription {
 	return (*FromServer[*pgproto3.RowDescription])(m).Parse()
 }
-func (m *ServerExtendedQueryRowDescription) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerExtendedQueryRowDescription) Source() RawMessageSource              { return m.source }
+func (m *ServerRowDescription) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerRowDescription) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerExtendedQueryRowDescription) Retain() ServerExtendedQueryRowDescription {
+func (m ServerRowDescription) Retain() ServerRowDescription {
 	src, parsed, isParsed := (*FromServer[*pgproto3.RowDescription])(&m).retainFields()
-	return ServerExtendedQueryRowDescription{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerRowDescription{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to Describe of portal or statement that doesn't return data.
-type ServerExtendedQueryNoData FromServer[*pgproto3.NoData]
+type ServerNoData FromServer[*pgproto3.NoData]
 
-func (*ServerExtendedQueryNoData) Server()            {}
-func (*ServerExtendedQueryNoData) ExtendedQuery()     {}
-func (t *ServerExtendedQueryNoData) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerExtendedQueryNoData) Parse() *pgproto3.NoData {
-	return (*FromServer[*pgproto3.NoData])(m).Parse()
-}
-func (m *ServerExtendedQueryNoData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerExtendedQueryNoData) Source() RawMessageSource              { return m.source }
+func (*ServerNoData) Server()                                 {}
+func (*ServerNoData) ExtendedQuery()                          {}
+func (t *ServerNoData) MsgType() MsgType                      { return t.source.MessageType() }
+func (m *ServerNoData) Parse() *pgproto3.NoData               { return (*FromServer[*pgproto3.NoData])(m).Parse() }
+func (m *ServerNoData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerNoData) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerExtendedQueryNoData) Retain() ServerExtendedQueryNoData {
+func (m ServerNoData) Retain() ServerNoData {
 	src, parsed, isParsed := (*FromServer[*pgproto3.NoData])(&m).retainFields()
-	return ServerExtendedQueryNoData{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerNoData{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to Execute if there are additional rows / the execute did not
 // complete during the Execute call, the client should call Execute again.
-type ServerExtendedQueryPortalSuspended FromServer[*pgproto3.PortalSuspended]
+type ServerPortalSuspended FromServer[*pgproto3.PortalSuspended]
 
-func (*ServerExtendedQueryPortalSuspended) Server()            {}
-func (*ServerExtendedQueryPortalSuspended) ExtendedQuery()     {}
-func (t *ServerExtendedQueryPortalSuspended) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerExtendedQueryPortalSuspended) Parse() *pgproto3.PortalSuspended {
+func (*ServerPortalSuspended) Server()            {}
+func (*ServerPortalSuspended) ExtendedQuery()     {}
+func (t *ServerPortalSuspended) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerPortalSuspended) Parse() *pgproto3.PortalSuspended {
 	return (*FromServer[*pgproto3.PortalSuspended])(m).Parse()
 }
-func (m *ServerExtendedQueryPortalSuspended) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerExtendedQueryPortalSuspended) Source() RawMessageSource              { return m.source }
+func (m *ServerPortalSuspended) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerPortalSuspended) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerExtendedQueryPortalSuspended) Retain() ServerExtendedQueryPortalSuspended {
+func (m ServerPortalSuspended) Retain() ServerPortalSuspended {
 	src, parsed, isParsed := (*FromServer[*pgproto3.PortalSuspended])(&m).retainFields()
-	return ServerExtendedQueryPortalSuspended{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerPortalSuspended{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to Close of prepared statement or portal.
-type ServerExtendedQueryCloseComplete FromServer[*pgproto3.CloseComplete]
+type ServerCloseComplete FromServer[*pgproto3.CloseComplete]
 
-func (*ServerExtendedQueryCloseComplete) Server()            {}
-func (*ServerExtendedQueryCloseComplete) ExtendedQuery()     {}
-func (t *ServerExtendedQueryCloseComplete) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerExtendedQueryCloseComplete) Parse() *pgproto3.CloseComplete {
+func (*ServerCloseComplete) Server()            {}
+func (*ServerCloseComplete) ExtendedQuery()     {}
+func (t *ServerCloseComplete) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerCloseComplete) Parse() *pgproto3.CloseComplete {
 	return (*FromServer[*pgproto3.CloseComplete])(m).Parse()
 }
-func (m *ServerExtendedQueryCloseComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerExtendedQueryCloseComplete) Source() RawMessageSource              { return m.source }
+func (m *ServerCloseComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerCloseComplete) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerExtendedQueryCloseComplete) Retain() ServerExtendedQueryCloseComplete {
+func (m ServerCloseComplete) Retain() ServerCloseComplete {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CloseComplete])(&m).retainFields()
-	return ServerExtendedQueryCloseComplete{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerCloseComplete{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToServerExtendedQuery converts a pgproto3.BackendMessage to a ServerExtendedQuery if it matches one of the known types.
@@ -560,19 +546,19 @@ func (m ServerExtendedQueryCloseComplete) Retain() ServerExtendedQueryCloseCompl
 func ToServerExtendedQuery(msg pgproto3.BackendMessage) (ServerExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ParseComplete:
-		return (*ServerExtendedQueryParseComplete)(ServerParsed(m)), true
+		return (*ServerParseComplete)(ServerParsed(m)), true
 	case *pgproto3.BindComplete:
-		return (*ServerExtendedQueryBindComplete)(ServerParsed(m)), true
+		return (*ServerBindComplete)(ServerParsed(m)), true
 	case *pgproto3.ParameterDescription:
-		return (*ServerExtendedQueryParameterDescription)(ServerParsed(m)), true
+		return (*ServerParameterDescription)(ServerParsed(m)), true
 	case *pgproto3.RowDescription:
-		return (*ServerExtendedQueryRowDescription)(ServerParsed(m)), true
+		return (*ServerRowDescription)(ServerParsed(m)), true
 	case *pgproto3.NoData:
-		return (*ServerExtendedQueryNoData)(ServerParsed(m)), true
+		return (*ServerNoData)(ServerParsed(m)), true
 	case *pgproto3.PortalSuspended:
-		return (*ServerExtendedQueryPortalSuspended)(ServerParsed(m)), true
+		return (*ServerPortalSuspended)(ServerParsed(m)), true
 	case *pgproto3.CloseComplete:
-		return (*ServerExtendedQueryCloseComplete)(ServerParsed(m)), true
+		return (*ServerCloseComplete)(ServerParsed(m)), true
 	}
 	return nil, false
 }
@@ -580,13 +566,13 @@ func ToServerExtendedQuery(msg pgproto3.BackendMessage) (ServerExtendedQuery, bo
 // ServerExtendedQueryHandlers provides type-safe handlers for each ServerExtendedQuery variant.
 type ServerExtendedQueryHandlers[T any] struct {
 	Default              func(msg ServerExtendedQuery) (T, error)
-	ParseComplete        func(msg *ServerExtendedQueryParseComplete) (T, error)
-	BindComplete         func(msg *ServerExtendedQueryBindComplete) (T, error)
-	ParameterDescription func(msg *ServerExtendedQueryParameterDescription) (T, error)
-	RowDescription       func(msg *ServerExtendedQueryRowDescription) (T, error)
-	NoData               func(msg *ServerExtendedQueryNoData) (T, error)
-	PortalSuspended      func(msg *ServerExtendedQueryPortalSuspended) (T, error)
-	CloseComplete        func(msg *ServerExtendedQueryCloseComplete) (T, error)
+	ParseComplete        func(msg *ServerParseComplete) (T, error)
+	BindComplete         func(msg *ServerBindComplete) (T, error)
+	ParameterDescription func(msg *ServerParameterDescription) (T, error)
+	RowDescription       func(msg *ServerRowDescription) (T, error)
+	NoData               func(msg *ServerNoData) (T, error)
+	PortalSuspended      func(msg *ServerPortalSuspended) (T, error)
+	CloseComplete        func(msg *ServerCloseComplete) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -599,37 +585,37 @@ func (h ServerExtendedQueryHandlers[T]) HandleDefault(msg ServerExtendedQuery, d
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerExtendedQueryParseComplete:
+	case *ServerParseComplete:
 		if h.ParseComplete != nil {
 			return h.ParseComplete(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerExtendedQueryBindComplete:
+	case *ServerBindComplete:
 		if h.BindComplete != nil {
 			return h.BindComplete(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerExtendedQueryParameterDescription:
+	case *ServerParameterDescription:
 		if h.ParameterDescription != nil {
 			return h.ParameterDescription(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerExtendedQueryRowDescription:
+	case *ServerRowDescription:
 		if h.RowDescription != nil {
 			return h.RowDescription(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerExtendedQueryNoData:
+	case *ServerNoData:
 		if h.NoData != nil {
 			return h.NoData(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerExtendedQueryPortalSuspended:
+	case *ServerPortalSuspended:
 		if h.PortalSuspended != nil {
 			return h.PortalSuspended(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerExtendedQueryCloseComplete:
+	case *ServerCloseComplete:
 		if h.CloseComplete != nil {
 			return h.CloseComplete(msg)
 		}
@@ -647,13 +633,13 @@ func (h ServerExtendedQueryHandlers[T]) Handle(msg ServerExtendedQuery) (T, erro
 // ServerExtendedQueryHandlersCtx provides type-safe handlers with context and an argument for each ServerExtendedQuery variant.
 type ServerExtendedQueryHandlersCtx[Arg, Result any] struct {
 	Default              func(ctx context.Context, msg ServerExtendedQuery, arg Arg) (Result, error)
-	ParseComplete        func(ctx context.Context, msg *ServerExtendedQueryParseComplete, arg Arg) (Result, error)
-	BindComplete         func(ctx context.Context, msg *ServerExtendedQueryBindComplete, arg Arg) (Result, error)
-	ParameterDescription func(ctx context.Context, msg *ServerExtendedQueryParameterDescription, arg Arg) (Result, error)
-	RowDescription       func(ctx context.Context, msg *ServerExtendedQueryRowDescription, arg Arg) (Result, error)
-	NoData               func(ctx context.Context, msg *ServerExtendedQueryNoData, arg Arg) (Result, error)
-	PortalSuspended      func(ctx context.Context, msg *ServerExtendedQueryPortalSuspended, arg Arg) (Result, error)
-	CloseComplete        func(ctx context.Context, msg *ServerExtendedQueryCloseComplete, arg Arg) (Result, error)
+	ParseComplete        func(ctx context.Context, msg *ServerParseComplete, arg Arg) (Result, error)
+	BindComplete         func(ctx context.Context, msg *ServerBindComplete, arg Arg) (Result, error)
+	ParameterDescription func(ctx context.Context, msg *ServerParameterDescription, arg Arg) (Result, error)
+	RowDescription       func(ctx context.Context, msg *ServerRowDescription, arg Arg) (Result, error)
+	NoData               func(ctx context.Context, msg *ServerNoData, arg Arg) (Result, error)
+	PortalSuspended      func(ctx context.Context, msg *ServerPortalSuspended, arg Arg) (Result, error)
+	CloseComplete        func(ctx context.Context, msg *ServerCloseComplete, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -666,37 +652,37 @@ func (h ServerExtendedQueryHandlersCtx[Arg, Result]) HandleDefault(ctx context.C
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerExtendedQueryParseComplete:
+	case *ServerParseComplete:
 		if h.ParseComplete != nil {
 			return h.ParseComplete(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryBindComplete:
+	case *ServerBindComplete:
 		if h.BindComplete != nil {
 			return h.BindComplete(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryParameterDescription:
+	case *ServerParameterDescription:
 		if h.ParameterDescription != nil {
 			return h.ParameterDescription(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryRowDescription:
+	case *ServerRowDescription:
 		if h.RowDescription != nil {
 			return h.RowDescription(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryNoData:
+	case *ServerNoData:
 		if h.NoData != nil {
 			return h.NoData(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryPortalSuspended:
+	case *ServerPortalSuspended:
 		if h.PortalSuspended != nil {
 			return h.PortalSuspended(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryCloseComplete:
+	case *ServerCloseComplete:
 		if h.CloseComplete != nil {
 			return h.CloseComplete(ctx, msg, arg)
 		}
@@ -722,110 +708,110 @@ type ServerCopy interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ServerCopy = (*ServerCopyCopyInResponse)(nil)
-	_ ServerCopy = (*ServerCopyCopyOutResponse)(nil)
-	_ ServerCopy = (*ServerCopyCopyBothResponse)(nil)
-	_ ServerCopy = (*ServerCopyCopyData)(nil)
-	_ ServerCopy = (*ServerCopyCopyDone)(nil)
+	_ ServerCopy = (*ServerCopyInResponse)(nil)
+	_ ServerCopy = (*ServerCopyOutResponse)(nil)
+	_ ServerCopy = (*ServerCopyBothResponse)(nil)
+	_ ServerCopy = (*ServerCopyData)(nil)
+	_ ServerCopy = (*ServerCopyDone)(nil)
 )
 
 // Response to COPY FROM STDIN.
 // Backend ready to copy data from client to server.
 // Starts CopyIn mode.
-type ServerCopyCopyInResponse FromServer[*pgproto3.CopyInResponse]
+type ServerCopyInResponse FromServer[*pgproto3.CopyInResponse]
 
-func (*ServerCopyCopyInResponse) Server()            {}
-func (*ServerCopyCopyInResponse) Copy()              {}
-func (t *ServerCopyCopyInResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerCopyCopyInResponse) Parse() *pgproto3.CopyInResponse {
+func (*ServerCopyInResponse) Server()            {}
+func (*ServerCopyInResponse) Copy()              {}
+func (t *ServerCopyInResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerCopyInResponse) Parse() *pgproto3.CopyInResponse {
 	return (*FromServer[*pgproto3.CopyInResponse])(m).Parse()
 }
-func (m *ServerCopyCopyInResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerCopyCopyInResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyInResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerCopyInResponse) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerCopyCopyInResponse) Retain() ServerCopyCopyInResponse {
+func (m ServerCopyInResponse) Retain() ServerCopyInResponse {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CopyInResponse])(&m).retainFields()
-	return ServerCopyCopyInResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerCopyInResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to COPY TO STDOUT.
 // Backend ready to copy data from server to client.
 // Starts CopyOut mode.
-type ServerCopyCopyOutResponse FromServer[*pgproto3.CopyOutResponse]
+type ServerCopyOutResponse FromServer[*pgproto3.CopyOutResponse]
 
-func (*ServerCopyCopyOutResponse) Server()            {}
-func (*ServerCopyCopyOutResponse) Copy()              {}
-func (t *ServerCopyCopyOutResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerCopyCopyOutResponse) Parse() *pgproto3.CopyOutResponse {
+func (*ServerCopyOutResponse) Server()            {}
+func (*ServerCopyOutResponse) Copy()              {}
+func (t *ServerCopyOutResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerCopyOutResponse) Parse() *pgproto3.CopyOutResponse {
 	return (*FromServer[*pgproto3.CopyOutResponse])(m).Parse()
 }
-func (m *ServerCopyCopyOutResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerCopyCopyOutResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyOutResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerCopyOutResponse) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerCopyCopyOutResponse) Retain() ServerCopyCopyOutResponse {
+func (m ServerCopyOutResponse) Retain() ServerCopyOutResponse {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CopyOutResponse])(&m).retainFields()
-	return ServerCopyCopyOutResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerCopyOutResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to Replication.
-type ServerCopyCopyBothResponse FromServer[*pgproto3.CopyBothResponse]
+type ServerCopyBothResponse FromServer[*pgproto3.CopyBothResponse]
 
-func (*ServerCopyCopyBothResponse) Server()            {}
-func (*ServerCopyCopyBothResponse) Copy()              {}
-func (t *ServerCopyCopyBothResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerCopyCopyBothResponse) Parse() *pgproto3.CopyBothResponse {
+func (*ServerCopyBothResponse) Server()            {}
+func (*ServerCopyBothResponse) Copy()              {}
+func (t *ServerCopyBothResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerCopyBothResponse) Parse() *pgproto3.CopyBothResponse {
 	return (*FromServer[*pgproto3.CopyBothResponse])(m).Parse()
 }
-func (m *ServerCopyCopyBothResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerCopyCopyBothResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyBothResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerCopyBothResponse) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerCopyCopyBothResponse) Retain() ServerCopyCopyBothResponse {
+func (m ServerCopyBothResponse) Retain() ServerCopyBothResponse {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CopyBothResponse])(&m).retainFields()
-	return ServerCopyCopyBothResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerCopyBothResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Copy Mode: data row.
-type ServerCopyCopyData FromServer[*pgproto3.CopyData]
+type ServerCopyData FromServer[*pgproto3.CopyData]
 
-func (*ServerCopyCopyData) Server()            {}
-func (*ServerCopyCopyData) Copy()              {}
-func (t *ServerCopyCopyData) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerCopyCopyData) Parse() *pgproto3.CopyData {
+func (*ServerCopyData) Server()            {}
+func (*ServerCopyData) Copy()              {}
+func (t *ServerCopyData) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerCopyData) Parse() *pgproto3.CopyData {
 	return (*FromServer[*pgproto3.CopyData])(m).Parse()
 }
-func (m *ServerCopyCopyData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerCopyCopyData) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerCopyData) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerCopyCopyData) Retain() ServerCopyCopyData {
+func (m ServerCopyData) Retain() ServerCopyData {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CopyData])(&m).retainFields()
-	return ServerCopyCopyData{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerCopyData{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Copy Mode: copy completed.
-type ServerCopyCopyDone FromServer[*pgproto3.CopyDone]
+type ServerCopyDone FromServer[*pgproto3.CopyDone]
 
-func (*ServerCopyCopyDone) Server()            {}
-func (*ServerCopyCopyDone) Copy()              {}
-func (t *ServerCopyCopyDone) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerCopyCopyDone) Parse() *pgproto3.CopyDone {
+func (*ServerCopyDone) Server()            {}
+func (*ServerCopyDone) Copy()              {}
+func (t *ServerCopyDone) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromServer[*pgproto3.CopyDone])(m).Parse()
 }
-func (m *ServerCopyCopyDone) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerCopyCopyDone) Source() RawMessageSource              { return m.source }
+func (m *ServerCopyDone) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerCopyDone) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerCopyCopyDone) Retain() ServerCopyCopyDone {
+func (m ServerCopyDone) Retain() ServerCopyDone {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CopyDone])(&m).retainFields()
-	return ServerCopyCopyDone{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerCopyDone{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToServerCopy converts a pgproto3.BackendMessage to a ServerCopy if it matches one of the known types.
@@ -833,15 +819,15 @@ func (m ServerCopyCopyDone) Retain() ServerCopyCopyDone {
 func ToServerCopy(msg pgproto3.BackendMessage) (ServerCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyInResponse:
-		return (*ServerCopyCopyInResponse)(ServerParsed(m)), true
+		return (*ServerCopyInResponse)(ServerParsed(m)), true
 	case *pgproto3.CopyOutResponse:
-		return (*ServerCopyCopyOutResponse)(ServerParsed(m)), true
+		return (*ServerCopyOutResponse)(ServerParsed(m)), true
 	case *pgproto3.CopyBothResponse:
-		return (*ServerCopyCopyBothResponse)(ServerParsed(m)), true
+		return (*ServerCopyBothResponse)(ServerParsed(m)), true
 	case *pgproto3.CopyData:
-		return (*ServerCopyCopyData)(ServerParsed(m)), true
+		return (*ServerCopyData)(ServerParsed(m)), true
 	case *pgproto3.CopyDone:
-		return (*ServerCopyCopyDone)(ServerParsed(m)), true
+		return (*ServerCopyDone)(ServerParsed(m)), true
 	}
 	return nil, false
 }
@@ -849,11 +835,11 @@ func ToServerCopy(msg pgproto3.BackendMessage) (ServerCopy, bool) {
 // ServerCopyHandlers provides type-safe handlers for each ServerCopy variant.
 type ServerCopyHandlers[T any] struct {
 	Default          func(msg ServerCopy) (T, error)
-	CopyInResponse   func(msg *ServerCopyCopyInResponse) (T, error)
-	CopyOutResponse  func(msg *ServerCopyCopyOutResponse) (T, error)
-	CopyBothResponse func(msg *ServerCopyCopyBothResponse) (T, error)
-	CopyData         func(msg *ServerCopyCopyData) (T, error)
-	CopyDone         func(msg *ServerCopyCopyDone) (T, error)
+	CopyInResponse   func(msg *ServerCopyInResponse) (T, error)
+	CopyOutResponse  func(msg *ServerCopyOutResponse) (T, error)
+	CopyBothResponse func(msg *ServerCopyBothResponse) (T, error)
+	CopyData         func(msg *ServerCopyData) (T, error)
+	CopyDone         func(msg *ServerCopyDone) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -866,27 +852,27 @@ func (h ServerCopyHandlers[T]) HandleDefault(msg ServerCopy, defaultHandler func
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerCopyCopyInResponse:
+	case *ServerCopyInResponse:
 		if h.CopyInResponse != nil {
 			return h.CopyInResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerCopyCopyOutResponse:
+	case *ServerCopyOutResponse:
 		if h.CopyOutResponse != nil {
 			return h.CopyOutResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerCopyCopyBothResponse:
+	case *ServerCopyBothResponse:
 		if h.CopyBothResponse != nil {
 			return h.CopyBothResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerCopyCopyData:
+	case *ServerCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerCopyCopyDone:
+	case *ServerCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(msg)
 		}
@@ -904,11 +890,11 @@ func (h ServerCopyHandlers[T]) Handle(msg ServerCopy) (T, error) {
 // ServerCopyHandlersCtx provides type-safe handlers with context and an argument for each ServerCopy variant.
 type ServerCopyHandlersCtx[Arg, Result any] struct {
 	Default          func(ctx context.Context, msg ServerCopy, arg Arg) (Result, error)
-	CopyInResponse   func(ctx context.Context, msg *ServerCopyCopyInResponse, arg Arg) (Result, error)
-	CopyOutResponse  func(ctx context.Context, msg *ServerCopyCopyOutResponse, arg Arg) (Result, error)
-	CopyBothResponse func(ctx context.Context, msg *ServerCopyCopyBothResponse, arg Arg) (Result, error)
-	CopyData         func(ctx context.Context, msg *ServerCopyCopyData, arg Arg) (Result, error)
-	CopyDone         func(ctx context.Context, msg *ServerCopyCopyDone, arg Arg) (Result, error)
+	CopyInResponse   func(ctx context.Context, msg *ServerCopyInResponse, arg Arg) (Result, error)
+	CopyOutResponse  func(ctx context.Context, msg *ServerCopyOutResponse, arg Arg) (Result, error)
+	CopyBothResponse func(ctx context.Context, msg *ServerCopyBothResponse, arg Arg) (Result, error)
+	CopyData         func(ctx context.Context, msg *ServerCopyData, arg Arg) (Result, error)
+	CopyDone         func(ctx context.Context, msg *ServerCopyDone, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -921,27 +907,27 @@ func (h ServerCopyHandlersCtx[Arg, Result]) HandleDefault(ctx context.Context, m
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerCopyCopyInResponse:
+	case *ServerCopyInResponse:
 		if h.CopyInResponse != nil {
 			return h.CopyInResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyOutResponse:
+	case *ServerCopyOutResponse:
 		if h.CopyOutResponse != nil {
 			return h.CopyOutResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyBothResponse:
+	case *ServerCopyBothResponse:
 		if h.CopyBothResponse != nil {
 			return h.CopyBothResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyData:
+	case *ServerCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyDone:
+	case *ServerCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(ctx, msg, arg)
 		}
@@ -967,128 +953,126 @@ type ServerResponse interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ServerResponse = (*ServerResponseReadyForQuery)(nil)
-	_ ServerResponse = (*ServerResponseCommandComplete)(nil)
-	_ ServerResponse = (*ServerResponseDataRow)(nil)
-	_ ServerResponse = (*ServerResponseEmptyQueryResponse)(nil)
-	_ ServerResponse = (*ServerResponseErrorResponse)(nil)
-	_ ServerResponse = (*ServerResponseFunctionCallResponse)(nil)
+	_ ServerResponse = (*ServerReadyForQuery)(nil)
+	_ ServerResponse = (*ServerCommandComplete)(nil)
+	_ ServerResponse = (*ServerDataRow)(nil)
+	_ ServerResponse = (*ServerEmptyQueryResponse)(nil)
+	_ ServerResponse = (*ServerErrorResponse)(nil)
+	_ ServerResponse = (*ServerFunctionCallResponse)(nil)
 )
 
 // Start-up completed.
 // Simple Query mode: ready for next query.
 // Extended Query mode: response to Sync; backend no longer ignoring messages, ready for next command.
-type ServerResponseReadyForQuery FromServer[*pgproto3.ReadyForQuery]
+type ServerReadyForQuery FromServer[*pgproto3.ReadyForQuery]
 
-func (*ServerResponseReadyForQuery) Server()            {}
-func (*ServerResponseReadyForQuery) Response()          {}
-func (t *ServerResponseReadyForQuery) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerResponseReadyForQuery) Parse() *pgproto3.ReadyForQuery {
+func (*ServerReadyForQuery) Server()            {}
+func (*ServerReadyForQuery) Response()          {}
+func (t *ServerReadyForQuery) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerReadyForQuery) Parse() *pgproto3.ReadyForQuery {
 	return (*FromServer[*pgproto3.ReadyForQuery])(m).Parse()
 }
-func (m *ServerResponseReadyForQuery) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerResponseReadyForQuery) Source() RawMessageSource              { return m.source }
+func (m *ServerReadyForQuery) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerReadyForQuery) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerResponseReadyForQuery) Retain() ServerResponseReadyForQuery {
+func (m ServerReadyForQuery) Retain() ServerReadyForQuery {
 	src, parsed, isParsed := (*FromServer[*pgproto3.ReadyForQuery])(&m).retainFields()
-	return ServerResponseReadyForQuery{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerReadyForQuery{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // SQL command completed normally.
-type ServerResponseCommandComplete FromServer[*pgproto3.CommandComplete]
+type ServerCommandComplete FromServer[*pgproto3.CommandComplete]
 
-func (*ServerResponseCommandComplete) Server()            {}
-func (*ServerResponseCommandComplete) Response()          {}
-func (t *ServerResponseCommandComplete) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerResponseCommandComplete) Parse() *pgproto3.CommandComplete {
+func (*ServerCommandComplete) Server()            {}
+func (*ServerCommandComplete) Response()          {}
+func (t *ServerCommandComplete) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerCommandComplete) Parse() *pgproto3.CommandComplete {
 	return (*FromServer[*pgproto3.CommandComplete])(m).Parse()
 }
-func (m *ServerResponseCommandComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerResponseCommandComplete) Source() RawMessageSource              { return m.source }
+func (m *ServerCommandComplete) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerCommandComplete) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerResponseCommandComplete) Retain() ServerResponseCommandComplete {
+func (m ServerCommandComplete) Retain() ServerCommandComplete {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CommandComplete])(&m).retainFields()
-	return ServerResponseCommandComplete{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerCommandComplete{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Query results (both query modes)
-type ServerResponseDataRow FromServer[*pgproto3.DataRow]
+type ServerDataRow FromServer[*pgproto3.DataRow]
 
-func (*ServerResponseDataRow) Server()            {}
-func (*ServerResponseDataRow) Response()          {}
-func (t *ServerResponseDataRow) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerResponseDataRow) Parse() *pgproto3.DataRow {
-	return (*FromServer[*pgproto3.DataRow])(m).Parse()
-}
-func (m *ServerResponseDataRow) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerResponseDataRow) Source() RawMessageSource              { return m.source }
+func (*ServerDataRow) Server()                                 {}
+func (*ServerDataRow) Response()                               {}
+func (t *ServerDataRow) MsgType() MsgType                      { return t.source.MessageType() }
+func (m *ServerDataRow) Parse() *pgproto3.DataRow              { return (*FromServer[*pgproto3.DataRow])(m).Parse() }
+func (m *ServerDataRow) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerDataRow) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerResponseDataRow) Retain() ServerResponseDataRow {
+func (m ServerDataRow) Retain() ServerDataRow {
 	src, parsed, isParsed := (*FromServer[*pgproto3.DataRow])(&m).retainFields()
-	return ServerResponseDataRow{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerDataRow{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to empty query.
-type ServerResponseEmptyQueryResponse FromServer[*pgproto3.EmptyQueryResponse]
+type ServerEmptyQueryResponse FromServer[*pgproto3.EmptyQueryResponse]
 
-func (*ServerResponseEmptyQueryResponse) Server()            {}
-func (*ServerResponseEmptyQueryResponse) Response()          {}
-func (t *ServerResponseEmptyQueryResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerResponseEmptyQueryResponse) Parse() *pgproto3.EmptyQueryResponse {
+func (*ServerEmptyQueryResponse) Server()            {}
+func (*ServerEmptyQueryResponse) Response()          {}
+func (t *ServerEmptyQueryResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerEmptyQueryResponse) Parse() *pgproto3.EmptyQueryResponse {
 	return (*FromServer[*pgproto3.EmptyQueryResponse])(m).Parse()
 }
-func (m *ServerResponseEmptyQueryResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerResponseEmptyQueryResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerEmptyQueryResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerEmptyQueryResponse) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerResponseEmptyQueryResponse) Retain() ServerResponseEmptyQueryResponse {
+func (m ServerEmptyQueryResponse) Retain() ServerEmptyQueryResponse {
 	src, parsed, isParsed := (*FromServer[*pgproto3.EmptyQueryResponse])(&m).retainFields()
-	return ServerResponseEmptyQueryResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerEmptyQueryResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Error response.
-type ServerResponseErrorResponse FromServer[*pgproto3.ErrorResponse]
+type ServerErrorResponse FromServer[*pgproto3.ErrorResponse]
 
-func (*ServerResponseErrorResponse) Server()            {}
-func (*ServerResponseErrorResponse) Response()          {}
-func (t *ServerResponseErrorResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerResponseErrorResponse) Parse() *pgproto3.ErrorResponse {
+func (*ServerErrorResponse) Server()            {}
+func (*ServerErrorResponse) Response()          {}
+func (t *ServerErrorResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerErrorResponse) Parse() *pgproto3.ErrorResponse {
 	return (*FromServer[*pgproto3.ErrorResponse])(m).Parse()
 }
-func (m *ServerResponseErrorResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerResponseErrorResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerErrorResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerErrorResponse) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerResponseErrorResponse) Retain() ServerResponseErrorResponse {
+func (m ServerErrorResponse) Retain() ServerErrorResponse {
 	src, parsed, isParsed := (*FromServer[*pgproto3.ErrorResponse])(&m).retainFields()
-	return ServerResponseErrorResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerErrorResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Response to function call.
-type ServerResponseFunctionCallResponse FromServer[*pgproto3.FunctionCallResponse]
+type ServerFunctionCallResponse FromServer[*pgproto3.FunctionCallResponse]
 
-func (*ServerResponseFunctionCallResponse) Server()            {}
-func (*ServerResponseFunctionCallResponse) Response()          {}
-func (t *ServerResponseFunctionCallResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerResponseFunctionCallResponse) Parse() *pgproto3.FunctionCallResponse {
+func (*ServerFunctionCallResponse) Server()            {}
+func (*ServerFunctionCallResponse) Response()          {}
+func (t *ServerFunctionCallResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerFunctionCallResponse) Parse() *pgproto3.FunctionCallResponse {
 	return (*FromServer[*pgproto3.FunctionCallResponse])(m).Parse()
 }
-func (m *ServerResponseFunctionCallResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerResponseFunctionCallResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerFunctionCallResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerFunctionCallResponse) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerResponseFunctionCallResponse) Retain() ServerResponseFunctionCallResponse {
+func (m ServerFunctionCallResponse) Retain() ServerFunctionCallResponse {
 	src, parsed, isParsed := (*FromServer[*pgproto3.FunctionCallResponse])(&m).retainFields()
-	return ServerResponseFunctionCallResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerFunctionCallResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToServerResponse converts a pgproto3.BackendMessage to a ServerResponse if it matches one of the known types.
@@ -1096,17 +1080,17 @@ func (m ServerResponseFunctionCallResponse) Retain() ServerResponseFunctionCallR
 func ToServerResponse(msg pgproto3.BackendMessage) (ServerResponse, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.ReadyForQuery:
-		return (*ServerResponseReadyForQuery)(ServerParsed(m)), true
+		return (*ServerReadyForQuery)(ServerParsed(m)), true
 	case *pgproto3.CommandComplete:
-		return (*ServerResponseCommandComplete)(ServerParsed(m)), true
+		return (*ServerCommandComplete)(ServerParsed(m)), true
 	case *pgproto3.DataRow:
-		return (*ServerResponseDataRow)(ServerParsed(m)), true
+		return (*ServerDataRow)(ServerParsed(m)), true
 	case *pgproto3.EmptyQueryResponse:
-		return (*ServerResponseEmptyQueryResponse)(ServerParsed(m)), true
+		return (*ServerEmptyQueryResponse)(ServerParsed(m)), true
 	case *pgproto3.ErrorResponse:
-		return (*ServerResponseErrorResponse)(ServerParsed(m)), true
+		return (*ServerErrorResponse)(ServerParsed(m)), true
 	case *pgproto3.FunctionCallResponse:
-		return (*ServerResponseFunctionCallResponse)(ServerParsed(m)), true
+		return (*ServerFunctionCallResponse)(ServerParsed(m)), true
 	}
 	return nil, false
 }
@@ -1114,12 +1098,12 @@ func ToServerResponse(msg pgproto3.BackendMessage) (ServerResponse, bool) {
 // ServerResponseHandlers provides type-safe handlers for each ServerResponse variant.
 type ServerResponseHandlers[T any] struct {
 	Default              func(msg ServerResponse) (T, error)
-	ReadyForQuery        func(msg *ServerResponseReadyForQuery) (T, error)
-	CommandComplete      func(msg *ServerResponseCommandComplete) (T, error)
-	DataRow              func(msg *ServerResponseDataRow) (T, error)
-	EmptyQueryResponse   func(msg *ServerResponseEmptyQueryResponse) (T, error)
-	ErrorResponse        func(msg *ServerResponseErrorResponse) (T, error)
-	FunctionCallResponse func(msg *ServerResponseFunctionCallResponse) (T, error)
+	ReadyForQuery        func(msg *ServerReadyForQuery) (T, error)
+	CommandComplete      func(msg *ServerCommandComplete) (T, error)
+	DataRow              func(msg *ServerDataRow) (T, error)
+	EmptyQueryResponse   func(msg *ServerEmptyQueryResponse) (T, error)
+	ErrorResponse        func(msg *ServerErrorResponse) (T, error)
+	FunctionCallResponse func(msg *ServerFunctionCallResponse) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1132,32 +1116,32 @@ func (h ServerResponseHandlers[T]) HandleDefault(msg ServerResponse, defaultHand
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerResponseReadyForQuery:
+	case *ServerReadyForQuery:
 		if h.ReadyForQuery != nil {
 			return h.ReadyForQuery(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerResponseCommandComplete:
+	case *ServerCommandComplete:
 		if h.CommandComplete != nil {
 			return h.CommandComplete(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerResponseDataRow:
+	case *ServerDataRow:
 		if h.DataRow != nil {
 			return h.DataRow(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerResponseEmptyQueryResponse:
+	case *ServerEmptyQueryResponse:
 		if h.EmptyQueryResponse != nil {
 			return h.EmptyQueryResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerResponseErrorResponse:
+	case *ServerErrorResponse:
 		if h.ErrorResponse != nil {
 			return h.ErrorResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerResponseFunctionCallResponse:
+	case *ServerFunctionCallResponse:
 		if h.FunctionCallResponse != nil {
 			return h.FunctionCallResponse(msg)
 		}
@@ -1175,12 +1159,12 @@ func (h ServerResponseHandlers[T]) Handle(msg ServerResponse) (T, error) {
 // ServerResponseHandlersCtx provides type-safe handlers with context and an argument for each ServerResponse variant.
 type ServerResponseHandlersCtx[Arg, Result any] struct {
 	Default              func(ctx context.Context, msg ServerResponse, arg Arg) (Result, error)
-	ReadyForQuery        func(ctx context.Context, msg *ServerResponseReadyForQuery, arg Arg) (Result, error)
-	CommandComplete      func(ctx context.Context, msg *ServerResponseCommandComplete, arg Arg) (Result, error)
-	DataRow              func(ctx context.Context, msg *ServerResponseDataRow, arg Arg) (Result, error)
-	EmptyQueryResponse   func(ctx context.Context, msg *ServerResponseEmptyQueryResponse, arg Arg) (Result, error)
-	ErrorResponse        func(ctx context.Context, msg *ServerResponseErrorResponse, arg Arg) (Result, error)
-	FunctionCallResponse func(ctx context.Context, msg *ServerResponseFunctionCallResponse, arg Arg) (Result, error)
+	ReadyForQuery        func(ctx context.Context, msg *ServerReadyForQuery, arg Arg) (Result, error)
+	CommandComplete      func(ctx context.Context, msg *ServerCommandComplete, arg Arg) (Result, error)
+	DataRow              func(ctx context.Context, msg *ServerDataRow, arg Arg) (Result, error)
+	EmptyQueryResponse   func(ctx context.Context, msg *ServerEmptyQueryResponse, arg Arg) (Result, error)
+	ErrorResponse        func(ctx context.Context, msg *ServerErrorResponse, arg Arg) (Result, error)
+	FunctionCallResponse func(ctx context.Context, msg *ServerFunctionCallResponse, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1193,32 +1177,32 @@ func (h ServerResponseHandlersCtx[Arg, Result]) HandleDefault(ctx context.Contex
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerResponseReadyForQuery:
+	case *ServerReadyForQuery:
 		if h.ReadyForQuery != nil {
 			return h.ReadyForQuery(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseCommandComplete:
+	case *ServerCommandComplete:
 		if h.CommandComplete != nil {
 			return h.CommandComplete(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseDataRow:
+	case *ServerDataRow:
 		if h.DataRow != nil {
 			return h.DataRow(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseEmptyQueryResponse:
+	case *ServerEmptyQueryResponse:
 		if h.EmptyQueryResponse != nil {
 			return h.EmptyQueryResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseErrorResponse:
+	case *ServerErrorResponse:
 		if h.ErrorResponse != nil {
 			return h.ErrorResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseFunctionCallResponse:
+	case *ServerFunctionCallResponse:
 		if h.FunctionCallResponse != nil {
 			return h.FunctionCallResponse(ctx, msg, arg)
 		}
@@ -1244,66 +1228,66 @@ type ServerAsync interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ServerAsync = (*ServerAsyncNoticeResponse)(nil)
-	_ ServerAsync = (*ServerAsyncNotificationResponse)(nil)
-	_ ServerAsync = (*ServerAsyncParameterStatus)(nil)
+	_ ServerAsync = (*ServerNoticeResponse)(nil)
+	_ ServerAsync = (*ServerNotificationResponse)(nil)
+	_ ServerAsync = (*ServerParameterStatus)(nil)
 )
 
 // Warning message.
-type ServerAsyncNoticeResponse FromServer[*pgproto3.NoticeResponse]
+type ServerNoticeResponse FromServer[*pgproto3.NoticeResponse]
 
-func (*ServerAsyncNoticeResponse) Server()            {}
-func (*ServerAsyncNoticeResponse) Async()             {}
-func (t *ServerAsyncNoticeResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerAsyncNoticeResponse) Parse() *pgproto3.NoticeResponse {
+func (*ServerNoticeResponse) Server()            {}
+func (*ServerNoticeResponse) Async()             {}
+func (t *ServerNoticeResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerNoticeResponse) Parse() *pgproto3.NoticeResponse {
 	return (*FromServer[*pgproto3.NoticeResponse])(m).Parse()
 }
-func (m *ServerAsyncNoticeResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerAsyncNoticeResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerNoticeResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerNoticeResponse) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerAsyncNoticeResponse) Retain() ServerAsyncNoticeResponse {
+func (m ServerNoticeResponse) Retain() ServerNoticeResponse {
 	src, parsed, isParsed := (*FromServer[*pgproto3.NoticeResponse])(&m).retainFields()
-	return ServerAsyncNoticeResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerNoticeResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // LISTEN/NOTIFY notification.
-type ServerAsyncNotificationResponse FromServer[*pgproto3.NotificationResponse]
+type ServerNotificationResponse FromServer[*pgproto3.NotificationResponse]
 
-func (*ServerAsyncNotificationResponse) Server()            {}
-func (*ServerAsyncNotificationResponse) Async()             {}
-func (t *ServerAsyncNotificationResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerAsyncNotificationResponse) Parse() *pgproto3.NotificationResponse {
+func (*ServerNotificationResponse) Server()            {}
+func (*ServerNotificationResponse) Async()             {}
+func (t *ServerNotificationResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerNotificationResponse) Parse() *pgproto3.NotificationResponse {
 	return (*FromServer[*pgproto3.NotificationResponse])(m).Parse()
 }
-func (m *ServerAsyncNotificationResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerAsyncNotificationResponse) Source() RawMessageSource              { return m.source }
+func (m *ServerNotificationResponse) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerNotificationResponse) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerAsyncNotificationResponse) Retain() ServerAsyncNotificationResponse {
+func (m ServerNotificationResponse) Retain() ServerNotificationResponse {
 	src, parsed, isParsed := (*FromServer[*pgproto3.NotificationResponse])(&m).retainFields()
-	return ServerAsyncNotificationResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerNotificationResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Informs client that runtime parameter value changed.
-type ServerAsyncParameterStatus FromServer[*pgproto3.ParameterStatus]
+type ServerParameterStatus FromServer[*pgproto3.ParameterStatus]
 
-func (*ServerAsyncParameterStatus) Server()            {}
-func (*ServerAsyncParameterStatus) Async()             {}
-func (t *ServerAsyncParameterStatus) MsgType() MsgType { return t.source.MessageType() }
-func (m *ServerAsyncParameterStatus) Parse() *pgproto3.ParameterStatus {
+func (*ServerParameterStatus) Server()            {}
+func (*ServerParameterStatus) Async()             {}
+func (t *ServerParameterStatus) MsgType() MsgType { return t.source.MessageType() }
+func (m *ServerParameterStatus) Parse() *pgproto3.ParameterStatus {
 	return (*FromServer[*pgproto3.ParameterStatus])(m).Parse()
 }
-func (m *ServerAsyncParameterStatus) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerAsyncParameterStatus) Source() RawMessageSource              { return m.source }
+func (m *ServerParameterStatus) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *ServerParameterStatus) Source() RawMessageSource              { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerAsyncParameterStatus) Retain() ServerAsyncParameterStatus {
+func (m ServerParameterStatus) Retain() ServerParameterStatus {
 	src, parsed, isParsed := (*FromServer[*pgproto3.ParameterStatus])(&m).retainFields()
-	return ServerAsyncParameterStatus{source: src, parsed: parsed, isParsed: isParsed}
+	return ServerParameterStatus{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToServerAsync converts a pgproto3.BackendMessage to a ServerAsync if it matches one of the known types.
@@ -1311,11 +1295,11 @@ func (m ServerAsyncParameterStatus) Retain() ServerAsyncParameterStatus {
 func ToServerAsync(msg pgproto3.BackendMessage) (ServerAsync, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.NoticeResponse:
-		return (*ServerAsyncNoticeResponse)(ServerParsed(m)), true
+		return (*ServerNoticeResponse)(ServerParsed(m)), true
 	case *pgproto3.NotificationResponse:
-		return (*ServerAsyncNotificationResponse)(ServerParsed(m)), true
+		return (*ServerNotificationResponse)(ServerParsed(m)), true
 	case *pgproto3.ParameterStatus:
-		return (*ServerAsyncParameterStatus)(ServerParsed(m)), true
+		return (*ServerParameterStatus)(ServerParsed(m)), true
 	}
 	return nil, false
 }
@@ -1323,9 +1307,9 @@ func ToServerAsync(msg pgproto3.BackendMessage) (ServerAsync, bool) {
 // ServerAsyncHandlers provides type-safe handlers for each ServerAsync variant.
 type ServerAsyncHandlers[T any] struct {
 	Default              func(msg ServerAsync) (T, error)
-	NoticeResponse       func(msg *ServerAsyncNoticeResponse) (T, error)
-	NotificationResponse func(msg *ServerAsyncNotificationResponse) (T, error)
-	ParameterStatus      func(msg *ServerAsyncParameterStatus) (T, error)
+	NoticeResponse       func(msg *ServerNoticeResponse) (T, error)
+	NotificationResponse func(msg *ServerNotificationResponse) (T, error)
+	ParameterStatus      func(msg *ServerParameterStatus) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1338,17 +1322,17 @@ func (h ServerAsyncHandlers[T]) HandleDefault(msg ServerAsync, defaultHandler fu
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerAsyncNoticeResponse:
+	case *ServerNoticeResponse:
 		if h.NoticeResponse != nil {
 			return h.NoticeResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerAsyncNotificationResponse:
+	case *ServerNotificationResponse:
 		if h.NotificationResponse != nil {
 			return h.NotificationResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerAsyncParameterStatus:
+	case *ServerParameterStatus:
 		if h.ParameterStatus != nil {
 			return h.ParameterStatus(msg)
 		}
@@ -1366,9 +1350,9 @@ func (h ServerAsyncHandlers[T]) Handle(msg ServerAsync) (T, error) {
 // ServerAsyncHandlersCtx provides type-safe handlers with context and an argument for each ServerAsync variant.
 type ServerAsyncHandlersCtx[Arg, Result any] struct {
 	Default              func(ctx context.Context, msg ServerAsync, arg Arg) (Result, error)
-	NoticeResponse       func(ctx context.Context, msg *ServerAsyncNoticeResponse, arg Arg) (Result, error)
-	NotificationResponse func(ctx context.Context, msg *ServerAsyncNotificationResponse, arg Arg) (Result, error)
-	ParameterStatus      func(ctx context.Context, msg *ServerAsyncParameterStatus, arg Arg) (Result, error)
+	NoticeResponse       func(ctx context.Context, msg *ServerNoticeResponse, arg Arg) (Result, error)
+	NotificationResponse func(ctx context.Context, msg *ServerNotificationResponse, arg Arg) (Result, error)
+	ParameterStatus      func(ctx context.Context, msg *ServerParameterStatus, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1381,17 +1365,17 @@ func (h ServerAsyncHandlersCtx[Arg, Result]) HandleDefault(ctx context.Context, 
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerAsyncNoticeResponse:
+	case *ServerNoticeResponse:
 		if h.NoticeResponse != nil {
 			return h.NoticeResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerAsyncNotificationResponse:
+	case *ServerNotificationResponse:
 		if h.NotificationResponse != nil {
 			return h.NotificationResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerAsyncParameterStatus:
+	case *ServerParameterStatus:
 		if h.ParameterStatus != nil {
 			return h.ParameterStatus(ctx, msg, arg)
 		}
@@ -1411,48 +1395,48 @@ type ServerHandlers[Arg, Result any] struct {
 	Default func(ctx context.Context, msg ServerMessage, arg Arg) (Result, error)
 	// Startup
 	Startup                         *ServerStartupHandlersCtx[Arg, Result]
-	AuthenticationCleartextPassword func(ctx context.Context, msg *ServerStartupAuthenticationCleartextPassword, arg Arg) (Result, error)
-	AuthenticationGSS               func(ctx context.Context, msg *ServerStartupAuthenticationGSS, arg Arg) (Result, error)
-	AuthenticationGSSContinue       func(ctx context.Context, msg *ServerStartupAuthenticationGSSContinue, arg Arg) (Result, error)
-	AuthenticationMD5Password       func(ctx context.Context, msg *ServerStartupAuthenticationMD5Password, arg Arg) (Result, error)
-	AuthenticationOk                func(ctx context.Context, msg *ServerStartupAuthenticationOk, arg Arg) (Result, error)
-	AuthenticationSASL              func(ctx context.Context, msg *ServerStartupAuthenticationSASL, arg Arg) (Result, error)
-	AuthenticationSASLContinue      func(ctx context.Context, msg *ServerStartupAuthenticationSASLContinue, arg Arg) (Result, error)
-	AuthenticationSASLFinal         func(ctx context.Context, msg *ServerStartupAuthenticationSASLFinal, arg Arg) (Result, error)
-	BackendKeyData                  func(ctx context.Context, msg *ServerStartupBackendKeyData, arg Arg) (Result, error)
+	AuthenticationCleartextPassword func(ctx context.Context, msg *ServerAuthenticationCleartextPassword, arg Arg) (Result, error)
+	AuthenticationGSS               func(ctx context.Context, msg *ServerAuthenticationGSS, arg Arg) (Result, error)
+	AuthenticationGSSContinue       func(ctx context.Context, msg *ServerAuthenticationGSSContinue, arg Arg) (Result, error)
+	AuthenticationMD5Password       func(ctx context.Context, msg *ServerAuthenticationMD5Password, arg Arg) (Result, error)
+	AuthenticationOk                func(ctx context.Context, msg *ServerAuthenticationOk, arg Arg) (Result, error)
+	AuthenticationSASL              func(ctx context.Context, msg *ServerAuthenticationSASL, arg Arg) (Result, error)
+	AuthenticationSASLContinue      func(ctx context.Context, msg *ServerAuthenticationSASLContinue, arg Arg) (Result, error)
+	AuthenticationSASLFinal         func(ctx context.Context, msg *ServerAuthenticationSASLFinal, arg Arg) (Result, error)
+	BackendKeyData                  func(ctx context.Context, msg *ServerBackendKeyData, arg Arg) (Result, error)
 
 	// ExtendedQuery
 	ExtendedQuery        *ServerExtendedQueryHandlersCtx[Arg, Result]
-	ParseComplete        func(ctx context.Context, msg *ServerExtendedQueryParseComplete, arg Arg) (Result, error)
-	BindComplete         func(ctx context.Context, msg *ServerExtendedQueryBindComplete, arg Arg) (Result, error)
-	ParameterDescription func(ctx context.Context, msg *ServerExtendedQueryParameterDescription, arg Arg) (Result, error)
-	RowDescription       func(ctx context.Context, msg *ServerExtendedQueryRowDescription, arg Arg) (Result, error)
-	NoData               func(ctx context.Context, msg *ServerExtendedQueryNoData, arg Arg) (Result, error)
-	PortalSuspended      func(ctx context.Context, msg *ServerExtendedQueryPortalSuspended, arg Arg) (Result, error)
-	CloseComplete        func(ctx context.Context, msg *ServerExtendedQueryCloseComplete, arg Arg) (Result, error)
+	ParseComplete        func(ctx context.Context, msg *ServerParseComplete, arg Arg) (Result, error)
+	BindComplete         func(ctx context.Context, msg *ServerBindComplete, arg Arg) (Result, error)
+	ParameterDescription func(ctx context.Context, msg *ServerParameterDescription, arg Arg) (Result, error)
+	RowDescription       func(ctx context.Context, msg *ServerRowDescription, arg Arg) (Result, error)
+	NoData               func(ctx context.Context, msg *ServerNoData, arg Arg) (Result, error)
+	PortalSuspended      func(ctx context.Context, msg *ServerPortalSuspended, arg Arg) (Result, error)
+	CloseComplete        func(ctx context.Context, msg *ServerCloseComplete, arg Arg) (Result, error)
 
 	// Copy
 	Copy             *ServerCopyHandlersCtx[Arg, Result]
-	CopyInResponse   func(ctx context.Context, msg *ServerCopyCopyInResponse, arg Arg) (Result, error)
-	CopyOutResponse  func(ctx context.Context, msg *ServerCopyCopyOutResponse, arg Arg) (Result, error)
-	CopyBothResponse func(ctx context.Context, msg *ServerCopyCopyBothResponse, arg Arg) (Result, error)
-	CopyData         func(ctx context.Context, msg *ServerCopyCopyData, arg Arg) (Result, error)
-	CopyDone         func(ctx context.Context, msg *ServerCopyCopyDone, arg Arg) (Result, error)
+	CopyInResponse   func(ctx context.Context, msg *ServerCopyInResponse, arg Arg) (Result, error)
+	CopyOutResponse  func(ctx context.Context, msg *ServerCopyOutResponse, arg Arg) (Result, error)
+	CopyBothResponse func(ctx context.Context, msg *ServerCopyBothResponse, arg Arg) (Result, error)
+	CopyData         func(ctx context.Context, msg *ServerCopyData, arg Arg) (Result, error)
+	CopyDone         func(ctx context.Context, msg *ServerCopyDone, arg Arg) (Result, error)
 
 	// Response
 	Response             *ServerResponseHandlersCtx[Arg, Result]
-	ReadyForQuery        func(ctx context.Context, msg *ServerResponseReadyForQuery, arg Arg) (Result, error)
-	CommandComplete      func(ctx context.Context, msg *ServerResponseCommandComplete, arg Arg) (Result, error)
-	DataRow              func(ctx context.Context, msg *ServerResponseDataRow, arg Arg) (Result, error)
-	EmptyQueryResponse   func(ctx context.Context, msg *ServerResponseEmptyQueryResponse, arg Arg) (Result, error)
-	ErrorResponse        func(ctx context.Context, msg *ServerResponseErrorResponse, arg Arg) (Result, error)
-	FunctionCallResponse func(ctx context.Context, msg *ServerResponseFunctionCallResponse, arg Arg) (Result, error)
+	ReadyForQuery        func(ctx context.Context, msg *ServerReadyForQuery, arg Arg) (Result, error)
+	CommandComplete      func(ctx context.Context, msg *ServerCommandComplete, arg Arg) (Result, error)
+	DataRow              func(ctx context.Context, msg *ServerDataRow, arg Arg) (Result, error)
+	EmptyQueryResponse   func(ctx context.Context, msg *ServerEmptyQueryResponse, arg Arg) (Result, error)
+	ErrorResponse        func(ctx context.Context, msg *ServerErrorResponse, arg Arg) (Result, error)
+	FunctionCallResponse func(ctx context.Context, msg *ServerFunctionCallResponse, arg Arg) (Result, error)
 
 	// Async
 	Async                *ServerAsyncHandlersCtx[Arg, Result]
-	NoticeResponse       func(ctx context.Context, msg *ServerAsyncNoticeResponse, arg Arg) (Result, error)
-	NotificationResponse func(ctx context.Context, msg *ServerAsyncNotificationResponse, arg Arg) (Result, error)
-	ParameterStatus      func(ctx context.Context, msg *ServerAsyncParameterStatus, arg Arg) (Result, error)
+	NoticeResponse       func(ctx context.Context, msg *ServerNoticeResponse, arg Arg) (Result, error)
+	NotificationResponse func(ctx context.Context, msg *ServerNotificationResponse, arg Arg) (Result, error)
+	ParameterStatus      func(ctx context.Context, msg *ServerParameterStatus, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1465,7 +1449,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 		}
 	}
 	switch msg := msg.(type) {
-	case *ServerStartupAuthenticationCleartextPassword:
+	case *ServerAuthenticationCleartextPassword:
 		if h.AuthenticationCleartextPassword != nil {
 			return h.AuthenticationCleartextPassword(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.AuthenticationCleartextPassword != nil {
@@ -1474,7 +1458,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationGSS:
+	case *ServerAuthenticationGSS:
 		if h.AuthenticationGSS != nil {
 			return h.AuthenticationGSS(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.AuthenticationGSS != nil {
@@ -1483,7 +1467,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationGSSContinue:
+	case *ServerAuthenticationGSSContinue:
 		if h.AuthenticationGSSContinue != nil {
 			return h.AuthenticationGSSContinue(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.AuthenticationGSSContinue != nil {
@@ -1492,7 +1476,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationMD5Password:
+	case *ServerAuthenticationMD5Password:
 		if h.AuthenticationMD5Password != nil {
 			return h.AuthenticationMD5Password(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.AuthenticationMD5Password != nil {
@@ -1501,7 +1485,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationOk:
+	case *ServerAuthenticationOk:
 		if h.AuthenticationOk != nil {
 			return h.AuthenticationOk(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.AuthenticationOk != nil {
@@ -1510,7 +1494,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationSASL:
+	case *ServerAuthenticationSASL:
 		if h.AuthenticationSASL != nil {
 			return h.AuthenticationSASL(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.AuthenticationSASL != nil {
@@ -1519,7 +1503,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationSASLContinue:
+	case *ServerAuthenticationSASLContinue:
 		if h.AuthenticationSASLContinue != nil {
 			return h.AuthenticationSASLContinue(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.AuthenticationSASLContinue != nil {
@@ -1528,7 +1512,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupAuthenticationSASLFinal:
+	case *ServerAuthenticationSASLFinal:
 		if h.AuthenticationSASLFinal != nil {
 			return h.AuthenticationSASLFinal(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.AuthenticationSASLFinal != nil {
@@ -1537,7 +1521,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerStartupBackendKeyData:
+	case *ServerBackendKeyData:
 		if h.BackendKeyData != nil {
 			return h.BackendKeyData(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.BackendKeyData != nil {
@@ -1546,7 +1530,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryParseComplete:
+	case *ServerParseComplete:
 		if h.ParseComplete != nil {
 			return h.ParseComplete(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.ParseComplete != nil {
@@ -1555,7 +1539,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryBindComplete:
+	case *ServerBindComplete:
 		if h.BindComplete != nil {
 			return h.BindComplete(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.BindComplete != nil {
@@ -1564,7 +1548,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryParameterDescription:
+	case *ServerParameterDescription:
 		if h.ParameterDescription != nil {
 			return h.ParameterDescription(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.ParameterDescription != nil {
@@ -1573,7 +1557,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryRowDescription:
+	case *ServerRowDescription:
 		if h.RowDescription != nil {
 			return h.RowDescription(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.RowDescription != nil {
@@ -1582,7 +1566,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryNoData:
+	case *ServerNoData:
 		if h.NoData != nil {
 			return h.NoData(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.NoData != nil {
@@ -1591,7 +1575,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryPortalSuspended:
+	case *ServerPortalSuspended:
 		if h.PortalSuspended != nil {
 			return h.PortalSuspended(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.PortalSuspended != nil {
@@ -1600,7 +1584,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerExtendedQueryCloseComplete:
+	case *ServerCloseComplete:
 		if h.CloseComplete != nil {
 			return h.CloseComplete(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.CloseComplete != nil {
@@ -1609,7 +1593,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyInResponse:
+	case *ServerCopyInResponse:
 		if h.CopyInResponse != nil {
 			return h.CopyInResponse(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyInResponse != nil {
@@ -1618,7 +1602,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyOutResponse:
+	case *ServerCopyOutResponse:
 		if h.CopyOutResponse != nil {
 			return h.CopyOutResponse(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyOutResponse != nil {
@@ -1627,7 +1611,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyBothResponse:
+	case *ServerCopyBothResponse:
 		if h.CopyBothResponse != nil {
 			return h.CopyBothResponse(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyBothResponse != nil {
@@ -1636,7 +1620,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyData:
+	case *ServerCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyData != nil {
@@ -1645,7 +1629,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyCopyDone:
+	case *ServerCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyDone != nil {
@@ -1654,7 +1638,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseReadyForQuery:
+	case *ServerReadyForQuery:
 		if h.ReadyForQuery != nil {
 			return h.ReadyForQuery(ctx, msg, arg)
 		} else if h.Response != nil && h.Response.ReadyForQuery != nil {
@@ -1663,7 +1647,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Response.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseCommandComplete:
+	case *ServerCommandComplete:
 		if h.CommandComplete != nil {
 			return h.CommandComplete(ctx, msg, arg)
 		} else if h.Response != nil && h.Response.CommandComplete != nil {
@@ -1672,7 +1656,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Response.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseDataRow:
+	case *ServerDataRow:
 		if h.DataRow != nil {
 			return h.DataRow(ctx, msg, arg)
 		} else if h.Response != nil && h.Response.DataRow != nil {
@@ -1681,7 +1665,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Response.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseEmptyQueryResponse:
+	case *ServerEmptyQueryResponse:
 		if h.EmptyQueryResponse != nil {
 			return h.EmptyQueryResponse(ctx, msg, arg)
 		} else if h.Response != nil && h.Response.EmptyQueryResponse != nil {
@@ -1690,7 +1674,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Response.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseErrorResponse:
+	case *ServerErrorResponse:
 		if h.ErrorResponse != nil {
 			return h.ErrorResponse(ctx, msg, arg)
 		} else if h.Response != nil && h.Response.ErrorResponse != nil {
@@ -1699,7 +1683,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Response.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerResponseFunctionCallResponse:
+	case *ServerFunctionCallResponse:
 		if h.FunctionCallResponse != nil {
 			return h.FunctionCallResponse(ctx, msg, arg)
 		} else if h.Response != nil && h.Response.FunctionCallResponse != nil {
@@ -1708,7 +1692,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Response.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerAsyncNoticeResponse:
+	case *ServerNoticeResponse:
 		if h.NoticeResponse != nil {
 			return h.NoticeResponse(ctx, msg, arg)
 		} else if h.Async != nil && h.Async.NoticeResponse != nil {
@@ -1717,7 +1701,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Async.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerAsyncNotificationResponse:
+	case *ServerNotificationResponse:
 		if h.NotificationResponse != nil {
 			return h.NotificationResponse(ctx, msg, arg)
 		} else if h.Async != nil && h.Async.NotificationResponse != nil {
@@ -1726,7 +1710,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Async.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerAsyncParameterStatus:
+	case *ServerParameterStatus:
 		if h.ParameterStatus != nil {
 			return h.ParameterStatus(ctx, msg, arg)
 		} else if h.Async != nil && h.Async.ParameterStatus != nil {

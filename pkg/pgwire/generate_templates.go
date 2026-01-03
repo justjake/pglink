@@ -3,7 +3,7 @@ package pgwire
 // This file contains template functions used by the code generator (generate.go).
 // These functions define which pgproto3 message types belong to each category.
 // The generator reads these switch statements to produce type-safe wrapper types
-// and conversion functions (e.g., ToClientSimpleQuery, ClientSimpleQueryQuery).
+// and conversion functions (e.g., ToClientSimpleQuery, ClientQuery).
 //
 // These functions are intentionally private (lowercase) because they are only
 // used as templates for code generation. They are tested by unit tests to ensure

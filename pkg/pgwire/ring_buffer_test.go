@@ -1389,10 +1389,10 @@ func TestCursor_AsClient(t *testing.T) {
 			t.Fatalf("AsClient error: %v", err)
 		}
 
-		// The parsed message should be a ClientSimpleQueryQuery
-		query, ok := parsed.(*ClientSimpleQueryQuery)
+		// The parsed message should be a ClientQuery
+		query, ok := parsed.(*ClientQuery)
 		if !ok {
-			t.Fatalf("expected *ClientSimpleQueryQuery, got %T", parsed)
+			t.Fatalf("expected *ClientQuery, got %T", parsed)
 		}
 
 		// Access the parsed Query message
@@ -1423,10 +1423,10 @@ func TestCursor_AsServer(t *testing.T) {
 			t.Fatalf("AsServer error: %v", err)
 		}
 
-		// The parsed message should be a ServerResponseReadyForQuery
-		rfq, ok := parsed.(*ServerResponseReadyForQuery)
+		// The parsed message should be a ServerReadyForQuery
+		rfq, ok := parsed.(*ServerReadyForQuery)
 		if !ok {
-			t.Fatalf("expected *ServerResponseReadyForQuery, got %T", parsed)
+			t.Fatalf("expected *ServerReadyForQuery, got %T", parsed)
 		}
 
 		// Access the parsed ReadyForQuery message

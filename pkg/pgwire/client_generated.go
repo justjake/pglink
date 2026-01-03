@@ -20,146 +20,146 @@ type ClientStartup interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientStartup = (*ClientStartupGSSEncRequest)(nil)
-	_ ClientStartup = (*ClientStartupGSSResponse)(nil)
-	_ ClientStartup = (*ClientStartupPasswordMessage)(nil)
-	_ ClientStartup = (*ClientStartupSASLInitialResponse)(nil)
-	_ ClientStartup = (*ClientStartupSASLResponse)(nil)
-	_ ClientStartup = (*ClientStartupSSLRequest)(nil)
-	_ ClientStartup = (*ClientStartupStartupMessage)(nil)
+	_ ClientStartup = (*ClientGSSEncRequest)(nil)
+	_ ClientStartup = (*ClientGSSResponse)(nil)
+	_ ClientStartup = (*ClientPasswordMessage)(nil)
+	_ ClientStartup = (*ClientSASLInitialResponse)(nil)
+	_ ClientStartup = (*ClientSASLResponse)(nil)
+	_ ClientStartup = (*ClientSSLRequest)(nil)
+	_ ClientStartup = (*ClientStartupMessage)(nil)
 )
 
-// ClientStartupGSSEncRequest wraps *pgproto3.GSSEncRequest from the client.
-type ClientStartupGSSEncRequest FromClient[*pgproto3.GSSEncRequest]
+// ClientGSSEncRequest wraps *pgproto3.GSSEncRequest from the client.
+type ClientGSSEncRequest FromClient[*pgproto3.GSSEncRequest]
 
-func (*ClientStartupGSSEncRequest) Client()            {}
-func (*ClientStartupGSSEncRequest) Startup()           {}
-func (t *ClientStartupGSSEncRequest) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientStartupGSSEncRequest) Parse() *pgproto3.GSSEncRequest {
+func (*ClientGSSEncRequest) Client()            {}
+func (*ClientGSSEncRequest) Startup()           {}
+func (t *ClientGSSEncRequest) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientGSSEncRequest) Parse() *pgproto3.GSSEncRequest {
 	return (*FromClient[*pgproto3.GSSEncRequest])(m).Parse()
 }
-func (m *ClientStartupGSSEncRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientStartupGSSEncRequest) Source() RawMessageSource                { return m.source }
+func (m *ClientGSSEncRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientGSSEncRequest) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientStartupGSSEncRequest) Retain() ClientStartupGSSEncRequest {
+func (m ClientGSSEncRequest) Retain() ClientGSSEncRequest {
 	src, parsed, isParsed := (*FromClient[*pgproto3.GSSEncRequest])(&m).retainFields()
-	return ClientStartupGSSEncRequest{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientGSSEncRequest{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientStartupGSSResponse wraps *pgproto3.GSSResponse from the client.
-type ClientStartupGSSResponse FromClient[*pgproto3.GSSResponse]
+// ClientGSSResponse wraps *pgproto3.GSSResponse from the client.
+type ClientGSSResponse FromClient[*pgproto3.GSSResponse]
 
-func (*ClientStartupGSSResponse) Client()            {}
-func (*ClientStartupGSSResponse) Startup()           {}
-func (t *ClientStartupGSSResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientStartupGSSResponse) Parse() *pgproto3.GSSResponse {
+func (*ClientGSSResponse) Client()            {}
+func (*ClientGSSResponse) Startup()           {}
+func (t *ClientGSSResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientGSSResponse) Parse() *pgproto3.GSSResponse {
 	return (*FromClient[*pgproto3.GSSResponse])(m).Parse()
 }
-func (m *ClientStartupGSSResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientStartupGSSResponse) Source() RawMessageSource                { return m.source }
+func (m *ClientGSSResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientGSSResponse) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientStartupGSSResponse) Retain() ClientStartupGSSResponse {
+func (m ClientGSSResponse) Retain() ClientGSSResponse {
 	src, parsed, isParsed := (*FromClient[*pgproto3.GSSResponse])(&m).retainFields()
-	return ClientStartupGSSResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientGSSResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientStartupPasswordMessage wraps *pgproto3.PasswordMessage from the client.
-type ClientStartupPasswordMessage FromClient[*pgproto3.PasswordMessage]
+// ClientPasswordMessage wraps *pgproto3.PasswordMessage from the client.
+type ClientPasswordMessage FromClient[*pgproto3.PasswordMessage]
 
-func (*ClientStartupPasswordMessage) Client()            {}
-func (*ClientStartupPasswordMessage) Startup()           {}
-func (t *ClientStartupPasswordMessage) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientStartupPasswordMessage) Parse() *pgproto3.PasswordMessage {
+func (*ClientPasswordMessage) Client()            {}
+func (*ClientPasswordMessage) Startup()           {}
+func (t *ClientPasswordMessage) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientPasswordMessage) Parse() *pgproto3.PasswordMessage {
 	return (*FromClient[*pgproto3.PasswordMessage])(m).Parse()
 }
-func (m *ClientStartupPasswordMessage) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientStartupPasswordMessage) Source() RawMessageSource                { return m.source }
+func (m *ClientPasswordMessage) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientPasswordMessage) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientStartupPasswordMessage) Retain() ClientStartupPasswordMessage {
+func (m ClientPasswordMessage) Retain() ClientPasswordMessage {
 	src, parsed, isParsed := (*FromClient[*pgproto3.PasswordMessage])(&m).retainFields()
-	return ClientStartupPasswordMessage{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientPasswordMessage{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientStartupSASLInitialResponse wraps *pgproto3.SASLInitialResponse from the client.
-type ClientStartupSASLInitialResponse FromClient[*pgproto3.SASLInitialResponse]
+// ClientSASLInitialResponse wraps *pgproto3.SASLInitialResponse from the client.
+type ClientSASLInitialResponse FromClient[*pgproto3.SASLInitialResponse]
 
-func (*ClientStartupSASLInitialResponse) Client()            {}
-func (*ClientStartupSASLInitialResponse) Startup()           {}
-func (t *ClientStartupSASLInitialResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientStartupSASLInitialResponse) Parse() *pgproto3.SASLInitialResponse {
+func (*ClientSASLInitialResponse) Client()            {}
+func (*ClientSASLInitialResponse) Startup()           {}
+func (t *ClientSASLInitialResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientSASLInitialResponse) Parse() *pgproto3.SASLInitialResponse {
 	return (*FromClient[*pgproto3.SASLInitialResponse])(m).Parse()
 }
-func (m *ClientStartupSASLInitialResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientStartupSASLInitialResponse) Source() RawMessageSource                { return m.source }
+func (m *ClientSASLInitialResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientSASLInitialResponse) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientStartupSASLInitialResponse) Retain() ClientStartupSASLInitialResponse {
+func (m ClientSASLInitialResponse) Retain() ClientSASLInitialResponse {
 	src, parsed, isParsed := (*FromClient[*pgproto3.SASLInitialResponse])(&m).retainFields()
-	return ClientStartupSASLInitialResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientSASLInitialResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientStartupSASLResponse wraps *pgproto3.SASLResponse from the client.
-type ClientStartupSASLResponse FromClient[*pgproto3.SASLResponse]
+// ClientSASLResponse wraps *pgproto3.SASLResponse from the client.
+type ClientSASLResponse FromClient[*pgproto3.SASLResponse]
 
-func (*ClientStartupSASLResponse) Client()            {}
-func (*ClientStartupSASLResponse) Startup()           {}
-func (t *ClientStartupSASLResponse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientStartupSASLResponse) Parse() *pgproto3.SASLResponse {
+func (*ClientSASLResponse) Client()            {}
+func (*ClientSASLResponse) Startup()           {}
+func (t *ClientSASLResponse) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientSASLResponse) Parse() *pgproto3.SASLResponse {
 	return (*FromClient[*pgproto3.SASLResponse])(m).Parse()
 }
-func (m *ClientStartupSASLResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientStartupSASLResponse) Source() RawMessageSource                { return m.source }
+func (m *ClientSASLResponse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientSASLResponse) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientStartupSASLResponse) Retain() ClientStartupSASLResponse {
+func (m ClientSASLResponse) Retain() ClientSASLResponse {
 	src, parsed, isParsed := (*FromClient[*pgproto3.SASLResponse])(&m).retainFields()
-	return ClientStartupSASLResponse{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientSASLResponse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientStartupSSLRequest wraps *pgproto3.SSLRequest from the client.
-type ClientStartupSSLRequest FromClient[*pgproto3.SSLRequest]
+// ClientSSLRequest wraps *pgproto3.SSLRequest from the client.
+type ClientSSLRequest FromClient[*pgproto3.SSLRequest]
 
-func (*ClientStartupSSLRequest) Client()            {}
-func (*ClientStartupSSLRequest) Startup()           {}
-func (t *ClientStartupSSLRequest) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientStartupSSLRequest) Parse() *pgproto3.SSLRequest {
+func (*ClientSSLRequest) Client()            {}
+func (*ClientSSLRequest) Startup()           {}
+func (t *ClientSSLRequest) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientSSLRequest) Parse() *pgproto3.SSLRequest {
 	return (*FromClient[*pgproto3.SSLRequest])(m).Parse()
 }
-func (m *ClientStartupSSLRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientStartupSSLRequest) Source() RawMessageSource                { return m.source }
+func (m *ClientSSLRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientSSLRequest) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientStartupSSLRequest) Retain() ClientStartupSSLRequest {
+func (m ClientSSLRequest) Retain() ClientSSLRequest {
 	src, parsed, isParsed := (*FromClient[*pgproto3.SSLRequest])(&m).retainFields()
-	return ClientStartupSSLRequest{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientSSLRequest{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientStartupStartupMessage wraps *pgproto3.StartupMessage from the client.
-type ClientStartupStartupMessage FromClient[*pgproto3.StartupMessage]
+// ClientStartupMessage wraps *pgproto3.StartupMessage from the client.
+type ClientStartupMessage FromClient[*pgproto3.StartupMessage]
 
-func (*ClientStartupStartupMessage) Client()            {}
-func (*ClientStartupStartupMessage) Startup()           {}
-func (t *ClientStartupStartupMessage) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientStartupStartupMessage) Parse() *pgproto3.StartupMessage {
+func (*ClientStartupMessage) Client()            {}
+func (*ClientStartupMessage) Startup()           {}
+func (t *ClientStartupMessage) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientStartupMessage) Parse() *pgproto3.StartupMessage {
 	return (*FromClient[*pgproto3.StartupMessage])(m).Parse()
 }
-func (m *ClientStartupStartupMessage) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientStartupStartupMessage) Source() RawMessageSource                { return m.source }
+func (m *ClientStartupMessage) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientStartupMessage) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientStartupStartupMessage) Retain() ClientStartupStartupMessage {
+func (m ClientStartupMessage) Retain() ClientStartupMessage {
 	src, parsed, isParsed := (*FromClient[*pgproto3.StartupMessage])(&m).retainFields()
-	return ClientStartupStartupMessage{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientStartupMessage{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToClientStartup converts a pgproto3.FrontendMessage to a ClientStartup if it matches one of the known types.
@@ -167,19 +167,19 @@ func (m ClientStartupStartupMessage) Retain() ClientStartupStartupMessage {
 func ToClientStartup(msg pgproto3.FrontendMessage) (ClientStartup, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.GSSEncRequest:
-		return (*ClientStartupGSSEncRequest)(ClientParsed(m)), true
+		return (*ClientGSSEncRequest)(ClientParsed(m)), true
 	case *pgproto3.GSSResponse:
-		return (*ClientStartupGSSResponse)(ClientParsed(m)), true
+		return (*ClientGSSResponse)(ClientParsed(m)), true
 	case *pgproto3.PasswordMessage:
-		return (*ClientStartupPasswordMessage)(ClientParsed(m)), true
+		return (*ClientPasswordMessage)(ClientParsed(m)), true
 	case *pgproto3.SASLInitialResponse:
-		return (*ClientStartupSASLInitialResponse)(ClientParsed(m)), true
+		return (*ClientSASLInitialResponse)(ClientParsed(m)), true
 	case *pgproto3.SASLResponse:
-		return (*ClientStartupSASLResponse)(ClientParsed(m)), true
+		return (*ClientSASLResponse)(ClientParsed(m)), true
 	case *pgproto3.SSLRequest:
-		return (*ClientStartupSSLRequest)(ClientParsed(m)), true
+		return (*ClientSSLRequest)(ClientParsed(m)), true
 	case *pgproto3.StartupMessage:
-		return (*ClientStartupStartupMessage)(ClientParsed(m)), true
+		return (*ClientStartupMessage)(ClientParsed(m)), true
 	}
 	return nil, false
 }
@@ -187,13 +187,13 @@ func ToClientStartup(msg pgproto3.FrontendMessage) (ClientStartup, bool) {
 // ClientStartupHandlers provides type-safe handlers for each ClientStartup variant.
 type ClientStartupHandlers[T any] struct {
 	Default             func(msg ClientStartup) (T, error)
-	GSSEncRequest       func(msg *ClientStartupGSSEncRequest) (T, error)
-	GSSResponse         func(msg *ClientStartupGSSResponse) (T, error)
-	PasswordMessage     func(msg *ClientStartupPasswordMessage) (T, error)
-	SASLInitialResponse func(msg *ClientStartupSASLInitialResponse) (T, error)
-	SASLResponse        func(msg *ClientStartupSASLResponse) (T, error)
-	SSLRequest          func(msg *ClientStartupSSLRequest) (T, error)
-	StartupMessage      func(msg *ClientStartupStartupMessage) (T, error)
+	GSSEncRequest       func(msg *ClientGSSEncRequest) (T, error)
+	GSSResponse         func(msg *ClientGSSResponse) (T, error)
+	PasswordMessage     func(msg *ClientPasswordMessage) (T, error)
+	SASLInitialResponse func(msg *ClientSASLInitialResponse) (T, error)
+	SASLResponse        func(msg *ClientSASLResponse) (T, error)
+	SSLRequest          func(msg *ClientSSLRequest) (T, error)
+	StartupMessage      func(msg *ClientStartupMessage) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -206,37 +206,37 @@ func (h ClientStartupHandlers[T]) HandleDefault(msg ClientStartup, defaultHandle
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientStartupGSSEncRequest:
+	case *ClientGSSEncRequest:
 		if h.GSSEncRequest != nil {
 			return h.GSSEncRequest(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientStartupGSSResponse:
+	case *ClientGSSResponse:
 		if h.GSSResponse != nil {
 			return h.GSSResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientStartupPasswordMessage:
+	case *ClientPasswordMessage:
 		if h.PasswordMessage != nil {
 			return h.PasswordMessage(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientStartupSASLInitialResponse:
+	case *ClientSASLInitialResponse:
 		if h.SASLInitialResponse != nil {
 			return h.SASLInitialResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientStartupSASLResponse:
+	case *ClientSASLResponse:
 		if h.SASLResponse != nil {
 			return h.SASLResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientStartupSSLRequest:
+	case *ClientSSLRequest:
 		if h.SSLRequest != nil {
 			return h.SSLRequest(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientStartupStartupMessage:
+	case *ClientStartupMessage:
 		if h.StartupMessage != nil {
 			return h.StartupMessage(msg)
 		}
@@ -254,13 +254,13 @@ func (h ClientStartupHandlers[T]) Handle(msg ClientStartup) (T, error) {
 // ClientStartupHandlersCtx provides type-safe handlers with context and an argument for each ClientStartup variant.
 type ClientStartupHandlersCtx[Arg, Result any] struct {
 	Default             func(ctx context.Context, msg ClientStartup, arg Arg) (Result, error)
-	GSSEncRequest       func(ctx context.Context, msg *ClientStartupGSSEncRequest, arg Arg) (Result, error)
-	GSSResponse         func(ctx context.Context, msg *ClientStartupGSSResponse, arg Arg) (Result, error)
-	PasswordMessage     func(ctx context.Context, msg *ClientStartupPasswordMessage, arg Arg) (Result, error)
-	SASLInitialResponse func(ctx context.Context, msg *ClientStartupSASLInitialResponse, arg Arg) (Result, error)
-	SASLResponse        func(ctx context.Context, msg *ClientStartupSASLResponse, arg Arg) (Result, error)
-	SSLRequest          func(ctx context.Context, msg *ClientStartupSSLRequest, arg Arg) (Result, error)
-	StartupMessage      func(ctx context.Context, msg *ClientStartupStartupMessage, arg Arg) (Result, error)
+	GSSEncRequest       func(ctx context.Context, msg *ClientGSSEncRequest, arg Arg) (Result, error)
+	GSSResponse         func(ctx context.Context, msg *ClientGSSResponse, arg Arg) (Result, error)
+	PasswordMessage     func(ctx context.Context, msg *ClientPasswordMessage, arg Arg) (Result, error)
+	SASLInitialResponse func(ctx context.Context, msg *ClientSASLInitialResponse, arg Arg) (Result, error)
+	SASLResponse        func(ctx context.Context, msg *ClientSASLResponse, arg Arg) (Result, error)
+	SSLRequest          func(ctx context.Context, msg *ClientSSLRequest, arg Arg) (Result, error)
+	StartupMessage      func(ctx context.Context, msg *ClientStartupMessage, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -273,37 +273,37 @@ func (h ClientStartupHandlersCtx[Arg, Result]) HandleDefault(ctx context.Context
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientStartupGSSEncRequest:
+	case *ClientGSSEncRequest:
 		if h.GSSEncRequest != nil {
 			return h.GSSEncRequest(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupGSSResponse:
+	case *ClientGSSResponse:
 		if h.GSSResponse != nil {
 			return h.GSSResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupPasswordMessage:
+	case *ClientPasswordMessage:
 		if h.PasswordMessage != nil {
 			return h.PasswordMessage(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupSASLInitialResponse:
+	case *ClientSASLInitialResponse:
 		if h.SASLInitialResponse != nil {
 			return h.SASLInitialResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupSASLResponse:
+	case *ClientSASLResponse:
 		if h.SASLResponse != nil {
 			return h.SASLResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupSSLRequest:
+	case *ClientSSLRequest:
 		if h.SSLRequest != nil {
 			return h.SSLRequest(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupStartupMessage:
+	case *ClientStartupMessage:
 		if h.StartupMessage != nil {
 			return h.StartupMessage(ctx, msg, arg)
 		}
@@ -329,47 +329,45 @@ type ClientSimpleQuery interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientSimpleQuery = (*ClientSimpleQueryQuery)(nil)
-	_ ClientSimpleQuery = (*ClientSimpleQueryFunctionCall)(nil)
+	_ ClientSimpleQuery = (*ClientQuery)(nil)
+	_ ClientSimpleQuery = (*ClientFunctionCall)(nil)
 )
 
 // Simple query.
 // Destroys unnamed prepared statement & portal.
-type ClientSimpleQueryQuery FromClient[*pgproto3.Query]
+type ClientQuery FromClient[*pgproto3.Query]
 
-func (*ClientSimpleQueryQuery) Client()            {}
-func (*ClientSimpleQueryQuery) SimpleQuery()       {}
-func (t *ClientSimpleQueryQuery) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientSimpleQueryQuery) Parse() *pgproto3.Query {
-	return (*FromClient[*pgproto3.Query])(m).Parse()
-}
-func (m *ClientSimpleQueryQuery) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientSimpleQueryQuery) Source() RawMessageSource                { return m.source }
+func (*ClientQuery) Client()                                   {}
+func (*ClientQuery) SimpleQuery()                              {}
+func (t *ClientQuery) MsgType() MsgType                        { return t.source.MessageType() }
+func (m *ClientQuery) Parse() *pgproto3.Query                  { return (*FromClient[*pgproto3.Query])(m).Parse() }
+func (m *ClientQuery) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientQuery) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientSimpleQueryQuery) Retain() ClientSimpleQueryQuery {
+func (m ClientQuery) Retain() ClientQuery {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Query])(&m).retainFields()
-	return ClientSimpleQueryQuery{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientQuery{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Call a function; seems to work like a simple query? Or maybe it works with both modes?
-type ClientSimpleQueryFunctionCall FromClient[*pgproto3.FunctionCall]
+type ClientFunctionCall FromClient[*pgproto3.FunctionCall]
 
-func (*ClientSimpleQueryFunctionCall) Client()            {}
-func (*ClientSimpleQueryFunctionCall) SimpleQuery()       {}
-func (t *ClientSimpleQueryFunctionCall) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientSimpleQueryFunctionCall) Parse() *pgproto3.FunctionCall {
+func (*ClientFunctionCall) Client()            {}
+func (*ClientFunctionCall) SimpleQuery()       {}
+func (t *ClientFunctionCall) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientFunctionCall) Parse() *pgproto3.FunctionCall {
 	return (*FromClient[*pgproto3.FunctionCall])(m).Parse()
 }
-func (m *ClientSimpleQueryFunctionCall) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientSimpleQueryFunctionCall) Source() RawMessageSource                { return m.source }
+func (m *ClientFunctionCall) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientFunctionCall) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientSimpleQueryFunctionCall) Retain() ClientSimpleQueryFunctionCall {
+func (m ClientFunctionCall) Retain() ClientFunctionCall {
 	src, parsed, isParsed := (*FromClient[*pgproto3.FunctionCall])(&m).retainFields()
-	return ClientSimpleQueryFunctionCall{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientFunctionCall{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToClientSimpleQuery converts a pgproto3.FrontendMessage to a ClientSimpleQuery if it matches one of the known types.
@@ -377,9 +375,9 @@ func (m ClientSimpleQueryFunctionCall) Retain() ClientSimpleQueryFunctionCall {
 func ToClientSimpleQuery(msg pgproto3.FrontendMessage) (ClientSimpleQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Query:
-		return (*ClientSimpleQueryQuery)(ClientParsed(m)), true
+		return (*ClientQuery)(ClientParsed(m)), true
 	case *pgproto3.FunctionCall:
-		return (*ClientSimpleQueryFunctionCall)(ClientParsed(m)), true
+		return (*ClientFunctionCall)(ClientParsed(m)), true
 	}
 	return nil, false
 }
@@ -387,8 +385,8 @@ func ToClientSimpleQuery(msg pgproto3.FrontendMessage) (ClientSimpleQuery, bool)
 // ClientSimpleQueryHandlers provides type-safe handlers for each ClientSimpleQuery variant.
 type ClientSimpleQueryHandlers[T any] struct {
 	Default      func(msg ClientSimpleQuery) (T, error)
-	Query        func(msg *ClientSimpleQueryQuery) (T, error)
-	FunctionCall func(msg *ClientSimpleQueryFunctionCall) (T, error)
+	Query        func(msg *ClientQuery) (T, error)
+	FunctionCall func(msg *ClientFunctionCall) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -401,12 +399,12 @@ func (h ClientSimpleQueryHandlers[T]) HandleDefault(msg ClientSimpleQuery, defau
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientSimpleQueryQuery:
+	case *ClientQuery:
 		if h.Query != nil {
 			return h.Query(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientSimpleQueryFunctionCall:
+	case *ClientFunctionCall:
 		if h.FunctionCall != nil {
 			return h.FunctionCall(msg)
 		}
@@ -424,8 +422,8 @@ func (h ClientSimpleQueryHandlers[T]) Handle(msg ClientSimpleQuery) (T, error) {
 // ClientSimpleQueryHandlersCtx provides type-safe handlers with context and an argument for each ClientSimpleQuery variant.
 type ClientSimpleQueryHandlersCtx[Arg, Result any] struct {
 	Default      func(ctx context.Context, msg ClientSimpleQuery, arg Arg) (Result, error)
-	Query        func(ctx context.Context, msg *ClientSimpleQueryQuery, arg Arg) (Result, error)
-	FunctionCall func(ctx context.Context, msg *ClientSimpleQueryFunctionCall, arg Arg) (Result, error)
+	Query        func(ctx context.Context, msg *ClientQuery, arg Arg) (Result, error)
+	FunctionCall func(ctx context.Context, msg *ClientFunctionCall, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -438,12 +436,12 @@ func (h ClientSimpleQueryHandlersCtx[Arg, Result]) HandleDefault(ctx context.Con
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientSimpleQueryQuery:
+	case *ClientQuery:
 		if h.Query != nil {
 			return h.Query(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientSimpleQueryFunctionCall:
+	case *ClientFunctionCall:
 		if h.FunctionCall != nil {
 			return h.FunctionCall(ctx, msg, arg)
 		}
@@ -469,51 +467,47 @@ type ClientExtendedQuery interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientExtendedQuery = (*ClientExtendedQueryParse)(nil)
-	_ ClientExtendedQuery = (*ClientExtendedQueryBind)(nil)
-	_ ClientExtendedQuery = (*ClientExtendedQueryExecute)(nil)
-	_ ClientExtendedQuery = (*ClientExtendedQuerySync)(nil)
-	_ ClientExtendedQuery = (*ClientExtendedQueryDescribe)(nil)
-	_ ClientExtendedQuery = (*ClientExtendedQueryClose)(nil)
-	_ ClientExtendedQuery = (*ClientExtendedQueryFlush)(nil)
+	_ ClientExtendedQuery = (*ClientParse)(nil)
+	_ ClientExtendedQuery = (*ClientBind)(nil)
+	_ ClientExtendedQuery = (*ClientExecute)(nil)
+	_ ClientExtendedQuery = (*ClientSync)(nil)
+	_ ClientExtendedQuery = (*ClientDescribe)(nil)
+	_ ClientExtendedQuery = (*ClientClose)(nil)
+	_ ClientExtendedQuery = (*ClientFlush)(nil)
 )
 
 // Extended Query 1: parse text into a prepared statement.
-type ClientExtendedQueryParse FromClient[*pgproto3.Parse]
+type ClientParse FromClient[*pgproto3.Parse]
 
-func (*ClientExtendedQueryParse) Client()            {}
-func (*ClientExtendedQueryParse) ExtendedQuery()     {}
-func (t *ClientExtendedQueryParse) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientExtendedQueryParse) Parse() *pgproto3.Parse {
-	return (*FromClient[*pgproto3.Parse])(m).Parse()
-}
-func (m *ClientExtendedQueryParse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientExtendedQueryParse) Source() RawMessageSource                { return m.source }
+func (*ClientParse) Client()                                   {}
+func (*ClientParse) ExtendedQuery()                            {}
+func (t *ClientParse) MsgType() MsgType                        { return t.source.MessageType() }
+func (m *ClientParse) Parse() *pgproto3.Parse                  { return (*FromClient[*pgproto3.Parse])(m).Parse() }
+func (m *ClientParse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientParse) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientExtendedQueryParse) Retain() ClientExtendedQueryParse {
+func (m ClientParse) Retain() ClientParse {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Parse])(&m).retainFields()
-	return ClientExtendedQueryParse{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientParse{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Extended Query 2: Bind parameters to a prepared statement.
-type ClientExtendedQueryBind FromClient[*pgproto3.Bind]
+type ClientBind FromClient[*pgproto3.Bind]
 
-func (*ClientExtendedQueryBind) Client()            {}
-func (*ClientExtendedQueryBind) ExtendedQuery()     {}
-func (t *ClientExtendedQueryBind) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientExtendedQueryBind) Parse() *pgproto3.Bind {
-	return (*FromClient[*pgproto3.Bind])(m).Parse()
-}
-func (m *ClientExtendedQueryBind) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientExtendedQueryBind) Source() RawMessageSource                { return m.source }
+func (*ClientBind) Client()                                   {}
+func (*ClientBind) ExtendedQuery()                            {}
+func (t *ClientBind) MsgType() MsgType                        { return t.source.MessageType() }
+func (m *ClientBind) Parse() *pgproto3.Bind                   { return (*FromClient[*pgproto3.Bind])(m).Parse() }
+func (m *ClientBind) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientBind) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientExtendedQueryBind) Retain() ClientExtendedQueryBind {
+func (m ClientBind) Retain() ClientBind {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Bind])(&m).retainFields()
-	return ClientExtendedQueryBind{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientBind{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Extended Query 3: Execute a prepared statement, requesting N or all rows.
@@ -524,22 +518,20 @@ func (m ClientExtendedQueryBind) Retain() ClientExtendedQueryBind {
 // - CommandComplete: success
 // - ErrorResponse: failure
 // - EmptyQueryResponse: the portal was created from an empty query string
-type ClientExtendedQueryExecute FromClient[*pgproto3.Execute]
+type ClientExecute FromClient[*pgproto3.Execute]
 
-func (*ClientExtendedQueryExecute) Client()            {}
-func (*ClientExtendedQueryExecute) ExtendedQuery()     {}
-func (t *ClientExtendedQueryExecute) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientExtendedQueryExecute) Parse() *pgproto3.Execute {
-	return (*FromClient[*pgproto3.Execute])(m).Parse()
-}
-func (m *ClientExtendedQueryExecute) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientExtendedQueryExecute) Source() RawMessageSource                { return m.source }
+func (*ClientExecute) Client()                                   {}
+func (*ClientExecute) ExtendedQuery()                            {}
+func (t *ClientExecute) MsgType() MsgType                        { return t.source.MessageType() }
+func (m *ClientExecute) Parse() *pgproto3.Execute                { return (*FromClient[*pgproto3.Execute])(m).Parse() }
+func (m *ClientExecute) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientExecute) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientExtendedQueryExecute) Retain() ClientExtendedQueryExecute {
+func (m ClientExecute) Retain() ClientExecute {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Execute])(&m).retainFields()
-	return ClientExtendedQueryExecute{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientExecute{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Extended Query 4: Command pipeline complete.
@@ -558,22 +550,20 @@ func (m ClientExtendedQueryExecute) Retain() ClientExtendedQueryExecute {
 // one and only one ReadyForQuery sent for each Sync.)
 // In addition to these fundamental, required operations, there are several
 // optional operations that can be used with extended-query protocol.
-type ClientExtendedQuerySync FromClient[*pgproto3.Sync]
+type ClientSync FromClient[*pgproto3.Sync]
 
-func (*ClientExtendedQuerySync) Client()            {}
-func (*ClientExtendedQuerySync) ExtendedQuery()     {}
-func (t *ClientExtendedQuerySync) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientExtendedQuerySync) Parse() *pgproto3.Sync {
-	return (*FromClient[*pgproto3.Sync])(m).Parse()
-}
-func (m *ClientExtendedQuerySync) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientExtendedQuerySync) Source() RawMessageSource                { return m.source }
+func (*ClientSync) Client()                                   {}
+func (*ClientSync) ExtendedQuery()                            {}
+func (t *ClientSync) MsgType() MsgType                        { return t.source.MessageType() }
+func (m *ClientSync) Parse() *pgproto3.Sync                   { return (*FromClient[*pgproto3.Sync])(m).Parse() }
+func (m *ClientSync) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientSync) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientExtendedQuerySync) Retain() ClientExtendedQuerySync {
+func (m ClientSync) Retain() ClientSync {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Sync])(&m).retainFields()
-	return ClientExtendedQuerySync{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientSync{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Extended Query tool: Describe prepared statement or portal.
@@ -596,43 +586,41 @@ func (m ClientExtendedQuerySync) Retain() ClientExtendedQuerySync {
 // the formats to be used for returned columns are not yet known to the
 // backend; the format code fields in the RowDescription message will be
 // zeroes in this case.
-type ClientExtendedQueryDescribe FromClient[*pgproto3.Describe]
+type ClientDescribe FromClient[*pgproto3.Describe]
 
-func (*ClientExtendedQueryDescribe) Client()            {}
-func (*ClientExtendedQueryDescribe) ExtendedQuery()     {}
-func (t *ClientExtendedQueryDescribe) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientExtendedQueryDescribe) Parse() *pgproto3.Describe {
+func (*ClientDescribe) Client()            {}
+func (*ClientDescribe) ExtendedQuery()     {}
+func (t *ClientDescribe) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientDescribe) Parse() *pgproto3.Describe {
 	return (*FromClient[*pgproto3.Describe])(m).Parse()
 }
-func (m *ClientExtendedQueryDescribe) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientExtendedQueryDescribe) Source() RawMessageSource                { return m.source }
+func (m *ClientDescribe) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientDescribe) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientExtendedQueryDescribe) Retain() ClientExtendedQueryDescribe {
+func (m ClientDescribe) Retain() ClientDescribe {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Describe])(&m).retainFields()
-	return ClientExtendedQueryDescribe{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientDescribe{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Close prepared statement/portal.
 // Note that closing a prepared statement implicitly closes any open
 // portals that were constructed from that statement.
-type ClientExtendedQueryClose FromClient[*pgproto3.Close]
+type ClientClose FromClient[*pgproto3.Close]
 
-func (*ClientExtendedQueryClose) Client()            {}
-func (*ClientExtendedQueryClose) ExtendedQuery()     {}
-func (t *ClientExtendedQueryClose) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientExtendedQueryClose) Parse() *pgproto3.Close {
-	return (*FromClient[*pgproto3.Close])(m).Parse()
-}
-func (m *ClientExtendedQueryClose) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientExtendedQueryClose) Source() RawMessageSource                { return m.source }
+func (*ClientClose) Client()                                   {}
+func (*ClientClose) ExtendedQuery()                            {}
+func (t *ClientClose) MsgType() MsgType                        { return t.source.MessageType() }
+func (m *ClientClose) Parse() *pgproto3.Close                  { return (*FromClient[*pgproto3.Close])(m).Parse() }
+func (m *ClientClose) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientClose) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientExtendedQueryClose) Retain() ClientExtendedQueryClose {
+func (m ClientClose) Retain() ClientClose {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Close])(&m).retainFields()
-	return ClientExtendedQueryClose{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientClose{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // The Flush message does not cause any specific output to be generated,
@@ -642,22 +630,20 @@ func (m ClientExtendedQueryClose) Retain() ClientExtendedQueryClose {
 // before issuing more commands. Without Flush, messages returned by the
 // backend will be combined into the minimum possible number of packets to
 // minimize network overhead.
-type ClientExtendedQueryFlush FromClient[*pgproto3.Flush]
+type ClientFlush FromClient[*pgproto3.Flush]
 
-func (*ClientExtendedQueryFlush) Client()            {}
-func (*ClientExtendedQueryFlush) ExtendedQuery()     {}
-func (t *ClientExtendedQueryFlush) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientExtendedQueryFlush) Parse() *pgproto3.Flush {
-	return (*FromClient[*pgproto3.Flush])(m).Parse()
-}
-func (m *ClientExtendedQueryFlush) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientExtendedQueryFlush) Source() RawMessageSource                { return m.source }
+func (*ClientFlush) Client()                                   {}
+func (*ClientFlush) ExtendedQuery()                            {}
+func (t *ClientFlush) MsgType() MsgType                        { return t.source.MessageType() }
+func (m *ClientFlush) Parse() *pgproto3.Flush                  { return (*FromClient[*pgproto3.Flush])(m).Parse() }
+func (m *ClientFlush) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientFlush) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientExtendedQueryFlush) Retain() ClientExtendedQueryFlush {
+func (m ClientFlush) Retain() ClientFlush {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Flush])(&m).retainFields()
-	return ClientExtendedQueryFlush{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientFlush{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToClientExtendedQuery converts a pgproto3.FrontendMessage to a ClientExtendedQuery if it matches one of the known types.
@@ -665,19 +651,19 @@ func (m ClientExtendedQueryFlush) Retain() ClientExtendedQueryFlush {
 func ToClientExtendedQuery(msg pgproto3.FrontendMessage) (ClientExtendedQuery, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Parse:
-		return (*ClientExtendedQueryParse)(ClientParsed(m)), true
+		return (*ClientParse)(ClientParsed(m)), true
 	case *pgproto3.Bind:
-		return (*ClientExtendedQueryBind)(ClientParsed(m)), true
+		return (*ClientBind)(ClientParsed(m)), true
 	case *pgproto3.Execute:
-		return (*ClientExtendedQueryExecute)(ClientParsed(m)), true
+		return (*ClientExecute)(ClientParsed(m)), true
 	case *pgproto3.Sync:
-		return (*ClientExtendedQuerySync)(ClientParsed(m)), true
+		return (*ClientSync)(ClientParsed(m)), true
 	case *pgproto3.Describe:
-		return (*ClientExtendedQueryDescribe)(ClientParsed(m)), true
+		return (*ClientDescribe)(ClientParsed(m)), true
 	case *pgproto3.Close:
-		return (*ClientExtendedQueryClose)(ClientParsed(m)), true
+		return (*ClientClose)(ClientParsed(m)), true
 	case *pgproto3.Flush:
-		return (*ClientExtendedQueryFlush)(ClientParsed(m)), true
+		return (*ClientFlush)(ClientParsed(m)), true
 	}
 	return nil, false
 }
@@ -685,13 +671,13 @@ func ToClientExtendedQuery(msg pgproto3.FrontendMessage) (ClientExtendedQuery, b
 // ClientExtendedQueryHandlers provides type-safe handlers for each ClientExtendedQuery variant.
 type ClientExtendedQueryHandlers[T any] struct {
 	Default  func(msg ClientExtendedQuery) (T, error)
-	Parse    func(msg *ClientExtendedQueryParse) (T, error)
-	Bind     func(msg *ClientExtendedQueryBind) (T, error)
-	Execute  func(msg *ClientExtendedQueryExecute) (T, error)
-	Sync     func(msg *ClientExtendedQuerySync) (T, error)
-	Describe func(msg *ClientExtendedQueryDescribe) (T, error)
-	Close    func(msg *ClientExtendedQueryClose) (T, error)
-	Flush    func(msg *ClientExtendedQueryFlush) (T, error)
+	Parse    func(msg *ClientParse) (T, error)
+	Bind     func(msg *ClientBind) (T, error)
+	Execute  func(msg *ClientExecute) (T, error)
+	Sync     func(msg *ClientSync) (T, error)
+	Describe func(msg *ClientDescribe) (T, error)
+	Close    func(msg *ClientClose) (T, error)
+	Flush    func(msg *ClientFlush) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -704,37 +690,37 @@ func (h ClientExtendedQueryHandlers[T]) HandleDefault(msg ClientExtendedQuery, d
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientExtendedQueryParse:
+	case *ClientParse:
 		if h.Parse != nil {
 			return h.Parse(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientExtendedQueryBind:
+	case *ClientBind:
 		if h.Bind != nil {
 			return h.Bind(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientExtendedQueryExecute:
+	case *ClientExecute:
 		if h.Execute != nil {
 			return h.Execute(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientExtendedQuerySync:
+	case *ClientSync:
 		if h.Sync != nil {
 			return h.Sync(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientExtendedQueryDescribe:
+	case *ClientDescribe:
 		if h.Describe != nil {
 			return h.Describe(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientExtendedQueryClose:
+	case *ClientClose:
 		if h.Close != nil {
 			return h.Close(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientExtendedQueryFlush:
+	case *ClientFlush:
 		if h.Flush != nil {
 			return h.Flush(msg)
 		}
@@ -752,13 +738,13 @@ func (h ClientExtendedQueryHandlers[T]) Handle(msg ClientExtendedQuery) (T, erro
 // ClientExtendedQueryHandlersCtx provides type-safe handlers with context and an argument for each ClientExtendedQuery variant.
 type ClientExtendedQueryHandlersCtx[Arg, Result any] struct {
 	Default  func(ctx context.Context, msg ClientExtendedQuery, arg Arg) (Result, error)
-	Parse    func(ctx context.Context, msg *ClientExtendedQueryParse, arg Arg) (Result, error)
-	Bind     func(ctx context.Context, msg *ClientExtendedQueryBind, arg Arg) (Result, error)
-	Execute  func(ctx context.Context, msg *ClientExtendedQueryExecute, arg Arg) (Result, error)
-	Sync     func(ctx context.Context, msg *ClientExtendedQuerySync, arg Arg) (Result, error)
-	Describe func(ctx context.Context, msg *ClientExtendedQueryDescribe, arg Arg) (Result, error)
-	Close    func(ctx context.Context, msg *ClientExtendedQueryClose, arg Arg) (Result, error)
-	Flush    func(ctx context.Context, msg *ClientExtendedQueryFlush, arg Arg) (Result, error)
+	Parse    func(ctx context.Context, msg *ClientParse, arg Arg) (Result, error)
+	Bind     func(ctx context.Context, msg *ClientBind, arg Arg) (Result, error)
+	Execute  func(ctx context.Context, msg *ClientExecute, arg Arg) (Result, error)
+	Sync     func(ctx context.Context, msg *ClientSync, arg Arg) (Result, error)
+	Describe func(ctx context.Context, msg *ClientDescribe, arg Arg) (Result, error)
+	Close    func(ctx context.Context, msg *ClientClose, arg Arg) (Result, error)
+	Flush    func(ctx context.Context, msg *ClientFlush, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -771,37 +757,37 @@ func (h ClientExtendedQueryHandlersCtx[Arg, Result]) HandleDefault(ctx context.C
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientExtendedQueryParse:
+	case *ClientParse:
 		if h.Parse != nil {
 			return h.Parse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryBind:
+	case *ClientBind:
 		if h.Bind != nil {
 			return h.Bind(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryExecute:
+	case *ClientExecute:
 		if h.Execute != nil {
 			return h.Execute(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQuerySync:
+	case *ClientSync:
 		if h.Sync != nil {
 			return h.Sync(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryDescribe:
+	case *ClientDescribe:
 		if h.Describe != nil {
 			return h.Describe(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryClose:
+	case *ClientClose:
 		if h.Close != nil {
 			return h.Close(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryFlush:
+	case *ClientFlush:
 		if h.Flush != nil {
 			return h.Flush(ctx, msg, arg)
 		}
@@ -827,66 +813,66 @@ type ClientCopy interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientCopy = (*ClientCopyCopyData)(nil)
-	_ ClientCopy = (*ClientCopyCopyDone)(nil)
-	_ ClientCopy = (*ClientCopyCopyFail)(nil)
+	_ ClientCopy = (*ClientCopyData)(nil)
+	_ ClientCopy = (*ClientCopyDone)(nil)
+	_ ClientCopy = (*ClientCopyFail)(nil)
 )
 
-// ClientCopyCopyData wraps *pgproto3.CopyData from the client.
-type ClientCopyCopyData FromClient[*pgproto3.CopyData]
+// ClientCopyData wraps *pgproto3.CopyData from the client.
+type ClientCopyData FromClient[*pgproto3.CopyData]
 
-func (*ClientCopyCopyData) Client()            {}
-func (*ClientCopyCopyData) Copy()              {}
-func (t *ClientCopyCopyData) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientCopyCopyData) Parse() *pgproto3.CopyData {
+func (*ClientCopyData) Client()            {}
+func (*ClientCopyData) Copy()              {}
+func (t *ClientCopyData) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientCopyData) Parse() *pgproto3.CopyData {
 	return (*FromClient[*pgproto3.CopyData])(m).Parse()
 }
-func (m *ClientCopyCopyData) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientCopyCopyData) Source() RawMessageSource                { return m.source }
+func (m *ClientCopyData) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientCopyData) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientCopyCopyData) Retain() ClientCopyCopyData {
+func (m ClientCopyData) Retain() ClientCopyData {
 	src, parsed, isParsed := (*FromClient[*pgproto3.CopyData])(&m).retainFields()
-	return ClientCopyCopyData{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientCopyData{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientCopyCopyDone wraps *pgproto3.CopyDone from the client.
-type ClientCopyCopyDone FromClient[*pgproto3.CopyDone]
+// ClientCopyDone wraps *pgproto3.CopyDone from the client.
+type ClientCopyDone FromClient[*pgproto3.CopyDone]
 
-func (*ClientCopyCopyDone) Client()            {}
-func (*ClientCopyCopyDone) Copy()              {}
-func (t *ClientCopyCopyDone) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientCopyCopyDone) Parse() *pgproto3.CopyDone {
+func (*ClientCopyDone) Client()            {}
+func (*ClientCopyDone) Copy()              {}
+func (t *ClientCopyDone) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromClient[*pgproto3.CopyDone])(m).Parse()
 }
-func (m *ClientCopyCopyDone) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientCopyCopyDone) Source() RawMessageSource                { return m.source }
+func (m *ClientCopyDone) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientCopyDone) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientCopyCopyDone) Retain() ClientCopyCopyDone {
+func (m ClientCopyDone) Retain() ClientCopyDone {
 	src, parsed, isParsed := (*FromClient[*pgproto3.CopyDone])(&m).retainFields()
-	return ClientCopyCopyDone{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientCopyDone{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientCopyCopyFail wraps *pgproto3.CopyFail from the client.
-type ClientCopyCopyFail FromClient[*pgproto3.CopyFail]
+// ClientCopyFail wraps *pgproto3.CopyFail from the client.
+type ClientCopyFail FromClient[*pgproto3.CopyFail]
 
-func (*ClientCopyCopyFail) Client()            {}
-func (*ClientCopyCopyFail) Copy()              {}
-func (t *ClientCopyCopyFail) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientCopyCopyFail) Parse() *pgproto3.CopyFail {
+func (*ClientCopyFail) Client()            {}
+func (*ClientCopyFail) Copy()              {}
+func (t *ClientCopyFail) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientCopyFail) Parse() *pgproto3.CopyFail {
 	return (*FromClient[*pgproto3.CopyFail])(m).Parse()
 }
-func (m *ClientCopyCopyFail) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientCopyCopyFail) Source() RawMessageSource                { return m.source }
+func (m *ClientCopyFail) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientCopyFail) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientCopyCopyFail) Retain() ClientCopyCopyFail {
+func (m ClientCopyFail) Retain() ClientCopyFail {
 	src, parsed, isParsed := (*FromClient[*pgproto3.CopyFail])(&m).retainFields()
-	return ClientCopyCopyFail{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientCopyFail{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToClientCopy converts a pgproto3.FrontendMessage to a ClientCopy if it matches one of the known types.
@@ -894,11 +880,11 @@ func (m ClientCopyCopyFail) Retain() ClientCopyCopyFail {
 func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyData:
-		return (*ClientCopyCopyData)(ClientParsed(m)), true
+		return (*ClientCopyData)(ClientParsed(m)), true
 	case *pgproto3.CopyDone:
-		return (*ClientCopyCopyDone)(ClientParsed(m)), true
+		return (*ClientCopyDone)(ClientParsed(m)), true
 	case *pgproto3.CopyFail:
-		return (*ClientCopyCopyFail)(ClientParsed(m)), true
+		return (*ClientCopyFail)(ClientParsed(m)), true
 	}
 	return nil, false
 }
@@ -906,9 +892,9 @@ func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 // ClientCopyHandlers provides type-safe handlers for each ClientCopy variant.
 type ClientCopyHandlers[T any] struct {
 	Default  func(msg ClientCopy) (T, error)
-	CopyData func(msg *ClientCopyCopyData) (T, error)
-	CopyDone func(msg *ClientCopyCopyDone) (T, error)
-	CopyFail func(msg *ClientCopyCopyFail) (T, error)
+	CopyData func(msg *ClientCopyData) (T, error)
+	CopyDone func(msg *ClientCopyDone) (T, error)
+	CopyFail func(msg *ClientCopyFail) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -921,17 +907,17 @@ func (h ClientCopyHandlers[T]) HandleDefault(msg ClientCopy, defaultHandler func
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientCopyCopyData:
+	case *ClientCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientCopyCopyDone:
+	case *ClientCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientCopyCopyFail:
+	case *ClientCopyFail:
 		if h.CopyFail != nil {
 			return h.CopyFail(msg)
 		}
@@ -949,9 +935,9 @@ func (h ClientCopyHandlers[T]) Handle(msg ClientCopy) (T, error) {
 // ClientCopyHandlersCtx provides type-safe handlers with context and an argument for each ClientCopy variant.
 type ClientCopyHandlersCtx[Arg, Result any] struct {
 	Default  func(ctx context.Context, msg ClientCopy, arg Arg) (Result, error)
-	CopyData func(ctx context.Context, msg *ClientCopyCopyData, arg Arg) (Result, error)
-	CopyDone func(ctx context.Context, msg *ClientCopyCopyDone, arg Arg) (Result, error)
-	CopyFail func(ctx context.Context, msg *ClientCopyCopyFail, arg Arg) (Result, error)
+	CopyData func(ctx context.Context, msg *ClientCopyData, arg Arg) (Result, error)
+	CopyDone func(ctx context.Context, msg *ClientCopyDone, arg Arg) (Result, error)
+	CopyFail func(ctx context.Context, msg *ClientCopyFail, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -964,17 +950,17 @@ func (h ClientCopyHandlersCtx[Arg, Result]) HandleDefault(ctx context.Context, m
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientCopyCopyData:
+	case *ClientCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCopyCopyDone:
+	case *ClientCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCopyCopyFail:
+	case *ClientCopyFail:
 		if h.CopyFail != nil {
 			return h.CopyFail(ctx, msg, arg)
 		}
@@ -1000,26 +986,26 @@ type ClientCancel interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientCancel = (*ClientCancelCancelRequest)(nil)
+	_ ClientCancel = (*ClientCancelRequest)(nil)
 )
 
-// ClientCancelCancelRequest wraps *pgproto3.CancelRequest from the client.
-type ClientCancelCancelRequest FromClient[*pgproto3.CancelRequest]
+// ClientCancelRequest wraps *pgproto3.CancelRequest from the client.
+type ClientCancelRequest FromClient[*pgproto3.CancelRequest]
 
-func (*ClientCancelCancelRequest) Client()            {}
-func (*ClientCancelCancelRequest) Cancel()            {}
-func (t *ClientCancelCancelRequest) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientCancelCancelRequest) Parse() *pgproto3.CancelRequest {
+func (*ClientCancelRequest) Client()            {}
+func (*ClientCancelRequest) Cancel()            {}
+func (t *ClientCancelRequest) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientCancelRequest) Parse() *pgproto3.CancelRequest {
 	return (*FromClient[*pgproto3.CancelRequest])(m).Parse()
 }
-func (m *ClientCancelCancelRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientCancelCancelRequest) Source() RawMessageSource                { return m.source }
+func (m *ClientCancelRequest) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientCancelRequest) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientCancelCancelRequest) Retain() ClientCancelCancelRequest {
+func (m ClientCancelRequest) Retain() ClientCancelRequest {
 	src, parsed, isParsed := (*FromClient[*pgproto3.CancelRequest])(&m).retainFields()
-	return ClientCancelCancelRequest{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientCancelRequest{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToClientCancel converts a pgproto3.FrontendMessage to a ClientCancel if it matches one of the known types.
@@ -1027,7 +1013,7 @@ func (m ClientCancelCancelRequest) Retain() ClientCancelCancelRequest {
 func ToClientCancel(msg pgproto3.FrontendMessage) (ClientCancel, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CancelRequest:
-		return (*ClientCancelCancelRequest)(ClientParsed(m)), true
+		return (*ClientCancelRequest)(ClientParsed(m)), true
 	}
 	return nil, false
 }
@@ -1035,7 +1021,7 @@ func ToClientCancel(msg pgproto3.FrontendMessage) (ClientCancel, bool) {
 // ClientCancelHandlers provides type-safe handlers for each ClientCancel variant.
 type ClientCancelHandlers[T any] struct {
 	Default       func(msg ClientCancel) (T, error)
-	CancelRequest func(msg *ClientCancelCancelRequest) (T, error)
+	CancelRequest func(msg *ClientCancelRequest) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1048,7 +1034,7 @@ func (h ClientCancelHandlers[T]) HandleDefault(msg ClientCancel, defaultHandler 
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientCancelCancelRequest:
+	case *ClientCancelRequest:
 		if h.CancelRequest != nil {
 			return h.CancelRequest(msg)
 		}
@@ -1066,7 +1052,7 @@ func (h ClientCancelHandlers[T]) Handle(msg ClientCancel) (T, error) {
 // ClientCancelHandlersCtx provides type-safe handlers with context and an argument for each ClientCancel variant.
 type ClientCancelHandlersCtx[Arg, Result any] struct {
 	Default       func(ctx context.Context, msg ClientCancel, arg Arg) (Result, error)
-	CancelRequest func(ctx context.Context, msg *ClientCancelCancelRequest, arg Arg) (Result, error)
+	CancelRequest func(ctx context.Context, msg *ClientCancelRequest, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1079,7 +1065,7 @@ func (h ClientCancelHandlersCtx[Arg, Result]) HandleDefault(ctx context.Context,
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientCancelCancelRequest:
+	case *ClientCancelRequest:
 		if h.CancelRequest != nil {
 			return h.CancelRequest(ctx, msg, arg)
 		}
@@ -1105,26 +1091,26 @@ type ClientTerminateConn interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientTerminateConn = (*ClientTerminateConnTerminate)(nil)
+	_ ClientTerminateConn = (*ClientTerminate)(nil)
 )
 
-// ClientTerminateConnTerminate wraps *pgproto3.Terminate from the client.
-type ClientTerminateConnTerminate FromClient[*pgproto3.Terminate]
+// ClientTerminate wraps *pgproto3.Terminate from the client.
+type ClientTerminate FromClient[*pgproto3.Terminate]
 
-func (*ClientTerminateConnTerminate) Client()            {}
-func (*ClientTerminateConnTerminate) TerminateConn()     {}
-func (t *ClientTerminateConnTerminate) MsgType() MsgType { return t.source.MessageType() }
-func (m *ClientTerminateConnTerminate) Parse() *pgproto3.Terminate {
+func (*ClientTerminate) Client()            {}
+func (*ClientTerminate) TerminateConn()     {}
+func (t *ClientTerminate) MsgType() MsgType { return t.source.MessageType() }
+func (m *ClientTerminate) Parse() *pgproto3.Terminate {
 	return (*FromClient[*pgproto3.Terminate])(m).Parse()
 }
-func (m *ClientTerminateConnTerminate) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientTerminateConnTerminate) Source() RawMessageSource                { return m.source }
+func (m *ClientTerminate) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *ClientTerminate) Source() RawMessageSource                { return m.source }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientTerminateConnTerminate) Retain() ClientTerminateConnTerminate {
+func (m ClientTerminate) Retain() ClientTerminate {
 	src, parsed, isParsed := (*FromClient[*pgproto3.Terminate])(&m).retainFields()
-	return ClientTerminateConnTerminate{source: src, parsed: parsed, isParsed: isParsed}
+	return ClientTerminate{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToClientTerminateConn converts a pgproto3.FrontendMessage to a ClientTerminateConn if it matches one of the known types.
@@ -1132,7 +1118,7 @@ func (m ClientTerminateConnTerminate) Retain() ClientTerminateConnTerminate {
 func ToClientTerminateConn(msg pgproto3.FrontendMessage) (ClientTerminateConn, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.Terminate:
-		return (*ClientTerminateConnTerminate)(ClientParsed(m)), true
+		return (*ClientTerminate)(ClientParsed(m)), true
 	}
 	return nil, false
 }
@@ -1140,7 +1126,7 @@ func ToClientTerminateConn(msg pgproto3.FrontendMessage) (ClientTerminateConn, b
 // ClientTerminateConnHandlers provides type-safe handlers for each ClientTerminateConn variant.
 type ClientTerminateConnHandlers[T any] struct {
 	Default   func(msg ClientTerminateConn) (T, error)
-	Terminate func(msg *ClientTerminateConnTerminate) (T, error)
+	Terminate func(msg *ClientTerminate) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1153,7 +1139,7 @@ func (h ClientTerminateConnHandlers[T]) HandleDefault(msg ClientTerminateConn, d
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientTerminateConnTerminate:
+	case *ClientTerminate:
 		if h.Terminate != nil {
 			return h.Terminate(msg)
 		}
@@ -1171,7 +1157,7 @@ func (h ClientTerminateConnHandlers[T]) Handle(msg ClientTerminateConn) (T, erro
 // ClientTerminateConnHandlersCtx provides type-safe handlers with context and an argument for each ClientTerminateConn variant.
 type ClientTerminateConnHandlersCtx[Arg, Result any] struct {
 	Default   func(ctx context.Context, msg ClientTerminateConn, arg Arg) (Result, error)
-	Terminate func(ctx context.Context, msg *ClientTerminateConnTerminate, arg Arg) (Result, error)
+	Terminate func(ctx context.Context, msg *ClientTerminate, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1184,7 +1170,7 @@ func (h ClientTerminateConnHandlersCtx[Arg, Result]) HandleDefault(ctx context.C
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientTerminateConnTerminate:
+	case *ClientTerminate:
 		if h.Terminate != nil {
 			return h.Terminate(ctx, msg, arg)
 		}
@@ -1204,42 +1190,42 @@ type ClientHandlers[Arg, Result any] struct {
 	Default func(ctx context.Context, msg ClientMessage, arg Arg) (Result, error)
 	// Startup
 	Startup             *ClientStartupHandlersCtx[Arg, Result]
-	GSSEncRequest       func(ctx context.Context, msg *ClientStartupGSSEncRequest, arg Arg) (Result, error)
-	GSSResponse         func(ctx context.Context, msg *ClientStartupGSSResponse, arg Arg) (Result, error)
-	PasswordMessage     func(ctx context.Context, msg *ClientStartupPasswordMessage, arg Arg) (Result, error)
-	SASLInitialResponse func(ctx context.Context, msg *ClientStartupSASLInitialResponse, arg Arg) (Result, error)
-	SASLResponse        func(ctx context.Context, msg *ClientStartupSASLResponse, arg Arg) (Result, error)
-	SSLRequest          func(ctx context.Context, msg *ClientStartupSSLRequest, arg Arg) (Result, error)
-	StartupMessage      func(ctx context.Context, msg *ClientStartupStartupMessage, arg Arg) (Result, error)
+	GSSEncRequest       func(ctx context.Context, msg *ClientGSSEncRequest, arg Arg) (Result, error)
+	GSSResponse         func(ctx context.Context, msg *ClientGSSResponse, arg Arg) (Result, error)
+	PasswordMessage     func(ctx context.Context, msg *ClientPasswordMessage, arg Arg) (Result, error)
+	SASLInitialResponse func(ctx context.Context, msg *ClientSASLInitialResponse, arg Arg) (Result, error)
+	SASLResponse        func(ctx context.Context, msg *ClientSASLResponse, arg Arg) (Result, error)
+	SSLRequest          func(ctx context.Context, msg *ClientSSLRequest, arg Arg) (Result, error)
+	StartupMessage      func(ctx context.Context, msg *ClientStartupMessage, arg Arg) (Result, error)
 
 	// SimpleQuery
 	SimpleQuery  *ClientSimpleQueryHandlersCtx[Arg, Result]
-	Query        func(ctx context.Context, msg *ClientSimpleQueryQuery, arg Arg) (Result, error)
-	FunctionCall func(ctx context.Context, msg *ClientSimpleQueryFunctionCall, arg Arg) (Result, error)
+	Query        func(ctx context.Context, msg *ClientQuery, arg Arg) (Result, error)
+	FunctionCall func(ctx context.Context, msg *ClientFunctionCall, arg Arg) (Result, error)
 
 	// ExtendedQuery
 	ExtendedQuery *ClientExtendedQueryHandlersCtx[Arg, Result]
-	Parse         func(ctx context.Context, msg *ClientExtendedQueryParse, arg Arg) (Result, error)
-	Bind          func(ctx context.Context, msg *ClientExtendedQueryBind, arg Arg) (Result, error)
-	Execute       func(ctx context.Context, msg *ClientExtendedQueryExecute, arg Arg) (Result, error)
-	Sync          func(ctx context.Context, msg *ClientExtendedQuerySync, arg Arg) (Result, error)
-	Describe      func(ctx context.Context, msg *ClientExtendedQueryDescribe, arg Arg) (Result, error)
-	Close         func(ctx context.Context, msg *ClientExtendedQueryClose, arg Arg) (Result, error)
-	Flush         func(ctx context.Context, msg *ClientExtendedQueryFlush, arg Arg) (Result, error)
+	Parse         func(ctx context.Context, msg *ClientParse, arg Arg) (Result, error)
+	Bind          func(ctx context.Context, msg *ClientBind, arg Arg) (Result, error)
+	Execute       func(ctx context.Context, msg *ClientExecute, arg Arg) (Result, error)
+	Sync          func(ctx context.Context, msg *ClientSync, arg Arg) (Result, error)
+	Describe      func(ctx context.Context, msg *ClientDescribe, arg Arg) (Result, error)
+	Close         func(ctx context.Context, msg *ClientClose, arg Arg) (Result, error)
+	Flush         func(ctx context.Context, msg *ClientFlush, arg Arg) (Result, error)
 
 	// Copy
 	Copy     *ClientCopyHandlersCtx[Arg, Result]
-	CopyData func(ctx context.Context, msg *ClientCopyCopyData, arg Arg) (Result, error)
-	CopyDone func(ctx context.Context, msg *ClientCopyCopyDone, arg Arg) (Result, error)
-	CopyFail func(ctx context.Context, msg *ClientCopyCopyFail, arg Arg) (Result, error)
+	CopyData func(ctx context.Context, msg *ClientCopyData, arg Arg) (Result, error)
+	CopyDone func(ctx context.Context, msg *ClientCopyDone, arg Arg) (Result, error)
+	CopyFail func(ctx context.Context, msg *ClientCopyFail, arg Arg) (Result, error)
 
 	// Cancel
 	Cancel        *ClientCancelHandlersCtx[Arg, Result]
-	CancelRequest func(ctx context.Context, msg *ClientCancelCancelRequest, arg Arg) (Result, error)
+	CancelRequest func(ctx context.Context, msg *ClientCancelRequest, arg Arg) (Result, error)
 
 	// TerminateConn
 	TerminateConn *ClientTerminateConnHandlersCtx[Arg, Result]
-	Terminate     func(ctx context.Context, msg *ClientTerminateConnTerminate, arg Arg) (Result, error)
+	Terminate     func(ctx context.Context, msg *ClientTerminate, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -1252,7 +1238,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientStartupGSSEncRequest:
+	case *ClientGSSEncRequest:
 		if h.GSSEncRequest != nil {
 			return h.GSSEncRequest(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.GSSEncRequest != nil {
@@ -1261,7 +1247,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupGSSResponse:
+	case *ClientGSSResponse:
 		if h.GSSResponse != nil {
 			return h.GSSResponse(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.GSSResponse != nil {
@@ -1270,7 +1256,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupPasswordMessage:
+	case *ClientPasswordMessage:
 		if h.PasswordMessage != nil {
 			return h.PasswordMessage(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.PasswordMessage != nil {
@@ -1279,7 +1265,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupSASLInitialResponse:
+	case *ClientSASLInitialResponse:
 		if h.SASLInitialResponse != nil {
 			return h.SASLInitialResponse(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.SASLInitialResponse != nil {
@@ -1288,7 +1274,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupSASLResponse:
+	case *ClientSASLResponse:
 		if h.SASLResponse != nil {
 			return h.SASLResponse(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.SASLResponse != nil {
@@ -1297,7 +1283,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupSSLRequest:
+	case *ClientSSLRequest:
 		if h.SSLRequest != nil {
 			return h.SSLRequest(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.SSLRequest != nil {
@@ -1306,7 +1292,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientStartupStartupMessage:
+	case *ClientStartupMessage:
 		if h.StartupMessage != nil {
 			return h.StartupMessage(ctx, msg, arg)
 		} else if h.Startup != nil && h.Startup.StartupMessage != nil {
@@ -1315,7 +1301,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Startup.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientSimpleQueryQuery:
+	case *ClientQuery:
 		if h.Query != nil {
 			return h.Query(ctx, msg, arg)
 		} else if h.SimpleQuery != nil && h.SimpleQuery.Query != nil {
@@ -1324,7 +1310,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.SimpleQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientSimpleQueryFunctionCall:
+	case *ClientFunctionCall:
 		if h.FunctionCall != nil {
 			return h.FunctionCall(ctx, msg, arg)
 		} else if h.SimpleQuery != nil && h.SimpleQuery.FunctionCall != nil {
@@ -1333,7 +1319,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.SimpleQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryParse:
+	case *ClientParse:
 		if h.Parse != nil {
 			return h.Parse(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.Parse != nil {
@@ -1342,7 +1328,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryBind:
+	case *ClientBind:
 		if h.Bind != nil {
 			return h.Bind(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.Bind != nil {
@@ -1351,7 +1337,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryExecute:
+	case *ClientExecute:
 		if h.Execute != nil {
 			return h.Execute(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.Execute != nil {
@@ -1360,7 +1346,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQuerySync:
+	case *ClientSync:
 		if h.Sync != nil {
 			return h.Sync(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.Sync != nil {
@@ -1369,7 +1355,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryDescribe:
+	case *ClientDescribe:
 		if h.Describe != nil {
 			return h.Describe(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.Describe != nil {
@@ -1378,7 +1364,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryClose:
+	case *ClientClose:
 		if h.Close != nil {
 			return h.Close(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.Close != nil {
@@ -1387,7 +1373,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientExtendedQueryFlush:
+	case *ClientFlush:
 		if h.Flush != nil {
 			return h.Flush(ctx, msg, arg)
 		} else if h.ExtendedQuery != nil && h.ExtendedQuery.Flush != nil {
@@ -1396,7 +1382,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCopyCopyData:
+	case *ClientCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyData != nil {
@@ -1405,7 +1391,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCopyCopyDone:
+	case *ClientCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyDone != nil {
@@ -1414,7 +1400,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCopyCopyFail:
+	case *ClientCopyFail:
 		if h.CopyFail != nil {
 			return h.CopyFail(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyFail != nil {
@@ -1423,7 +1409,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCancelCancelRequest:
+	case *ClientCancelRequest:
 		if h.CancelRequest != nil {
 			return h.CancelRequest(ctx, msg, arg)
 		} else if h.Cancel != nil && h.Cancel.CancelRequest != nil {
@@ -1432,7 +1418,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Cancel.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientTerminateConnTerminate:
+	case *ClientTerminate:
 		if h.Terminate != nil {
 			return h.Terminate(ctx, msg, arg)
 		} else if h.TerminateConn != nil && h.TerminateConn.Terminate != nil {

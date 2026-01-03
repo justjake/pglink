@@ -14,9 +14,17 @@ type ParameterStatusTracker struct {
 
 var _ Tracker = (*ParameterStatusTracker)(nil)
 
+func (t *ParameterStatusTracker) SetState(state pgwire.ParameterStatuses) {
+	t.ParameterStatuses = state
+	t.Parameters = make([]string, 0, len(state))
+	for name := range state {
+		t.Parameters = append(t.Parameters, name)
+	}
+}
+
 func (t *ParameterStatusTracker) TrackNow(msg pgwire.Message) {
 	switch msg := msg.(type) {
-	case *pgwire.ServerAsyncParameterStatus:
+	case *pgwire.ServerParameterStatus:
 		data := msg.Parse()
 		if _, ok := t.ParameterStatuses[data.Name]; !ok {
 			t.Parameters = append(t.Parameters, data.Name)
@@ -26,7 +34,7 @@ func (t *ParameterStatusTracker) TrackNow(msg pgwire.Message) {
 }
 
 func (t *ParameterStatusTracker) TrackEffect(msg pgwire.Message) pure.Effect {
-	if msg, ok := msg.(*pgwire.ServerAsyncParameterStatus); ok {
+	if msg, ok := msg.(*pgwire.ServerParameterStatus); ok {
 		return pure.WithNameFunc(func() string {
 			data := msg.Parse()
 			return fmt.Sprintf("SetParameterStatus(%s=%q)", data.Name, data.Value)

@@ -63,7 +63,7 @@ func BenchmarkFlyweightAllocationNoInterface(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		// Direct assignment without interface conversion
-		fw.flush = ClientExtendedQueryFlush{source: cursor}
+		fw.flush = ClientFlush{source: cursor}
 		// Access directly
 		_ = fw.flush.source.MessageType()
 	}

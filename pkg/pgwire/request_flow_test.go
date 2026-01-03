@@ -10,51 +10,51 @@ import (
 
 // Helper to create server messages for testing
 func parseComplete() ServerMessage {
-	return (*ServerExtendedQueryParseComplete)(ServerParsed(&pgproto3.ParseComplete{}))
+	return (*ServerParseComplete)(ServerParsed(&pgproto3.ParseComplete{}))
 }
 
 func bindComplete() ServerMessage {
-	return (*ServerExtendedQueryBindComplete)(ServerParsed(&pgproto3.BindComplete{}))
+	return (*ServerBindComplete)(ServerParsed(&pgproto3.BindComplete{}))
 }
 
 func closeComplete() ServerMessage {
-	return (*ServerExtendedQueryCloseComplete)(ServerParsed(&pgproto3.CloseComplete{}))
+	return (*ServerCloseComplete)(ServerParsed(&pgproto3.CloseComplete{}))
 }
 
 func noData() ServerMessage {
-	return (*ServerExtendedQueryNoData)(ServerParsed(&pgproto3.NoData{}))
+	return (*ServerNoData)(ServerParsed(&pgproto3.NoData{}))
 }
 
 func parameterDescription() ServerMessage {
-	return (*ServerExtendedQueryParameterDescription)(ServerParsed(&pgproto3.ParameterDescription{}))
+	return (*ServerParameterDescription)(ServerParsed(&pgproto3.ParameterDescription{}))
 }
 
 func rowDescription() ServerMessage {
-	return (*ServerExtendedQueryRowDescription)(ServerParsed(&pgproto3.RowDescription{}))
+	return (*ServerRowDescription)(ServerParsed(&pgproto3.RowDescription{}))
 }
 
 func readyForQuery() ServerMessage {
-	return (*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))
+	return (*ServerReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))
 }
 
 func commandComplete() ServerMessage {
-	return (*ServerResponseCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")}))
+	return (*ServerCommandComplete)(ServerParsed(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")}))
 }
 
 func emptyQueryResponse() ServerMessage {
-	return (*ServerResponseEmptyQueryResponse)(ServerParsed(&pgproto3.EmptyQueryResponse{}))
+	return (*ServerEmptyQueryResponse)(ServerParsed(&pgproto3.EmptyQueryResponse{}))
 }
 
 func portalSuspended() ServerMessage {
-	return (*ServerExtendedQueryPortalSuspended)(ServerParsed(&pgproto3.PortalSuspended{}))
+	return (*ServerPortalSuspended)(ServerParsed(&pgproto3.PortalSuspended{}))
 }
 
 func errorResponse() ServerMessage {
-	return (*ServerResponseErrorResponse)(ServerParsed(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "42601"}))
+	return (*ServerErrorResponse)(ServerParsed(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "42601"}))
 }
 
 func dataRow() ServerMessage {
-	return (*ServerResponseDataRow)(ServerParsed(&pgproto3.DataRow{}))
+	return (*ServerDataRow)(ServerParsed(&pgproto3.DataRow{}))
 }
 
 // Test request flow through ProtocolState.Update - the public API

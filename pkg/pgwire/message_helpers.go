@@ -6,21 +6,21 @@ var ErrNoMessageSource = errors.New("pgwire: no message source")
 
 // This file contains manually-added helper methods for message types.
 
-func (m *ClientStartupStartupMessage) StartupParameters() ParameterStatuses {
+func (m *ClientStartupMessage) StartupParameters() ParameterStatuses {
 	return ParameterStatuses(m.Parse().Parameters)
 }
 
-func (m *ClientStartupStartupMessage) User() string {
+func (m *ClientStartupMessage) User() string {
 	return m.StartupParameters().User()
 }
 
-func (m *ClientStartupStartupMessage) Database() string {
+func (m *ClientStartupMessage) Database() string {
 	return m.StartupParameters().Database()
 }
 
 // DataSize returns the size of the copy data without parsing the full message.
 // This allows counting bytes transferred during COPY without allocation.
-func (m *ClientCopyCopyData) DataSize() int {
+func (m *ClientCopyData) DataSize() int {
 	if m.isParsed {
 		return len(m.parsed.Data)
 	}
@@ -33,7 +33,7 @@ func (m *ClientCopyCopyData) DataSize() int {
 
 // DataSize returns the size of the copy data without parsing the full message.
 // This allows counting bytes transferred during COPY without allocation.
-func (m *ServerCopyCopyData) DataSize() int {
+func (m *ServerCopyData) DataSize() int {
 	if m.isParsed {
 		return len(m.parsed.Data)
 	}
@@ -44,7 +44,7 @@ func (m *ServerCopyCopyData) DataSize() int {
 	return 0
 }
 
-func (m *ServerResponseReadyForQuery) TxStatus() TxStatus {
+func (m *ServerReadyForQuery) TxStatus() TxStatus {
 	if m.isParsed {
 		return TxStatus(m.parsed.TxStatus)
 	}
@@ -57,7 +57,7 @@ func (m *ServerResponseReadyForQuery) TxStatus() TxStatus {
 	panic(ErrNoMessageSource)
 }
 
-func (m *ClientExtendedQueryBind) BindData() (BindData, error) {
+func (m *ClientBind) BindData() (BindData, error) {
 	if m.source != nil {
 		parser := MessageParser{m.source.MessageBody()}
 		statement, err := parser.ReadString()

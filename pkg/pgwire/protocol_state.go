@@ -164,7 +164,7 @@ func (s *ProtocolState) updateForServerMessage(msg ServerMessage) *PendingReques
 
 func (s *ProtocolState) updateForSimpleQueryMessage(msg ClientSimpleQuery) {
 	switch msg := msg.(type) {
-	case *ClientSimpleQueryQuery:
+	case *ClientQuery:
 		s.clearPendingExecute()
 		s.ExtendedQueryMode = false
 		unnamed := ""
@@ -172,7 +172,7 @@ func (s *ProtocolState) updateForSimpleQueryMessage(msg ClientSimpleQuery) {
 		delete(s.Portals.Alive, unnamed)
 		s.Statements.Executing = &unnamed
 		s.Portals.Executing = &unnamed
-	case *ClientSimpleQueryFunctionCall:
+	case *ClientFunctionCall:
 		// Nothing.
 	default:
 		panic(fmt.Sprintf("unexpected pgwire.ClientSimpleQuery: %#v", msg))
@@ -181,14 +181,14 @@ func (s *ProtocolState) updateForSimpleQueryMessage(msg ClientSimpleQuery) {
 
 func (s *ProtocolState) updateForExtendedQueryMessage(msg ClientExtendedQuery) {
 	switch msg := msg.(type) {
-	case *ClientExtendedQueryParse:
+	case *ClientParse:
 		s.clearPendingExecute()
 		s.ExtendedQueryMode = true
 		parsed := msg.Parse()
 		s.Statements.PendingCreate[parsed.Name] = true
 		name := parsed.Name
 		s.Statements.PendingExecute = &name
-	case *ClientExtendedQueryClose:
+	case *ClientClose:
 		s.clearPendingExecute()
 		s.ExtendedQueryMode = true
 		parsed := msg.Parse()
@@ -197,7 +197,7 @@ func (s *ProtocolState) updateForExtendedQueryMessage(msg ClientExtendedQuery) {
 		} else {
 			s.Portals.PendingClose[parsed.Name] = true
 		}
-	case *ClientExtendedQueryBind:
+	case *ClientBind:
 		s.ExtendedQueryMode = true
 		parsed := msg.Parse()
 		s.Portals.PendingCreate[parsed.DestinationPortal] = true
@@ -207,9 +207,9 @@ func (s *ProtocolState) updateForExtendedQueryMessage(msg ClientExtendedQuery) {
 		} else {
 			s.clearPendingExecute()
 		}
-	case *ClientExtendedQueryDescribe:
+	case *ClientDescribe:
 		s.ExtendedQueryMode = true
-	case *ClientExtendedQueryExecute:
+	case *ClientExecute:
 		s.ExtendedQueryMode = true
 		parsed := msg.Parse()
 		name := parsed.Portal
@@ -221,8 +221,8 @@ func (s *ProtocolState) updateForExtendedQueryMessage(msg ClientExtendedQuery) {
 			s.Statements.PendingExecute = nil
 			s.Statements.Executing = &stmtName
 		}
-	case *ClientExtendedQueryFlush:
-	case *ClientExtendedQuerySync:
+	case *ClientFlush:
+	case *ClientSync:
 		s.SyncsInFlight++
 	default:
 		panic(fmt.Sprintf("unexpected pgwire.ClientExtendedQuery: %#v", msg))
@@ -236,12 +236,12 @@ func (s *ProtocolState) updateForServerExtendedQueryMessage(msg ServerExtendedQu
 
 	// Update object state
 	switch msg.(type) {
-	case *ServerExtendedQueryParseComplete:
+	case *ServerParseComplete:
 		for name := range s.Statements.PendingCreate {
 			s.Statements.Alive[name] = true
 		}
 		clear(s.Statements.PendingCreate)
-	case *ServerExtendedQueryCloseComplete:
+	case *ServerCloseComplete:
 		for name := range s.Statements.PendingClose {
 			s.Statements.Alive[name] = false
 		}
@@ -250,7 +250,7 @@ func (s *ProtocolState) updateForServerExtendedQueryMessage(msg ServerExtendedQu
 			s.Portals.Alive[name] = false
 		}
 		clear(s.Statements.PendingClose)
-	case *ServerExtendedQueryBindComplete:
+	case *ServerBindComplete:
 		for name := range s.Portals.PendingCreate {
 			s.Portals.Alive[name] = true
 		}
@@ -267,15 +267,15 @@ func (s *ProtocolState) updateForServerExtendedQueryMessage(msg ServerExtendedQu
 
 func (s *ProtocolState) updateForServerCopyMessage(msg ServerCopy) {
 	switch msg.(type) {
-	case *ServerCopyCopyInResponse:
+	case *ServerCopyInResponse:
 		s.CopyMode = CopyIn
-	case *ServerCopyCopyOutResponse:
+	case *ServerCopyOutResponse:
 		s.CopyMode = CopyOut
-	case *ServerCopyCopyBothResponse:
+	case *ServerCopyBothResponse:
 		s.CopyMode = CopyBoth
-	case *ServerCopyCopyData:
+	case *ServerCopyData:
 		return
-	case *ServerCopyCopyDone:
+	case *ServerCopyDone:
 		// TODO: should we actually only set this in ReadyForQuery?
 		s.CopyMode = CopyNone
 	default:
@@ -288,7 +288,7 @@ func (s *ProtocolState) updateForServerCopyMessage(msg ServerCopy) {
 // For ReadyForQuery, also ends the request flow if empty.
 func (s *ProtocolState) updateForServerResponseMessage(msg ServerResponse) *PendingRequest {
 	switch msg := msg.(type) {
-	case *ServerResponseReadyForQuery:
+	case *ServerReadyForQuery:
 		s.CopyMode = CopyNone
 		// Fast path: use TxStatusByte() to avoid full parsing
 		s.TxStatus = msg.TxStatus()
@@ -322,19 +322,19 @@ func (s *ProtocolState) updateForServerResponseMessage(msg ServerResponse) *Pend
 		s.endRequestFlowIfEmpty()
 
 		return poppedReq
-	case *ServerResponseCommandComplete, *ServerResponseEmptyQueryResponse:
+	case *ServerCommandComplete, *ServerEmptyQueryResponse:
 		// These complete Execute or Query requests
 		if req, ok := s.popForResponse(msg); ok {
 			return &req
 		}
-	case *ServerResponseDataRow:
+	case *ServerDataRow:
 		// DataRow doesn't pop any request
-	case *ServerResponseFunctionCallResponse:
+	case *ServerFunctionCallResponse:
 		s.clearPendingExecute()
 		if req, ok := s.popForResponse(msg); ok {
 			return &req
 		}
-	case *ServerResponseErrorResponse:
+	case *ServerErrorResponse:
 		s.clearPendingExecute()
 		if s.ExtendedQueryMode {
 			s.ServerIgnoringMessagesUntilSync = true
@@ -351,9 +351,9 @@ func (s *ProtocolState) updateForServerResponseMessage(msg ServerResponse) *Pend
 
 func (s *ProtocolState) updateForServerAsyncMessage(msg ServerAsync) {
 	switch msg := msg.(type) {
-	case *ServerAsyncNoticeResponse:
-	case *ServerAsyncNotificationResponse:
-	case *ServerAsyncParameterStatus:
+	case *ServerNoticeResponse:
+	case *ServerNotificationResponse:
+	case *ServerParameterStatus:
 		parsed := msg.Parse()
 		if parsed.Value == "" {
 			delete(s.ParameterStatuses, parsed.Name)

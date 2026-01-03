@@ -6,28 +6,28 @@ import "fmt"
 // One instance per message type, reused each iteration for zero allocation.
 type ClientFlyweights struct {
 	// Simple query
-	query        ClientSimpleQueryQuery
-	functionCall ClientSimpleQueryFunctionCall
+	query        ClientQuery
+	functionCall ClientFunctionCall
 
 	// Startup/Auth
-	passwordMessage ClientStartupPasswordMessage
+	passwordMessage ClientPasswordMessage
 
 	// Extended query
-	parse    ClientExtendedQueryParse
-	bind     ClientExtendedQueryBind
-	execute  ClientExtendedQueryExecute
-	describe ClientExtendedQueryDescribe
-	close    ClientExtendedQueryClose
-	sync     ClientExtendedQuerySync
-	flush    ClientExtendedQueryFlush
+	parse    ClientParse
+	bind     ClientBind
+	execute  ClientExecute
+	describe ClientDescribe
+	close    ClientClose
+	sync     ClientSync
+	flush    ClientFlush
 
 	// Copy
-	copyData ClientCopyCopyData
-	copyDone ClientCopyCopyDone
-	copyFail ClientCopyCopyFail
+	copyData ClientCopyData
+	copyDone ClientCopyDone
+	copyFail ClientCopyFail
 
 	// Terminate
-	terminate ClientTerminateConnTerminate
+	terminate ClientTerminate
 }
 
 // Parse returns the current message as a ClientMessage using flyweights.
@@ -39,54 +39,54 @@ func (fw *ClientFlyweights) Parse(source RawMessageSource) (ClientMessage, error
 	switch msgType {
 	// Simple query
 	case MsgClientQuery:
-		fw.query = ClientSimpleQueryQuery{source: source}
+		fw.query = ClientQuery{source: source}
 		return &fw.query, nil
 	case MsgClientFunc:
-		fw.functionCall = ClientSimpleQueryFunctionCall{source: source}
+		fw.functionCall = ClientFunctionCall{source: source}
 		return &fw.functionCall, nil
 
 	// Extended query
 	case MsgClientParse:
-		fw.parse = ClientExtendedQueryParse{source: source}
+		fw.parse = ClientParse{source: source}
 		return &fw.parse, nil
 	case MsgClientBind:
-		fw.bind = ClientExtendedQueryBind{source: source}
+		fw.bind = ClientBind{source: source}
 		return &fw.bind, nil
 	case MsgClientExecute:
-		fw.execute = ClientExtendedQueryExecute{source: source}
+		fw.execute = ClientExecute{source: source}
 		return &fw.execute, nil
 	case MsgClientDescribe:
-		fw.describe = ClientExtendedQueryDescribe{source: source}
+		fw.describe = ClientDescribe{source: source}
 		return &fw.describe, nil
 	case MsgClientClose:
-		fw.close = ClientExtendedQueryClose{source: source}
+		fw.close = ClientClose{source: source}
 		return &fw.close, nil
 	case MsgClientSync:
-		fw.sync = ClientExtendedQuerySync{source: source}
+		fw.sync = ClientSync{source: source}
 		return &fw.sync, nil
 	case MsgClientFlush:
-		fw.flush = ClientExtendedQueryFlush{source: source}
+		fw.flush = ClientFlush{source: source}
 		return &fw.flush, nil
 
 	// Copy
 	case MsgClientCopyData:
-		fw.copyData = ClientCopyCopyData{source: source}
+		fw.copyData = ClientCopyData{source: source}
 		return &fw.copyData, nil
 	case MsgClientCopyDone:
-		fw.copyDone = ClientCopyCopyDone{source: source}
+		fw.copyDone = ClientCopyDone{source: source}
 		return &fw.copyDone, nil
 	case MsgClientCopyFail:
-		fw.copyFail = ClientCopyCopyFail{source: source}
+		fw.copyFail = ClientCopyFail{source: source}
 		return &fw.copyFail, nil
 
 	// Terminate
 	case MsgClientTerminate:
-		fw.terminate = ClientTerminateConnTerminate{source: source}
+		fw.terminate = ClientTerminate{source: source}
 		return &fw.terminate, nil
 
 	// Startup/Auth (p = password)
 	case MsgClientPassword:
-		fw.passwordMessage = ClientStartupPasswordMessage{source: source}
+		fw.passwordMessage = ClientPasswordMessage{source: source}
 		return &fw.passwordMessage, nil
 
 	default:
@@ -97,44 +97,44 @@ func (fw *ClientFlyweights) Parse(source RawMessageSource) (ClientMessage, error
 // ServerFlyweights holds reusable message wrappers for server messages.
 type ServerFlyweights struct {
 	// Response
-	readyForQuery        ServerResponseReadyForQuery
-	commandComplete      ServerResponseCommandComplete
-	dataRow              ServerResponseDataRow
-	emptyQueryResponse   ServerResponseEmptyQueryResponse
-	errorResponse        ServerResponseErrorResponse
-	functionCallResponse ServerResponseFunctionCallResponse
+	readyForQuery        ServerReadyForQuery
+	commandComplete      ServerCommandComplete
+	dataRow              ServerDataRow
+	emptyQueryResponse   ServerEmptyQueryResponse
+	errorResponse        ServerErrorResponse
+	functionCallResponse ServerFunctionCallResponse
 
 	// Extended query
-	parseComplete        ServerExtendedQueryParseComplete
-	bindComplete         ServerExtendedQueryBindComplete
-	parameterDescription ServerExtendedQueryParameterDescription
-	rowDescription       ServerExtendedQueryRowDescription
-	noData               ServerExtendedQueryNoData
-	portalSuspended      ServerExtendedQueryPortalSuspended
-	closeComplete        ServerExtendedQueryCloseComplete
+	parseComplete        ServerParseComplete
+	bindComplete         ServerBindComplete
+	parameterDescription ServerParameterDescription
+	rowDescription       ServerRowDescription
+	noData               ServerNoData
+	portalSuspended      ServerPortalSuspended
+	closeComplete        ServerCloseComplete
 
 	// Copy
-	copyInResponse   ServerCopyCopyInResponse
-	copyOutResponse  ServerCopyCopyOutResponse
-	copyBothResponse ServerCopyCopyBothResponse
-	copyData         ServerCopyCopyData
-	copyDone         ServerCopyCopyDone
+	copyInResponse   ServerCopyInResponse
+	copyOutResponse  ServerCopyOutResponse
+	copyBothResponse ServerCopyBothResponse
+	copyData         ServerCopyData
+	copyDone         ServerCopyDone
 
 	// Async
-	noticeResponse       ServerAsyncNoticeResponse
-	notificationResponse ServerAsyncNotificationResponse
-	parameterStatus      ServerAsyncParameterStatus
+	noticeResponse       ServerNoticeResponse
+	notificationResponse ServerNotificationResponse
+	parameterStatus      ServerParameterStatus
 
 	// Startup
-	authenticationOk                ServerStartupAuthenticationOk
-	authenticationCleartextPassword ServerStartupAuthenticationCleartextPassword
-	authenticationMD5Password       ServerStartupAuthenticationMD5Password
-	authenticationGSS               ServerStartupAuthenticationGSS
-	authenticationGSSContinue       ServerStartupAuthenticationGSSContinue
-	authenticationSASL              ServerStartupAuthenticationSASL
-	authenticationSASLContinue      ServerStartupAuthenticationSASLContinue
-	authenticationSASLFinal         ServerStartupAuthenticationSASLFinal
-	backendKeyData                  ServerStartupBackendKeyData
+	authenticationOk                ServerAuthenticationOk
+	authenticationCleartextPassword ServerAuthenticationCleartextPassword
+	authenticationMD5Password       ServerAuthenticationMD5Password
+	authenticationGSS               ServerAuthenticationGSS
+	authenticationGSSContinue       ServerAuthenticationGSSContinue
+	authenticationSASL              ServerAuthenticationSASL
+	authenticationSASLContinue      ServerAuthenticationSASLContinue
+	authenticationSASLFinal         ServerAuthenticationSASLFinal
+	backendKeyData                  ServerBackendKeyData
 }
 
 // Parse returns the current message as a ServerMessage using flyweights.
@@ -146,80 +146,80 @@ func (fw *ServerFlyweights) Parse(source RawMessageSource) (ServerMessage, error
 	switch msgType {
 	// Response
 	case MsgServerReadyForQuery:
-		fw.readyForQuery = ServerResponseReadyForQuery{source: source}
+		fw.readyForQuery = ServerReadyForQuery{source: source}
 		return &fw.readyForQuery, nil
 	case MsgServerCommandComplete:
-		fw.commandComplete = ServerResponseCommandComplete{source: source}
+		fw.commandComplete = ServerCommandComplete{source: source}
 		return &fw.commandComplete, nil
 	case MsgServerDataRow:
-		fw.dataRow = ServerResponseDataRow{source: source}
+		fw.dataRow = ServerDataRow{source: source}
 		return &fw.dataRow, nil
 	case MsgServerEmptyQueryResponse:
-		fw.emptyQueryResponse = ServerResponseEmptyQueryResponse{source: source}
+		fw.emptyQueryResponse = ServerEmptyQueryResponse{source: source}
 		return &fw.emptyQueryResponse, nil
 	case MsgServerErrorResponse:
-		fw.errorResponse = ServerResponseErrorResponse{source: source}
+		fw.errorResponse = ServerErrorResponse{source: source}
 		return &fw.errorResponse, nil
 	case MsgServerFuncCallResponse:
-		fw.functionCallResponse = ServerResponseFunctionCallResponse{source: source}
+		fw.functionCallResponse = ServerFunctionCallResponse{source: source}
 		return &fw.functionCallResponse, nil
 
 	// Extended query
 	case MsgServerParseComplete:
-		fw.parseComplete = ServerExtendedQueryParseComplete{source: source}
+		fw.parseComplete = ServerParseComplete{source: source}
 		return &fw.parseComplete, nil
 	case MsgServerBindComplete:
-		fw.bindComplete = ServerExtendedQueryBindComplete{source: source}
+		fw.bindComplete = ServerBindComplete{source: source}
 		return &fw.bindComplete, nil
 	case MsgServerParameterDescription:
-		fw.parameterDescription = ServerExtendedQueryParameterDescription{source: source}
+		fw.parameterDescription = ServerParameterDescription{source: source}
 		return &fw.parameterDescription, nil
 	case MsgServerRowDescription:
-		fw.rowDescription = ServerExtendedQueryRowDescription{source: source}
+		fw.rowDescription = ServerRowDescription{source: source}
 		return &fw.rowDescription, nil
 	case MsgServerNoData:
-		fw.noData = ServerExtendedQueryNoData{source: source}
+		fw.noData = ServerNoData{source: source}
 		return &fw.noData, nil
 	case MsgServerPortalSuspended:
-		fw.portalSuspended = ServerExtendedQueryPortalSuspended{source: source}
+		fw.portalSuspended = ServerPortalSuspended{source: source}
 		return &fw.portalSuspended, nil
 	case MsgServerCloseComplete:
-		fw.closeComplete = ServerExtendedQueryCloseComplete{source: source}
+		fw.closeComplete = ServerCloseComplete{source: source}
 		return &fw.closeComplete, nil
 
 	// Copy
 	case MsgServerCopyInResponse:
-		fw.copyInResponse = ServerCopyCopyInResponse{source: source}
+		fw.copyInResponse = ServerCopyInResponse{source: source}
 		return &fw.copyInResponse, nil
 	case MsgServerCopyOutResponse:
-		fw.copyOutResponse = ServerCopyCopyOutResponse{source: source}
+		fw.copyOutResponse = ServerCopyOutResponse{source: source}
 		return &fw.copyOutResponse, nil
 	case MsgServerCopyBothResponse:
-		fw.copyBothResponse = ServerCopyCopyBothResponse{source: source}
+		fw.copyBothResponse = ServerCopyBothResponse{source: source}
 		return &fw.copyBothResponse, nil
 	case MsgServerCopyData:
-		fw.copyData = ServerCopyCopyData{source: source}
+		fw.copyData = ServerCopyData{source: source}
 		return &fw.copyData, nil
 	case MsgServerCopyDone:
-		fw.copyDone = ServerCopyCopyDone{source: source}
+		fw.copyDone = ServerCopyDone{source: source}
 		return &fw.copyDone, nil
 
 	// Async
 	case MsgServerNoticeResponse:
-		fw.noticeResponse = ServerAsyncNoticeResponse{source: source}
+		fw.noticeResponse = ServerNoticeResponse{source: source}
 		return &fw.noticeResponse, nil
 	case MsgServerNotificationResponse:
-		fw.notificationResponse = ServerAsyncNotificationResponse{source: source}
+		fw.notificationResponse = ServerNotificationResponse{source: source}
 		return &fw.notificationResponse, nil
 	case MsgServerParameterStatus:
-		fw.parameterStatus = ServerAsyncParameterStatus{source: source}
+		fw.parameterStatus = ServerParameterStatus{source: source}
 		return &fw.parameterStatus, nil
 
 	// Startup/Auth
 	case MsgServerAuth:
 		return fw.parseAuth(source)
 	case MsgServerBackendKeyData:
-		fw.backendKeyData = ServerStartupBackendKeyData{source: source}
+		fw.backendKeyData = ServerBackendKeyData{source: source}
 		return &fw.backendKeyData, nil
 
 	default:
@@ -239,28 +239,28 @@ func (fw *ServerFlyweights) parseAuth(source RawMessageSource) (ServerMessage, e
 
 	switch authType {
 	case 0:
-		fw.authenticationOk = ServerStartupAuthenticationOk{source: source}
+		fw.authenticationOk = ServerAuthenticationOk{source: source}
 		return &fw.authenticationOk, nil
 	case 3:
-		fw.authenticationCleartextPassword = ServerStartupAuthenticationCleartextPassword{source: source}
+		fw.authenticationCleartextPassword = ServerAuthenticationCleartextPassword{source: source}
 		return &fw.authenticationCleartextPassword, nil
 	case 5:
-		fw.authenticationMD5Password = ServerStartupAuthenticationMD5Password{source: source}
+		fw.authenticationMD5Password = ServerAuthenticationMD5Password{source: source}
 		return &fw.authenticationMD5Password, nil
 	case 7:
-		fw.authenticationGSS = ServerStartupAuthenticationGSS{source: source}
+		fw.authenticationGSS = ServerAuthenticationGSS{source: source}
 		return &fw.authenticationGSS, nil
 	case 8:
-		fw.authenticationGSSContinue = ServerStartupAuthenticationGSSContinue{source: source}
+		fw.authenticationGSSContinue = ServerAuthenticationGSSContinue{source: source}
 		return &fw.authenticationGSSContinue, nil
 	case 10:
-		fw.authenticationSASL = ServerStartupAuthenticationSASL{source: source}
+		fw.authenticationSASL = ServerAuthenticationSASL{source: source}
 		return &fw.authenticationSASL, nil
 	case 11:
-		fw.authenticationSASLContinue = ServerStartupAuthenticationSASLContinue{source: source}
+		fw.authenticationSASLContinue = ServerAuthenticationSASLContinue{source: source}
 		return &fw.authenticationSASLContinue, nil
 	case 12:
-		fw.authenticationSASLFinal = ServerStartupAuthenticationSASLFinal{source: source}
+		fw.authenticationSASLFinal = ServerAuthenticationSASLFinal{source: source}
 		return &fw.authenticationSASLFinal, nil
 	default:
 		return nil, fmt.Errorf("unknown authentication type: %d", authType)

@@ -103,10 +103,10 @@ type ServerQuery interface {
 	QueryHash() uint64
 	// ParseRequest returns a Parse request that will create the appropriate
 	// PreparedStatement on the server.
-	ParseRequest() *pgwire.ClientExtendedQueryParse
+	ParseRequest() *pgwire.ClientParse
 	// BindRequest returns a rewritten Bind request that shares its parameter
 	// values with the original Bind request
-	BindRequest(original *pgwire.ClientExtendedQueryBind) *pgwire.ClientExtendedQueryBind
+	BindRequest(original *pgwire.ClientBind) *pgwire.ClientBind
 }
 
 type serverQuery struct {
@@ -121,18 +121,18 @@ func (s *serverQuery) ServerName() string {
 	return fmt.Sprintf("pgwire_hash_%d", s.stmt.QueryHash)
 }
 
-func (s *serverQuery) ParseRequest() *pgwire.ClientExtendedQueryParse {
-	return (*pgwire.ClientExtendedQueryParse)(pgwire.ClientParsed(&pgproto3.Parse{
+func (s *serverQuery) ParseRequest() *pgwire.ClientParse {
+	return (*pgwire.ClientParse)(pgwire.ClientParsed(&pgproto3.Parse{
 		Name:          s.ServerName(),
 		Query:         s.stmt.Query,
 		ParameterOIDs: s.stmt.ParameterOIDs,
 	}))
 }
 
-func (s *serverQuery) BindRequest(original *pgwire.ClientExtendedQueryBind) *pgwire.ClientExtendedQueryBind {
+func (s *serverQuery) BindRequest(original *pgwire.ClientBind) *pgwire.ClientBind {
 	// TODO: structural sharing of the parameter values w/ `original`
 	data := original.Parse()
-	return (*pgwire.ClientExtendedQueryBind)(pgwire.ClientParsed(&pgproto3.Bind{
+	return (*pgwire.ClientBind)(pgwire.ClientParsed(&pgproto3.Bind{
 		PreparedStatement:    s.ServerName(),
 		DestinationPortal:    data.DestinationPortal,
 		ParameterFormatCodes: data.ParameterFormatCodes,

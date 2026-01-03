@@ -100,7 +100,7 @@ func (s *AuthSession) runPlainAuth() error {
 		return fmt.Errorf("failed to receive password: %w", err)
 	}
 
-	pwWrapper, ok := msg.(*pgwire.ClientStartupPasswordMessage)
+	pwWrapper, ok := msg.(*pgwire.ClientPasswordMessage)
 	if !ok {
 		return s.authError(fmt.Errorf("expected PasswordMessage, got %T", msg))
 	}
@@ -128,7 +128,7 @@ func (s *AuthSession) runMD5Auth() error {
 		return fmt.Errorf("failed to receive password: %w", err)
 	}
 
-	pwWrapper, ok := msg.(*pgwire.ClientStartupPasswordMessage)
+	pwWrapper, ok := msg.(*pgwire.ClientPasswordMessage)
 	if !ok {
 		return s.authError(fmt.Errorf("expected PasswordMessage, got %T", msg))
 	}
@@ -170,7 +170,7 @@ func (s *AuthSession) runSCRAMAuth() error {
 		return fmt.Errorf("failed to receive SASL initial response: %w", err)
 	}
 
-	initWrapper, ok := msg.(*pgwire.ClientStartupSASLInitialResponse)
+	initWrapper, ok := msg.(*pgwire.ClientSASLInitialResponse)
 	if !ok {
 		return s.authError(fmt.Errorf("expected SASLInitialResponse, got %T", msg))
 	}
@@ -257,7 +257,7 @@ func (s *AuthSession) runSCRAMAuth() error {
 		return fmt.Errorf("failed to receive SASL response: %w", err)
 	}
 
-	respWrapper, ok := msg.(*pgwire.ClientStartupSASLResponse)
+	respWrapper, ok := msg.(*pgwire.ClientSASLResponse)
 	if !ok {
 		return s.authError(fmt.Errorf("expected SASLResponse, got %T", msg))
 	}

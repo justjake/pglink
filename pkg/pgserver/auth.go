@@ -40,7 +40,7 @@ func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *Una
 		return nil, ctx.Err()
 	}
 
-	msg, err := pgwire.Expect[*pgwire.ClientStartupPasswordMessage](conn.Receive())
+	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive())
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *Unauthori
 		return nil, err
 	}
 
-	msg, err := pgwire.Expect[*pgwire.ClientStartupPasswordMessage](conn.Receive())
+	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive())
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	clientFirstMsg, err := pgwire.Expect[*pgwire.ClientStartupSASLInitialResponse](conn.Receive())
+	clientFirstMsg, err := pgwire.Expect[*pgwire.ClientSASLInitialResponse](conn.Receive())
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	clientFinalMsg, err := pgwire.Expect[*pgwire.ClientStartupSASLResponse](conn.Receive())
+	clientFinalMsg, err := pgwire.Expect[*pgwire.ClientSASLResponse](conn.Receive())
 	if err != nil {
 		return nil, err
 	}

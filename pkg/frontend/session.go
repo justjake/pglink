@@ -640,7 +640,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 		Client: pgwire.ClientMessageHandlers[bool]{
 			SimpleQuery: func(msg pgwire.ClientSimpleQuery) (bool, error) {
 				// Track SimpleQuery - expects ReadyForQuery response
-				if q, ok := msg.(*pgwire.ClientSimpleQueryQuery); ok {
+				if q, ok := msg.(*pgwire.ClientQuery); ok {
 					parsed := q.Parse()
 					s.state.PushRequest(pgwire.PendingRequest{
 						RequestType: pgwire.MsgClientQuery,
@@ -851,7 +851,7 @@ func (s *Session) runWithBackend(firstMsg pgwire.ClientMessage) error {
 
 func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtendedQuery, msgIdx int64, toServer **pgwire.RingRange) (bool, error) {
 	extendedQueryRewriter := pgwire.ClientExtendedQueryHandlers[pgproto3.FrontendMessage]{
-		Bind: func(msg *pgwire.ClientExtendedQueryBind) (pgproto3.FrontendMessage, error) {
+		Bind: func(msg *pgwire.ClientBind) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
 			serverStmt := s.clientToServerPreparedStatementName(parsed.PreparedStatement)
 			serverPortal := s.clientToServerPortalName(parsed.DestinationPortal)
@@ -954,7 +954,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				ResultFormatCodes:    parsed.ResultFormatCodes,
 			}, nil
 		},
-		Parse: func(msg *pgwire.ClientExtendedQueryParse) (pgproto3.FrontendMessage, error) {
+		Parse: func(msg *pgwire.ClientParse) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
 			queryHash := pgwire.HashQuery(parsed.Query)
 			serverName := s.clientToServerPreparedStatementName(parsed.Name)
@@ -1041,7 +1041,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				ParameterOIDs: parsed.ParameterOIDs,
 			}, nil
 		},
-		Execute: func(msg *pgwire.ClientExtendedQueryExecute) (pgproto3.FrontendMessage, error) {
+		Execute: func(msg *pgwire.ClientExecute) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
 			serverPortal := s.clientToServerPortalName(parsed.Portal)
 
@@ -1061,7 +1061,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				MaxRows: parsed.MaxRows,
 			}, nil
 		},
-		Describe: func(msg *pgwire.ClientExtendedQueryDescribe) (pgproto3.FrontendMessage, error) {
+		Describe: func(msg *pgwire.ClientDescribe) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
 			serverName := s.clientToServerObjectName(parsed.ObjectType, parsed.Name)
 
@@ -1082,7 +1082,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				Name:       serverName,
 			}, nil
 		},
-		Close: func(msg *pgwire.ClientExtendedQueryClose) (pgproto3.FrontendMessage, error) {
+		Close: func(msg *pgwire.ClientClose) (pgproto3.FrontendMessage, error) {
 			parsed := msg.Parse()
 			serverName := s.clientToServerObjectName(parsed.ObjectType, parsed.Name)
 
@@ -1103,7 +1103,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 				Name:       serverName,
 			}, nil
 		},
-		Sync: func(msg *pgwire.ClientExtendedQuerySync) (pgproto3.FrontendMessage, error) {
+		Sync: func(msg *pgwire.ClientSync) (pgproto3.FrontendMessage, error) {
 			// Track pending request - Sync expects ReadyForQuery response
 			s.state.PushRequest(pgwire.PendingRequest{
 				RequestType: pgwire.MsgClientSync,
@@ -1112,7 +1112,7 @@ func (s *Session) rewriteAndFlushExtendedQueryToBackend(msg pgwire.ClientExtende
 			// No variable content - always passthrough
 			return nil, nil
 		},
-		Flush: func(msg *pgwire.ClientExtendedQueryFlush) (pgproto3.FrontendMessage, error) {
+		Flush: func(msg *pgwire.ClientFlush) (pgproto3.FrontendMessage, error) {
 			// No variable content - always passthrough
 			return nil, nil
 		},
@@ -1171,7 +1171,7 @@ func (s *Session) handleServerExtendedQuery(msg pgwire.ServerExtendedQuery, msgI
 	}
 
 	// Handle ParseComplete specially for caching
-	if _, ok := msg.(*pgwire.ServerExtendedQueryParseComplete); ok && poppedReq != nil && poppedReq.Query != "" {
+	if _, ok := msg.(*pgwire.ServerParseComplete); ok && poppedReq != nil && poppedReq.Query != "" {
 		cache := s.database.StatementCache()
 		cache.Put(&pgwire.PreparedStatement{
 			Query:     poppedReq.Query,
@@ -1225,7 +1225,7 @@ func (s *Session) handleServerResponse(msg pgwire.ServerResponse, msgIdx int64, 
 	// Forward the message to the client
 	(*toClient).SetEndInclusive(msgIdx)
 
-	if _, ok := msg.(*pgwire.ServerResponseReadyForQuery); ok {
+	if _, ok := msg.(*pgwire.ServerReadyForQuery); ok {
 		// TODO: double-check and flush ParameterStatuses?
 		inTxOrQuery := s.state.InTxOrQuery()
 		s.logger.Debug("ReadyForQuery",
@@ -1622,7 +1622,7 @@ func (s *Session) setupFlowRecognizers() {
 
 	// SimpleQuery recognizer
 	s.state.AddRecognizer(&pgwire.SimpleQueryRecognizer{
-		OnStart: func(msg *pgwire.ClientSimpleQueryQuery) func(*pgwire.SimpleQueryFlow) {
+		OnStart: func(msg *pgwire.ClientQuery) func(*pgwire.SimpleQueryFlow) {
 			parsed := msg.Parse()
 			s.lastSQL = parsed.String // Track for CopyRecognizer
 
@@ -1683,7 +1683,7 @@ func (s *Session) setupFlowRecognizers() {
 
 	// ExtendedQuery recognizer
 	s.state.AddRecognizer(&pgwire.ExtendedQueryRecognizer{
-		OnStart: func(msg *pgwire.ClientExtendedQueryParse) func(*pgwire.ExtendedQueryFlow) {
+		OnStart: func(msg *pgwire.ClientParse) func(*pgwire.ExtendedQueryFlow) {
 			parsed := msg.Parse()
 			s.lastSQL = parsed.Query // Track for CopyRecognizer
 

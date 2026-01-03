@@ -22,15 +22,15 @@ func waitingForTransactionStart(ctx context.Context, state FlowState[Transaction
 		return true, StartedFlowState(state, TransactionFlow{}), inTransaction, nil
 	}
 	switch msg.(type) {
-	case *pgwire.ClientSimpleQueryQuery:
+	case *pgwire.ClientQuery:
 		return transactionStarted()
-	case *pgwire.ClientExtendedQueryParse:
+	case *pgwire.ClientParse:
 		return transactionStarted()
-	case *pgwire.ClientExtendedQueryBind:
+	case *pgwire.ClientBind:
 		return transactionStarted()
-	case *pgwire.ClientExtendedQueryExecute:
+	case *pgwire.ClientExecute:
 		return transactionStarted()
-	case *pgwire.ClientSimpleQueryFunctionCall:
+	case *pgwire.ClientFunctionCall:
 		return transactionStarted()
 	default:
 		return false, state, waitingForTransactionStart, nil
@@ -41,7 +41,7 @@ func inTransaction(ctx context.Context, state FlowState[TransactionFlow], msg pg
 	if msg, ok := msg.(pgwire.ServerMessage); ok {
 		state.Flow.LastServerMessageTime = time.Now()
 
-		if msg, ok := msg.(*pgwire.ServerResponseReadyForQuery); ok {
+		if msg, ok := msg.(*pgwire.ServerReadyForQuery); ok {
 			state.Flow.TxStatus = msg.TxStatus()
 			if state.Flow.TxStatus == pgwire.TxIdle {
 				return true, EndedFlowState(state), waitingForTransactionStart, nil

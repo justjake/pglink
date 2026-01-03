@@ -27,7 +27,7 @@ func BenchmarkProtocolState_UpdateSimpleQuery(b *testing.B) {
 	state := NewProtocolState()
 
 	// Create a simple query message (SELECT 1)
-	msg := (*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
+	msg := (*ClientQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -39,7 +39,7 @@ func BenchmarkProtocolState_UpdateSimpleQuery(b *testing.B) {
 func BenchmarkProtocolState_UpdateReadyForQuery(b *testing.B) {
 	state := NewProtocolState()
 
-	msg := (*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))
+	msg := (*ServerReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -52,7 +52,7 @@ func BenchmarkProtocolState_UpdateDataRow(b *testing.B) {
 	state := NewProtocolState()
 
 	// Create a minimal DataRow (1 column, value "1")
-	msg := (*ServerResponseDataRow)(ServerParsed(&pgproto3.DataRow{Values: [][]byte{{'1'}}}))
+	msg := (*ServerDataRow)(ServerParsed(&pgproto3.DataRow{Values: [][]byte{{'1'}}}))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -71,7 +71,7 @@ func BenchmarkClientMessageHandlers_Dispatch(b *testing.B) {
 		SimpleQuery: nil, // nil = use default
 	}
 
-	msg := (*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
+	msg := (*ClientQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
 
 	defaultHandler := func(msg ClientMessage) (bool, error) {
 		return true, nil
@@ -89,7 +89,7 @@ func BenchmarkServerMessageHandlers_Dispatch(b *testing.B) {
 		Response: nil, // nil = use default
 	}
 
-	msg := (*ServerResponseReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))
+	msg := (*ServerReadyForQuery)(ServerParsed(&pgproto3.ReadyForQuery{TxStatus: 'I'}))
 
 	defaultHandler := func(msg ServerMessage) (bool, error) {
 		return true, nil
@@ -105,7 +105,7 @@ func BenchmarkServerMessageHandlers_Dispatch(b *testing.B) {
 // creating handlers per call (as done in ProtocolState.Update)
 func BenchmarkClientMessageHandlers_AllocPerCall(b *testing.B) {
 	state := NewProtocolState()
-	msg := (*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
+	msg := (*ClientQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -117,7 +117,7 @@ func BenchmarkClientMessageHandlers_AllocPerCall(b *testing.B) {
 // BenchmarkClientMessageHandlers_ReuseHandlers measures dispatch with reused handlers
 func BenchmarkClientMessageHandlers_ReuseHandlers(b *testing.B) {
 	state := NewProtocolState()
-	msg := (*ClientSimpleQueryQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
+	msg := (*ClientQuery)(ClientParsed(&pgproto3.Query{String: "SELECT 1"}))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

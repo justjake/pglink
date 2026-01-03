@@ -25,7 +25,7 @@ type SessionModel struct {
 	Logging            Logging
 }
 
-func (s *SessionModel) HandleParse(msg *pgwire.ClientExtendedQueryParse) Action {
+func (s *SessionModel) HandleParse(msg *pgwire.ClientParse) Action {
 	data := msg.Parse()
 	if data.Name == "" {
 		return Forward(msg)
@@ -36,13 +36,13 @@ func (s *SessionModel) HandleParse(msg *pgwire.ClientExtendedQueryParse) Action 
 	if s.Backend.HasServerQuery(serverQuery) {
 		return Respond(msg, pgwire.ToServer(&pgproto3.ParseComplete{}), registerEffect)
 	} else {
-		return RewriteAndHandleResponse(msg, serverQuery.ParseRequest(), func(res *pgwire.ServerExtendedQueryParseComplete) Action {
+		return RewriteAndHandleResponse(msg, serverQuery.ParseRequest(), func(res *pgwire.ServerParseComplete) Action {
 			return Forward(res, s.PreparedStatements.AddToCacheEffect(serverQuery))
 		}, registerEffect)
 	}
 }
 
-func (s *SessionModel) HandleBind(msg *pgwire.ClientExtendedQueryBind) Action {
+func (s *SessionModel) HandleBind(msg *pgwire.ClientBind) Action {
 	// TODO: avoid parsing all the parameters
 	clientStatementName := msg.Parse().PreparedStatement
 	if clientStatementName == "" {
@@ -55,7 +55,7 @@ func (s *SessionModel) HandleBind(msg *pgwire.ClientExtendedQueryBind) Action {
 		} else {
 			// compare to pgbouncer: ensure_statement_is_prepared_on_server
 			return Actions(
-				SendToServerAndHandleResponse(serverQuery.ParseRequest(), func(res *pgwire.ServerExtendedQueryParseComplete) Action {
+				SendToServerAndHandleResponse(serverQuery.ParseRequest(), func(res *pgwire.ServerParseComplete) Action {
 					return Skip(res)
 				}, s.PreparedStatements.AddToCacheEffect(serverQuery)),
 				Rewrite(msg, serverQuery.BindRequest(msg)),
@@ -69,11 +69,11 @@ func (s *SessionModel) HandleBind(msg *pgwire.ClientExtendedQueryBind) Action {
 	return Forward(msg)
 }
 
-func (s *SessionModel) HandleExecute(msg *pgwire.ClientExtendedQueryExecute) Action {
+func (s *SessionModel) HandleExecute(msg *pgwire.ClientExecute) Action {
 	return Forward(msg)
 }
 
-func (s *SessionModel) HandleParseComplete(msg *pgwire.ServerExtendedQueryParseComplete) Action {
+func (s *SessionModel) HandleParseComplete(msg *pgwire.ServerParseComplete) Action {
 	pendingRequest := s.PendingRequests.WaitingFor(msg)
 	if pendingRequest != nil {
 		return pendingRequest.Handle(msg)
@@ -82,7 +82,7 @@ func (s *SessionModel) HandleParseComplete(msg *pgwire.ServerExtendedQueryParseC
 	return Forward(msg)
 }
 
-func (s *SessionModel) HandleBindComplete(msg *pgwire.ServerExtendedQueryBindComplete) Action {
+func (s *SessionModel) HandleBindComplete(msg *pgwire.ServerBindComplete) Action {
 	pendingRequest := s.PendingRequests.WaitingFor(msg)
 	if pendingRequest != nil {
 		return pendingRequest.Handle(msg)
@@ -91,7 +91,7 @@ func (s *SessionModel) HandleBindComplete(msg *pgwire.ServerExtendedQueryBindCom
 	return Forward(msg)
 }
 
-func (s *SessionModel) HandleErrorResponse(msg *pgwire.ServerResponseErrorResponse) Action {
+func (s *SessionModel) HandleErrorResponse(msg *pgwire.ServerErrorResponse) Action {
 	var effects []Effect
 	if s.CopyMode.IsCopy() {
 		// pgbouncer:
@@ -133,7 +133,7 @@ func (s *SessionModel) HandleErrorResponse(msg *pgwire.ServerResponseErrorRespon
 	return Forward(msg, effects...)
 }
 
-func (s *SessionModel) HandleCommandComplete(msg *pgwire.ServerResponseCommandComplete) Action {
+func (s *SessionModel) HandleCommandComplete(msg *pgwire.ServerCommandComplete) Action {
 	var effects []Effect
 	// TODO: should this just be a callback from CopyStart?
 	// Do we need copy_mode explicitly across multiple handlers?
@@ -162,7 +162,7 @@ func (s *SessionModel) HandleCommandComplete(msg *pgwire.ServerResponseCommandCo
 	return Forward(msg, effects...)
 }
 
-func HandleReadyForQuery(msg *pgwire.ServerResponseReadyForQuery) Action {
+func HandleReadyForQuery(msg *pgwire.ServerReadyForQuery) Action {
 
 }
 
