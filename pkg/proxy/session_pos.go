@@ -207,6 +207,7 @@ func (p *pos) tryMarkHandled(action string) error {
 	if p.handled {
 		return fmt.Errorf("cannot %s: %w: %v", action, ErrPosAlreadyHandled, p)
 	}
+	p.Logger().Debug("handled", "action", action)
 	p.handled = true
 	return nil
 }

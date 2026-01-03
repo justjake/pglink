@@ -11,9 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
+var ErrSessionClosed = errors.New("session closed")
 var ErrBackendNotAcquired = errors.New("backend not acquired")
 var noHealthCheckChan = make(chan time.Time)
 
@@ -64,8 +66,6 @@ type Session struct {
 	backendPos        pos
 	bwq               pgwire.WriteQueue
 
-	// TODO: write queues
-	// TODO: flush
 	// TODO: trackers
 	// TODO: otel
 
@@ -140,9 +140,19 @@ func (s *Session) Close(ctx context.Context) error {
 	return res
 }
 
+// FlushDest flushes pending writes to the given destination.
+func (s *Session) FlushDest(ctx context.Context, dest ProxyRole) error {
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		return closedErr
+	}
+	return s.flush(ctx, dest)
+}
+
 // Flush flushes pending writes to the client and backend.
 func (s *Session) Flush(ctx context.Context) error {
-	s.assertNotClosed()
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		return closedErr
+	}
 
 	if err := s.flush(ctx, RoleServer); err != nil {
 		return err
@@ -157,13 +167,17 @@ func (s *Session) Flush(ctx context.Context) error {
 
 // FlushBackend flushes pending writes to the backend.
 func (s *Session) FlushBackend(ctx context.Context) error {
-	s.assertNotClosed()
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		return closedErr
+	}
 	return s.flush(ctx, RoleServer)
 }
 
 // FlushClient flushes pending writes to the client.
 func (s *Session) FlushClient(ctx context.Context) error {
-	s.assertNotClosed()
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		return closedErr
+	}
 	return s.flush(ctx, RoleClient)
 }
 
@@ -195,13 +209,14 @@ func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
 	if err != nil {
 		return fmt.Errorf("flush %s: %w", dest, err)
 	}
-	writeQueue.Clear()
 	return nil
 }
 
 // Backend returns the currently acquired backend, or nil if no backend is acquired.
 func (s *Session) Backend() Backend {
-	s.assertNotClosed()
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		panic(closedErr)
+	}
 	return s.backendConn
 }
 
@@ -211,7 +226,9 @@ func (s *Session) Backend() Backend {
 //
 // If a backend is already acquired, it is returned immediately.
 func (s *Session) AcquireBackend(ctx context.Context) (Backend, error) {
-	s.assertNotClosed()
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		return nil, fmt.Errorf("%w: %w", ErrBackendNotAcquired, closedErr)
+	}
 	if s.backendConn != nil {
 		return s.backendConn, nil
 	}
@@ -262,7 +279,9 @@ func (s *Session) ReleaseBackend(ctx context.Context) error {
 // QueueSendBytes queues writing bytes to dest.
 func (s *Session) QueueSendBytes(dest ProxyRole, bytes []byte) error {
 	// TODO: track write
-	s.assertNotClosed()
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		return closedErr
+	}
 	_, err := s.writeQueue(dest).Write(bytes)
 	return err
 }
@@ -272,14 +291,18 @@ func (s *Session) QueueSendBytes(dest ProxyRole, bytes []byte) error {
 // Messages from the client are queued to the backend. During flush, backend will be acquired if needed.
 func (s *Session) QueueSend(msg pgwire.Message) error {
 	// TODO: track write
-	s.assertNotClosed()
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		return closedErr
+	}
 	writeQueue := s.writeQueue(dest(msg))
 	return writeQueue.WriteMsg(msg)
 }
 
 func (s *Session) QueueSendPos(pos Pos) error {
 	// TODO: track write
-	s.assertNotClosed()
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		return closedErr
+	}
 	writeQueue := s.writeQueue(pos.From().Flipped())
 	return writeQueue.WriteRingMsg(pos.unwrap().RingMsg)
 }
@@ -287,6 +310,72 @@ func (s *Session) QueueSendPos(pos Pos) error {
 // ClearQueue clears the write queue for the given destination.
 func (s *Session) ClearQueue(dest ProxyRole) {
 	s.writeQueue(dest).Clear()
+}
+
+func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwire.Err) error {
+	logger := s.Logger().WithGroup("terminate").With("endpoint", RoleClient, "message", terminationMessage)
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		logger.Warn("cannot terminate client: session already closed", "err", closedErr)
+		return closedErr
+	}
+
+	if err := s.QueueSend(terminationMessage.ToMessage()); err != nil {
+		logger.Warn("ignored error sending termination message", "err", err)
+	}
+
+	if flushErr := s.flush(ctx, RoleClient); flushErr != nil {
+		logger.Warn("ignored flush error, may not have received all messages", "err", flushErr)
+	}
+
+	if termErr := s.clientConn.Terminate(ctx, terminationMessage); termErr != nil {
+		logger.Error("failed to terminate", "err", termErr)
+		return fmt.Errorf("failed to terminate client: %w: %w", termErr, terminationMessage)
+	}
+	logger.Info("terminated")
+	return nil
+}
+
+func (s *Session) TerminateBackend(ctx context.Context, cause error) error {
+	logger := s.Logger().WithGroup("terminate").With("endpoint", RoleServer, "cause", cause)
+	if closedErr := s.alreadyClosedError(); closedErr != nil {
+		logger.Warn("cannot terminate backend: session already closed", "err", closedErr)
+		return closedErr
+	}
+	if s.backendConn == nil {
+		return fmt.Errorf("failed to terminate backend: %w: %w", ErrBackendNotAcquired, cause)
+	}
+
+	if flushErr := s.flush(ctx, RoleServer); flushErr != nil {
+		s.bwq.Clear() // Do not retry during ReleaseBackend.
+		logger.Warn("ignored flush error, may not have received all messages", "err", flushErr)
+	}
+
+	if termErr := s.backendConn.Terminate(ctx, cause); termErr != nil {
+		logger.Error("failed to terminate", "err", termErr)
+		return fmt.Errorf("failed to terminate backend: %w: %w", termErr, cause)
+	}
+
+	if releaseErr := s.ReleaseBackend(ctx); releaseErr != nil {
+		logger.Error("failed to release backend", "err", releaseErr)
+		return fmt.Errorf("failed to release backend: %w: %w", releaseErr, cause)
+	}
+
+	logger.Info("terminated")
+	return nil
+}
+
+func (s *Session) TerminateBoth(ctx context.Context, dest ProxyRole, terminationMessage *pgwire.Err) error {
+	clientErr := s.TerminateClient(ctx, terminationMessage)
+	backendErr := s.TerminateBackend(ctx, terminationMessage)
+	return errors.Join(clientErr, backendErr)
+}
+
+func (s *Session) TerminateBothUnexpectedError(ctx context.Context, cause error) error {
+	var pgErr *pgwire.Err
+	if !errors.As(cause, &pgErr) {
+		pgErr = pgwire.NewErr(pgwire.ErrorPanic, pgerrcode.InternalError, "unexpected error", cause)
+	}
+	return s.TerminateBoth(ctx, RoleProxy, pgErr)
 }
 
 func (s *Session) releaseClient(ctx context.Context) error {
@@ -331,10 +420,11 @@ func (s *Session) getBackendPos() *pos {
 	return &s.backendPos
 }
 
-func (s *Session) assertNotClosed() {
+func (s *Session) alreadyClosedError() error {
 	if s.closed {
-		panic("session already closed")
+		return ErrSessionClosed
 	}
+	return nil
 }
 
 func (s *Session) Logger() *slog.Logger {

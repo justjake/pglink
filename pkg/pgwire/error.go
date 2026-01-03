@@ -34,6 +34,10 @@ func (e *Err) Cause() error {
 	return e.C
 }
 
+func (e *Err) ToMessage() Message {
+	return Server(&e.ErrorResponse)
+}
+
 func NewErr(severity Severity, code string, message string, cause error) *Err {
 	_, file, line, _ := runtime.Caller(1)
 	err := &Err{
