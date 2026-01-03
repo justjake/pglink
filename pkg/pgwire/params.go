@@ -2,6 +2,7 @@ package pgwire
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 )
@@ -52,6 +53,7 @@ const (
 	// Startup parameters
 	ParamUser     = "user"
 	ParamDatabase = "database"
+	ParamOptions  = "options"
 )
 
 var BaseTrackedParameters = []string{
@@ -194,11 +196,37 @@ func ParseOptionsParameter(options string) (map[string]string, error) {
 	result := make(map[string]string)
 	for _, m := range optionRE.FindAllStringSubmatch(options, -1) {
 		kv := unescapeOption(m[1])
-		if eq := strings.Index(kv, "="); eq != -1 {
-			result[kv[:eq]] = kv[eq+1:]
+		if before, after, ok := strings.Cut(kv, "="); ok {
+			result[before] = after
 		} else {
 			return nil, fmt.Errorf("invalid option: expected key=value, got %q", m[1])
 		}
+	}
+	return result, nil
+}
+
+func ParseStartupParameters(init ParameterStatuses, defaults ParameterStatuses) (ParameterStatuses, error) {
+	result := maps.Clone(defaults)
+	for key, value := range init {
+		if key == ParamOptions {
+			// Requires special handling below.
+			continue
+		}
+		result[key] = value
+	}
+
+	// Parse "options" startup parameter to extract session variables like "-c search_path=schema1".
+	if options, ok := init[ParamOptions]; ok && options != "" {
+		optionParams, err := ParseOptionsParameter(options)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(result, optionParams)
+	}
+
+	// Default to user's database if not specified.
+	if result[ParamDatabase] == "" && result[ParamUser] != "" {
+		result[ParamDatabase] = result[ParamUser]
 	}
 	return result, nil
 }

@@ -59,14 +59,23 @@ type CancelConn struct {
 	CancelMessage *pgproto3.CancelRequest
 }
 
+// ClientConn represents a successfully established client connection.
 type ClientConn struct {
 	FrontendConn
-	User              string
-	Database          string
-	ProcessID         pgwire.ProcessID
-	SecretKey         pgwire.SecretKey
+	// Assigned by the [AuthHandler] or [StartupHandler].
+	User string
+	// Assigned by the [AuthHandler] or [StartupHandler].
+	Database string
+	// Assigned by the [StartupHandler].
+	ProcessID pgwire.ProcessID
+	// Assigned by the [StartupHandler].
+	SecretKey pgwire.SecretKey
+	// Assigned by the [StartupHandler].
 	StartupParameters pgwire.ParameterStatuses
-	ExtraData         any
+	// Can be used to store arbitrary data about the connection for the caller's use.
+	ExtraData any
+	// Called by [DefaultCancelHandler] if set.
+	CancelHandler func(ctx context.Context, conn *ClientConn, cancel *CancelConn) error
 }
 
 // AuthHandler authenticates and authorizes the connection by communicating with the client.
@@ -82,6 +91,8 @@ type AuthHandler func(ctx context.Context, conn *UnauthorizedConn) (*AuthorizedC
 type CancelHandler func(ctx context.Context, conn *CancelConn) error
 
 // StartupHandler handles remaining setup for the connection after authentication.
+// The primary task is to decide a [pgwire.ProcessID] and [pgwire.SecretKey] for the connection,
+// as well as the [pgwire.ParameterStatuses] startup parameters.
 //
 // From the PostgreSQL documentation (https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP)
 //
@@ -103,17 +114,22 @@ func (k *contextKey) String() string { return "pgserver context value " + k.name
 
 var ServerContextKey = &contextKey{"server"}
 
+// ServerConfig is the configuration for a [Server].
 type ServerConfig struct {
 	// How the listener accepts underlying connections.
+	// If blank, [Server.ListenAndServe] will panic.
 	Addr string
+
 	// If provided, clients may upgrade to TLS.
 	TLSConfig *tls.Config
+
 	// If true, clients may choose to communicate over plaintext when TLSConfig is
 	// non-nil.
 	//
 	// By default, clients are rejected if they do not upgrade to TLS before
 	// starting authentication.
 	TLSOptional bool
+
 	// If true, disables fast-startup of TLS.
 	//
 	// By default, when TLSConfig is non-nil, the the listener will recognize
@@ -131,7 +147,7 @@ type ServerConfig struct {
 	// If non-nil, it must return a non-nil context.
 	BaseContext func(net.Listener) context.Context
 
-	//	ConnContext optionally specifies a function that modifies
+	// ConnContext optionally specifies a function that modifies
 	// the context used for a new connection c. The provided ctx
 	// is derived from the base context and has a ServerContextKey
 	// value.
@@ -148,11 +164,14 @@ type ServerConfig struct {
 	// [PasswordAuthenticator] provides [PasswordAuthenticator.CleartextPassword], [PasswordAuthenticator.MD5Password], and [PasswordAuthenticator.SASL] handlers.
 	AuthHandler AuthHandler
 
-	// Required. Handles cancellation request connections.
+	// Handles cancellation request connections.
+	// If nil, [DefaultCancelHandler] is used, which calls the corresponding client connection's [ClientConn.CancelHandler] if set.
+	//
 	// On error, the connection is closed.
 	CancelHandler CancelHandler
 
-	// Required. Handles the startup of the connection after authorization.
+	// Optional. Handles the startup of the connection after authorization.
+	// If nil, [DefaultStartupHandler] is used.
 	//
 	// On error, the connection is closed.
 	// On success,  emits startup messages to the client before calling [Handler].
@@ -162,12 +181,23 @@ type ServerConfig struct {
 	// Connections run in their own service goroutine.
 	Handler ConnHandler
 
+	// StartupTimeout is the maximum time allowed for the entire startup
+	// handshake (TLS negotiation, authentication, and startup).
+	// Default: 60 seconds. Set to negative value for no timeout.
+	StartupTimeout time.Duration
+
 	// Log errors
 	Logger *slog.Logger
 }
 
+// Server implements a PostgreSQL wire protocol server.
+// Connections run in their own service goroutine.
+// New connections can be denied before a goroutine is started by implementng [ServerConfig.ConnContext].
 type Server struct {
+	// It is unsafe to modify the configuration after the server is started.
 	ServerConfig
+	// ConnMap tracks client connections by their [pgwire.ProcessID] and [pgwire.SecretKey].
+	// It contains successfully established [ClientConn]s.
 	ConnMap *ConnMap
 	serverTrackers
 }
@@ -177,10 +207,10 @@ func NewServer(config ServerConfig) (*Server, error) {
 		return nil, errors.New("AuthHandler is required")
 	}
 	if config.CancelHandler == nil {
-		return nil, errors.New("CancelHandler is required")
+		config.CancelHandler = DefaultCancelHandler
 	}
 	if config.StartupHandler == nil {
-		return nil, errors.New("StartupHandler is required")
+		config.StartupHandler = DefaultStartupHandler
 	}
 	if config.Handler == nil {
 		return nil, errors.New("Handler is required")
@@ -265,6 +295,16 @@ func (s *Server) Serve(l net.Listener) error {
 			return err
 		}
 
+		// Configure TCP socket options
+		if tcpConn, ok := rawConn.(*net.TCPConn); ok {
+			if err := tcpConn.SetNoDelay(true); err != nil {
+				logger.Warn("failed to set TCP_NODELAY", "error", err)
+			}
+			if err := tcpConn.SetKeepAlive(true); err != nil {
+				logger.Warn("failed to enable TCP keep-alive", "error", err)
+			}
+		}
+
 		connLogger := logger.With("client", rawConn.RemoteAddr().String())
 		connCtx := ctx
 		if cc := s.ConnContext; cc != nil {
@@ -297,8 +337,12 @@ func (s *Server) newConn(rawConn net.Conn, logger *slog.Logger) *conn {
 	}
 }
 
+// CtxServer returns the [Server] from the context, or nil if not found.
 func CtxServer(ctx context.Context) *Server {
-	return ctx.Value(ServerContextKey).(*Server)
+	if server, ok := ctx.Value(ServerContextKey).(*Server); ok {
+		return server
+	}
+	return nil
 }
 
 // onceCloseListener wraps a net.Listener, protecting it from
@@ -413,9 +457,20 @@ func (c *conn) serve(ctx context.Context) {
 	ctx, cancelCtx := context.WithCancel(ctx)
 	defer cancelCtx()
 
-	// TODO: configure all sorts of timeouts.
+	// Apply startup timeout if configured
+	startupCtx := ctx
+	startupTimeout := c.server.StartupTimeout
+	if startupTimeout == 0 {
+		startupTimeout = 60 * time.Second // default
+	}
+	if startupTimeout > 0 {
+		var cancelStartup context.CancelFunc
+		startupCtx, cancelStartup = context.WithTimeout(ctx, startupTimeout)
+		defer cancelStartup()
+	}
+	// startupTimeout < 0 means no timeout
 
-	unauthedConn, cancelConn, err := c.connect(ctx)
+	unauthedConn, cancelConn, err := c.connect(startupCtx)
 	if err != nil {
 		c.logger.Error("connect error", "error", err)
 		c.sendErr(err)
@@ -433,14 +488,14 @@ func (c *conn) serve(ctx context.Context) {
 		panic("encryptConn returned no connection types")
 	}
 
-	authConn, err := s.AuthHandler(ctx, unauthedConn)
+	authConn, err := s.AuthHandler(startupCtx, unauthedConn)
 	if err != nil {
 		c.logger.Error("auth error", "error", err)
 		c.sendErr(err)
 		return
 	}
 
-	startedConn, err := s.StartupHandler(ctx, authConn)
+	startedConn, err := s.StartupHandler(startupCtx, authConn)
 	if err != nil {
 		c.logger.Error("startup error", "error", err)
 		c.sendErr(err)

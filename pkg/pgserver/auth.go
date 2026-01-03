@@ -38,15 +38,11 @@ func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *Una
 		return nil, fmt.Errorf("failed to set auth type: %w", err)
 	}
 
-	if err := conn.SendFlush(&pgproto3.AuthenticationCleartextPassword{}); err != nil {
+	if err := conn.Send(ctx, &pgproto3.AuthenticationCleartextPassword{}); err != nil {
 		return nil, err
 	}
 
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-
-	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive())
+	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +55,7 @@ func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *Una
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", nil)
 	}
 
-	return a.authSuccess(&AuthorizedConn{
+	return a.authSuccess(ctx, &AuthorizedConn{
 		FrontendConn:   conn.FrontendConn,
 		User:           creds.Username(),
 		Database:       pgwire.ParameterStatuses(conn.StartupMessage.Parameters).Database(),
@@ -80,11 +76,11 @@ func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *Unauthori
 		return nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
 
-	if err := conn.SendFlush(&pgproto3.AuthenticationMD5Password{Salt: salt}); err != nil {
+	if err := conn.Send(ctx, &pgproto3.AuthenticationMD5Password{Salt: salt}); err != nil {
 		return nil, err
 	}
 
-	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive())
+	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +94,7 @@ func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *Unauthori
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", nil)
 	}
 
-	return a.authSuccess(&AuthorizedConn{
+	return a.authSuccess(ctx, &AuthorizedConn{
 		FrontendConn:   conn.FrontendConn,
 		User:           creds.Username(),
 		Database:       pgwire.ParameterStatuses(conn.StartupMessage.Parameters).Database(),
@@ -120,14 +116,11 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, err
 	}
 
-	if err := conn.SendFlush(&pgproto3.AuthenticationSASL{AuthMechanisms: mechanisms}); err != nil {
+	if err := conn.Send(ctx, &pgproto3.AuthenticationSASL{AuthMechanisms: mechanisms}); err != nil {
 		return nil, err
 	}
 
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	clientFirstMsg, err := pgwire.Expect[*pgwire.ClientSASLInitialResponse](conn.Receive())
+	clientFirstMsg, err := pgwire.Expect[*pgwire.ClientSASLInitialResponse](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +187,7 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "failed to process client-first-message", err)
 	}
 
-	if err := conn.SendFlush(&pgproto3.AuthenticationSASLContinue{
+	if err := conn.Send(ctx, &pgproto3.AuthenticationSASLContinue{
 		Data: []byte(serverFirstMsg),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to send SASL continue: %w", err)
@@ -205,10 +198,7 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, fmt.Errorf("failed to set auth type to SASLContinue: %w", err)
 	}
 
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	clientFinalMsg, err := pgwire.Expect[*pgwire.ClientSASLResponse](conn.Receive())
+	clientFinalMsg, err := pgwire.Expect[*pgwire.ClientSASLResponse](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -218,13 +208,13 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "SCRAM authentication failed", err)
 	}
 
-	if err := conn.SendFlush(&pgproto3.AuthenticationSASLFinal{
+	if err := conn.Send(ctx, &pgproto3.AuthenticationSASLFinal{
 		Data: []byte(serverFinalMsg),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to send SASL final: %w", err)
 	}
 
-	return a.authSuccess(&AuthorizedConn{
+	return a.authSuccess(ctx, &AuthorizedConn{
 		FrontendConn:   conn.FrontendConn,
 		User:           creds.Username(),
 		Database:       pgwire.ParameterStatuses(conn.StartupMessage.Parameters).Database(),
@@ -232,8 +222,8 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 	})
 }
 
-func (a *PasswordAuthenticator) authSuccess(conn *AuthorizedConn) (*AuthorizedConn, error) {
-	sendErr := conn.SendFlush(&pgproto3.AuthenticationOk{})
+func (a *PasswordAuthenticator) authSuccess(ctx context.Context, conn *AuthorizedConn) (*AuthorizedConn, error) {
+	sendErr := conn.Send(ctx, &pgproto3.AuthenticationOk{})
 	if sendErr != nil {
 		return nil, sendErr
 	}

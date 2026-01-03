@@ -6,6 +6,7 @@ import (
 	"iter"
 	"sync"
 
+	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
@@ -20,6 +21,13 @@ type ConnMap struct {
 type ConnKey struct {
 	ProcessID pgwire.ProcessID
 	SecretKey pgwire.SecretKey
+}
+
+func CancelMessageConnKey(msg *pgproto3.CancelRequest) ConnKey {
+	return ConnKey{
+		ProcessID: pgwire.ProcessID(msg.ProcessID),
+		SecretKey: pgwire.SecretKey(msg.SecretKey),
+	}
 }
 
 func (c *ConnMap) Get(key ConnKey) (*ClientConn, bool) {
