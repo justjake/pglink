@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -46,17 +45,8 @@ type Service struct {
 	// Connection tracking
 	activeConns atomic.Int32
 
-	// Session management
-	sessionsMu sync.Mutex
-	sessions   map[*Session]struct{}
-	sessionsWg sync.WaitGroup
-	nextPID    atomic.Uint32
-
-	// Cancel registry: maps proxy PID to session for query cancellation.
-	// When a cancel request arrives, we look up the session by PID,
-	// validate the secret key, and forward the cancel to the backend.
-	cancelRegistry   map[uint32]*Session
-	cancelRegistryMu sync.RWMutex
+	// PID allocation for client sessions
+	nextPID atomic.Uint32
 }
 
 // NewService creates a new frontend Service with the given configuration.
@@ -83,8 +73,6 @@ func NewService(ctx context.Context, cfg *config.Config, fsys fs.FS, secrets *co
 		secrets:        secrets,
 		tlsConfig:      tlsResult.Config,
 		databases:      make(map[*config.DatabaseConfig]*backend.Database),
-		sessions:       make(map[*Session]struct{}),
-		cancelRegistry: make(map[uint32]*Session),
 		tracingEnabled: tracingEnabled,
 		metrics:        metrics,
 	}, nil
@@ -146,9 +134,6 @@ func (s *Service) Listen() error {
 	// Run the server (blocks until server is closed or error)
 	serverErr := s.server.Serve(ln)
 
-	// Wait for all sessions to finish
-	s.sessionsWg.Wait()
-
 	// Return context error if that's why we stopped, otherwise return server error
 	if s.ctx.Err() != nil {
 		return s.ctx.Err()
@@ -163,18 +148,12 @@ func (s *Service) allocPID() uint32 {
 	return s.nextPID.Add(1)
 }
 
-// cancelAllSessions cancels all active sessions and closes their connections.
-// Closing the connection ensures that any blocked reads return immediately.
+// cancelAllSessions signals cancellation to all active sessions.
+// With pgserver, this is handled by closing the server which cancels
+// all connections via context cancellation.
 func (s *Service) cancelAllSessions() {
-	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-	for sess := range s.sessions {
-		sess.cancel()
-		// Close the connection to unblock any readers waiting on I/O
-		if sess.conn != nil {
-			_ = sess.conn.Close()
-		}
-	}
+	// pgserver handles connection cancellation via context when Server.Close() is called.
+	// This function is kept for potential future use but currently no-ops.
 }
 
 // Shutdown cancels the service's context, triggering graceful shutdown of all sessions.
@@ -185,48 +164,6 @@ func (s *Service) Shutdown() {
 // ActiveConnections returns the current number of active client connections.
 func (s *Service) ActiveConnections() int32 {
 	return s.activeConns.Load()
-}
-
-// registerForCancel adds a session to the cancel registry so it can receive
-// cancel requests. Called after the session has been assigned a PID.
-func (s *Service) registerForCancel(sess *Session) {
-	s.cancelRegistryMu.Lock()
-	defer s.cancelRegistryMu.Unlock()
-	s.cancelRegistry[sess.state.PID] = sess
-}
-
-// unregisterForCancel removes a session from the cancel registry.
-// Called when the session is closing.
-func (s *Service) unregisterForCancel(sess *Session) {
-	s.cancelRegistryMu.Lock()
-	defer s.cancelRegistryMu.Unlock()
-	delete(s.cancelRegistry, sess.state.PID)
-}
-
-// DumpRingBufferStats logs ring buffer statistics for all active sessions.
-// This is called when SIGUSR1 is received, before taking a flight recorder snapshot.
-func (s *Service) DumpRingBufferStats() {
-	s.logger.Info("ring buffer stats dump (SIGUSR1)")
-
-	s.sessionsMu.Lock()
-	sessions := make([]*Session, 0, len(s.sessions))
-	for sess := range s.sessions {
-		sessions = append(sessions, sess)
-	}
-	s.sessionsMu.Unlock()
-
-	for _, sess := range sessions {
-		sess.LogRingBufferStats(s.logger)
-	}
-}
-
-// SetupFlightRecorderCallback registers the ring buffer dump callback with the flight recorder.
-// This should be called after creating the flight recorder service.
-func (s *Service) SetupFlightRecorderCallback(fr *observability.FlightRecorderService) {
-	if fr == nil {
-		return
-	}
-	fr.SetSignalCallback(s.DumpRingBufferStats)
 }
 
 // collectPoolStats updates pool metrics from all databases.
@@ -297,35 +234,6 @@ func (s *Service) startPoolStatsCollection(ctx context.Context) {
 			}
 		}
 	}()
-}
-
-// handleCancelRequest processes a cancel request from a client.
-// It looks up the target session by PID, validates the secret key,
-// and forwards the cancel to the backend if valid.
-// Returns nil if the cancel was processed (whether or not it succeeded),
-// or an error if the cancel request itself was malformed.
-func (s *Service) handleCancelRequest(req *pgproto3.CancelRequest) error {
-	s.cancelRegistryMu.RLock()
-	sess := s.cancelRegistry[req.ProcessID]
-	s.cancelRegistryMu.RUnlock()
-
-	if sess == nil {
-		// No session found with this PID - silently ignore.
-		// This is expected if the session has already ended.
-		s.logger.Debug("cancel request for unknown frontend PID", "pid", req.ProcessID)
-		return nil
-	}
-
-	if sess.state.SecretCancelKey != req.SecretKey {
-		s.logger.Debug("cancel request with invalid secret", "pid", req.ProcessID)
-		return nil
-	}
-	if err := sess.cancelBackendQuery(); err != nil {
-		s.logger.Debug("failed to cancel backend query", "pid", req.ProcessID, "error", err)
-	} else {
-		s.logger.Info("cancelled query", "pid", req.ProcessID)
-	}
-	return nil
 }
 
 // ============================================================================

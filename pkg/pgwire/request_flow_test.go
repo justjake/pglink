@@ -253,23 +253,6 @@ func TestProtocolState_WithActions(t *testing.T) {
 	assert.Equal(t, ActionFake, req.Action)
 }
 
-func TestRequestFlow_IsComplete(t *testing.T) {
-	flow := NewRequestFlow()
-	assert.False(t, flow.IsComplete())
-
-	// Simulate receiving ReadyForQuery via UpdateHandlers
-	state := NewProtocolState()
-	handlers := flow.UpdateHandlers(&state)
-
-	// Create a mock ReadyForQuery message - we need to test the handler logic
-	// For now, just test the flag directly
-	flow.isComplete = true
-	assert.True(t, flow.IsComplete())
-
-	// Verify handler returns false (flow complete) for ReadyForQuery
-	_ = handlers // handlers tested in integration tests
-}
-
 func TestProtocolState_RequestFlow(t *testing.T) {
 	state := NewProtocolState()
 

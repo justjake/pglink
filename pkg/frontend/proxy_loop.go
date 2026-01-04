@@ -25,6 +25,9 @@ import (
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
+// errTerminateConn signals that the client sent a Terminate message.
+var errTerminateConn = errors.New("client terminating connection")
+
 // proxyState holds state for a proxy session using pgproxy.Session.
 // This replaces the Session struct for the pgproxy-based implementation.
 type proxyState struct {

@@ -2,8 +2,6 @@ package pgwire
 
 import (
 	"time"
-
-	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 // ResponseAction determines how to handle a server response
@@ -53,24 +51,17 @@ type PendingRequest struct {
 	FakeResponse func() []byte
 }
 
-// RequestFlow implements Flow and tracks outstanding requests in a protocol flow.
+// RequestFlow tracks outstanding requests in a protocol flow.
 // A flow starts with a client message (Parse, Query, etc.) and ends with ReadyForQuery.
-//
-// RequestFlow composes the Flow abstraction with request/response tracking:
-// - As a Flow, it tracks message sequences and determines when flows complete
-// - As a request queue, it tracks pending requests and their expected response actions
 type RequestFlow struct {
-	requests   []PendingRequest
-	isComplete bool
+	requests []PendingRequest
 
 	// StartTime is when the flow was created. Used for query_timeout calculation.
 	// For pipelined queries, this is when the first request was pushed to the flow.
 	StartTime time.Time
 
-	// Callbacks (set by the creator/recognizer)
-	OnResponse func(req PendingRequest, msg ServerMessage) ResponseAction
+	// OnComplete is called when the flow ends (Close is called).
 	OnComplete func(flow *RequestFlow)
-	OnError    func(flow *RequestFlow, err *pgproto3.ErrorResponse)
 }
 
 // NewRequestFlow creates a new RequestFlow with StartTime set to now.
@@ -80,52 +71,7 @@ func NewRequestFlow() *RequestFlow {
 	}
 }
 
-// UpdateHandlers implements the Flow interface.
-// Returns handlers that process messages and determine when the flow is complete.
-func (f *RequestFlow) UpdateHandlers(state *ProtocolState) FlowUpdateHandlers {
-	return FlowUpdateHandlers{
-		Client: FlowUpdateClientHandlers{
-			ExtendedQuery: func(msg ClientExtendedQuery) bool {
-				// Client messages are tracked via Push() - this is informational
-				return true
-			},
-			SimpleQuery: func(msg ClientSimpleQuery) bool {
-				return true
-			},
-		},
-		Server: FlowUpdateServerHandlers{
-			Response: func(msg ServerResponse) bool {
-				if _, ok := msg.(*ServerReadyForQuery); ok {
-					f.isComplete = true
-					return false // Flow complete
-				}
-				if errResp, ok := msg.(*ServerErrorResponse); ok {
-					if f.OnError != nil {
-						f.OnError(f, errResp.Parse())
-					}
-					// Error recovery: clear pending requests until Sync
-					if state.ExtendedQueryMode {
-						f.ClearUntilSync()
-					}
-				}
-				return true
-			},
-			ExtendedQuery: func(msg ServerExtendedQuery) bool {
-				return true
-			},
-			Copy: func(msg ServerCopy) bool {
-				return true
-			},
-			Async: func(msg ServerAsync) bool {
-				// Async messages don't affect flow lifecycle
-				return true
-			},
-		},
-	}
-}
-
-// Close implements the Flow interface.
-// Called when the flow ends (either completed or terminated).
+// Close is called when the flow ends (either completed or terminated).
 func (f *RequestFlow) Close() {
 	if f.OnComplete != nil {
 		f.OnComplete(f)
@@ -183,11 +129,6 @@ func (f *RequestFlow) ClearUntilSync() {
 // Len returns the number of pending requests
 func (f *RequestFlow) Len() int {
 	return len(f.requests)
-}
-
-// IsComplete returns true if the flow has completed (ReadyForQuery received)
-func (f *RequestFlow) IsComplete() bool {
-	return f.isComplete
 }
 
 // responseMatchesRequest checks if a server response message matches a pending request type.
