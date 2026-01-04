@@ -26,6 +26,24 @@ func (t *MsgLookup[T]) Get(m MsgType) T {
 	return t[m]
 }
 
+// Protocol version and magic numbers for startup messages.
+// These appear in the first 4 bytes of the message body (after the length field).
+const (
+	ProtocolVersion3_0 int32 = 196608   // 3 << 16 | 0
+	SSLRequestMagic    int32 = 80877103 // 1234 << 16 | 5679
+	CancelRequestMagic int32 = 80877102 // 1234 << 16 | 5678
+	GSSENCRequestMagic int32 = 80877104 // 1234 << 16 | 5680
+)
+
+// Startup message types (synthetic - these are not actual wire bytes).
+// Used by pgstream to identify startup-phase messages.
+const (
+	MsgStartup       MsgType = 0x00 // StartupMessage (version 3.0)
+	MsgSSLRequest    MsgType = 0x01 // SSLRequest
+	MsgCancelRequest MsgType = 0x02 // CancelRequest
+	MsgGSSENCRequest MsgType = 0x03 // GSSENCRequest
+)
+
 // Client (frontend) message types
 const (
 	MsgClientBind      MsgType = 'B'
@@ -133,6 +151,12 @@ var MsgIsStartup = MsgLookup[bool]{
 
 // MsgName returns a human-readable name for the message type.
 var MsgName = MsgLookup[string]{
+	// Startup messages (synthetic types)
+	0x00: "StartupMessage",
+	0x01: "SSLRequest",
+	0x02: "CancelRequest",
+	0x03: "GSSENCRequest",
+
 	// Client messages
 	'B': "Bind",
 	'C': "Close/CommandComplete",

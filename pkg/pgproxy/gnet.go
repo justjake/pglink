@@ -2,12 +2,14 @@ package pgproxy
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
 
+	"github.com/gammazero/deque"
 	"github.com/justjake/pglink/pkg/pgwire"
 	"github.com/panjf2000/gnet/v2"
 )
@@ -168,6 +170,7 @@ func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	return gnet.None
 }
 
+// pgbufstate is the internal state machine state for message parsing.
 type pgbufstate int
 
 const (
@@ -189,46 +192,337 @@ func (s pgbufstate) String() string {
 	}
 }
 
+// tracks message metadata in an abstract stream.
+type pgstreambuf struct {
+	msgStartIdx int64
+	msgEndIdx   int64
+	// contains the offsets of messages [msgStartIdx, msgEndIdx]).
+	// len(offsets) == msgEndIdx - msgStartIdx
+	//
+	// the offset is the byte offset where the message starts in the stream.
+	offsets deque.Deque[int64]
+}
+
+func (p *pgstreambuf) AddMessage(t pgwire.MsgType, startOffset, endOffset int64) {
+	// todo
+}
+
+func (p *pgstreambuf) Size(msg int64) int64 {
+	// todo
+}
+
+func (p *pgstreambuf) MsgRange(msg int64) (startOffset, endOffset int64) {
+	// todo
+}
+
+func (p *pgstreambuf) Range(startMsg, endMsg int64) (startOffset, endOffset int64) {
+	// todo
+}
+
+// pgstream is a PostgreSQL wire protocol message boundary parser for normal mode.
+// It parses messages with format: type (1 byte) + length (4 bytes) + body.
+// Implements io.Writer and calls onMsgComplete for each complete message.
 type pgstream struct {
 	state pgbufstate
 
-	// todo: add remaining necessary state modeling.
-	curIdx         int64
-	header         [5]byte
-	headerStartIdx int64
+	curIdx   int64   // total bytes processed
+	header   [5]byte // type (1) + length (4)
+	headerN  int     // bytes accumulated in header (0-5)
+	bodyLen  int64   // body length (length field value - 4)
+	bodyRead int64   // body bytes consumed so far
 
-	// called from Write as soon as a complete message is parsed and pgstream's
-	// internal state is in idle. at that point curIdx will be == endIdx.
-	onMsgComplete func(t pgwire.MsgType, startIdx, endIdx int64)
+	// Called when a complete message is parsed.
+	// msgType is the message type byte.
+	// startIdx and endIdx are byte offsets in the stream.
+	onMsgComplete func(msgType pgwire.MsgType, startIdx, endIdx int64)
 }
 
-type pgstreamStateFn func([]byte, int) ([]byte, int, error)
+// accumulateHeader copies bytes from b into the header buffer.
+// Returns remaining bytes, updated written count, and whether header is complete.
+func (p *pgstream) accumulateHeader(b []byte, written, need int) ([]byte, int, bool) {
+	have := len(b)
+	n := min(need-p.headerN, have)
+	copy(p.header[p.headerN:], b[:n])
+	p.headerN += n
+	p.curIdx += int64(n)
+	return b[n:], written + n, p.headerN >= need
+}
 
-func (p *pgstream) Write(b []byte) (written int, err error) {
+// parseLength parses a big-endian int32 length from header at the given offset.
+// Returns the body length (length field - 4) and any validation error.
+func (p *pgstream) parseLength(offset int) (int64, error) {
+	length := int64(binary.BigEndian.Uint32(p.header[offset:]))
+	if length < 4 {
+		return 0, fmt.Errorf("invalid message length: %d", length)
+	}
+	return length - 4, nil
+}
+
+// resetForNextMessage resets state for parsing the next message.
+func (p *pgstream) resetForNextMessage() {
+	p.state = pgbufstateIdle
+	p.headerN = 0
+}
+
+// Write implements io.Writer. Parses PostgreSQL messages (type + length + body)
+// and calls onMsgComplete for each complete message found.
+func (p *pgstream) Write(b []byte) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
 
+	written := 0
+
+	// Fast path: process complete messages without state transitions
+	for p.state == pgbufstateIdle && len(b) >= 5 {
+		length := int64(binary.BigEndian.Uint32(b[1:5]))
+		if length < 4 {
+			return written, fmt.Errorf("invalid message length: %d", length)
+		}
+		msgSize := 1 + length
+		if int64(len(b)) < msgSize {
+			break // incomplete message, use slow path
+		}
+		// Complete message available
+		msgType := pgwire.MsgType(b[0])
+		startIdx := p.curIdx
+		p.curIdx += msgSize
+		if p.onMsgComplete != nil {
+			p.onMsgComplete(msgType, startIdx, p.curIdx)
+		}
+		b = b[msgSize:]
+		written += int(msgSize)
+	}
+
+	// Slow path: state machine for partial messages
 	for len(b) > 0 {
 		switch p.state {
-		// todo: handling for exotic like SSL yes/no.
 		case pgbufstateIdle:
-			b, written, err = p.writeIdle(b, written)
+			// Start reading header (type + 4-byte length)
+			p.state = pgbufstateReadingSize
+			fallthrough
+
+		case pgbufstateReadingSize:
+			var complete bool
+			b, written, complete = p.accumulateHeader(b, written, 5)
+			if !complete {
+				continue
+			}
+
+			bodyLen, err := p.parseLength(1) // length is at offset 1 (after type byte)
 			if err != nil {
 				return written, err
 			}
-		case pgbufstateReadingSize:
-			// TODO
+
+			p.bodyLen = bodyLen
+			p.bodyRead = 0
+			if p.bodyLen == 0 {
+				p.finishMessage()
+				continue
+			}
+			p.state = pgbufstateReadingBody
+
 		case pgbufstateReadingBody:
-			// TODO
+			var err error
+			b, written, err = p.consumeBody(b, written)
+			if err != nil {
+				return written, err
+			}
+
 		default:
-			panic(fmt.Sprintf("invalid state: %v", p.state))
+			return written, fmt.Errorf("invalid state: %v", p.state)
 		}
 	}
-
-	return
+	return written, nil
 }
 
-func (p *pgstream) writeIdle(b []byte, written int) (remaining []byte, written int, err error) {
-	// todo
+// consumeBody consumes body bytes and finishes the message when complete.
+func (p *pgstream) consumeBody(b []byte, written int) ([]byte, int, error) {
+	need := p.bodyLen - p.bodyRead
+	n := min(need, int64(len(b)))
+
+	p.bodyRead += n
+	p.curIdx += n
+	written += int(n)
+	b = b[n:]
+
+	if p.bodyRead >= p.bodyLen {
+		p.finishMessage()
+	}
+	return b, written, nil
+}
+
+// finishMessage completes a message and calls the callback.
+func (p *pgstream) finishMessage() {
+	msgType := pgwire.MsgType(p.header[0])
+	endIdx := p.curIdx
+	startIdx := endIdx - p.bodyLen - 5 // 5 = type + length header
+
+	if p.onMsgComplete != nil {
+		p.onMsgComplete(msgType, startIdx, endIdx)
+	}
+
+	p.resetForNextMessage()
+}
+
+// pgfrontendstream parses client->server messages.
+// Handles startup messages (length + body, no type byte) then normal messages.
+type pgfrontendstream struct {
+	pgstream
+	startup bool // true while in startup phase
+}
+
+// NewFrontendStream creates a parser for client->server messages.
+func NewFrontendStream(onComplete func(pgwire.MsgType, int64, int64)) *pgfrontendstream {
+	return &pgfrontendstream{
+		pgstream: pgstream{onMsgComplete: onComplete},
+		startup:  true,
+	}
+}
+
+// SetNormalPhase transitions to normal message parsing.
+func (p *pgfrontendstream) SetNormalPhase() {
+	p.startup = false
+}
+
+// Write implements io.Writer.
+func (p *pgfrontendstream) Write(b []byte) (int, error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
+	if p.startup {
+		return p.writeStartup(b)
+	}
+	return p.pgstream.Write(b)
+}
+
+// writeStartup handles startup messages: length (4 bytes) + body (no type byte).
+func (p *pgfrontendstream) writeStartup(b []byte) (int, error) {
+	written := 0
+
+	for len(b) > 0 {
+		switch p.state {
+		case pgbufstateIdle:
+			p.state = pgbufstateReadingSize
+			fallthrough
+
+		case pgbufstateReadingSize:
+			var complete bool
+			b, written, complete = p.accumulateHeader(b, written, 4)
+			if !complete {
+				continue
+			}
+
+			bodyLen, err := p.parseLength(0)
+			if err != nil {
+				return written, err
+			}
+
+			p.bodyLen = bodyLen
+			p.bodyRead = 0
+			if p.bodyLen == 0 {
+				p.finishStartupMessage()
+				continue
+			}
+			p.state = pgbufstateReadingBody
+
+		case pgbufstateReadingBody:
+			var err error
+			b, written, err = p.consumeStartupBody(b, written)
+			if err != nil {
+				return written, err
+			}
+
+		default:
+			return written, fmt.Errorf("invalid state: %v", p.state)
+		}
+	}
+	return written, nil
+}
+
+// consumeStartupBody consumes body bytes for startup messages.
+func (p *pgfrontendstream) consumeStartupBody(b []byte, written int) ([]byte, int, error) {
+	need := p.bodyLen - p.bodyRead
+	n := min(need, int64(len(b)))
+
+	p.bodyRead += n
+	p.curIdx += n
+	written += int(n)
+	b = b[n:]
+
+	if p.bodyRead >= p.bodyLen {
+		p.finishStartupMessage()
+	}
+	return b, written, nil
+}
+
+// finishStartupMessage completes a startup message.
+func (p *pgfrontendstream) finishStartupMessage() {
+	endIdx := p.curIdx
+	startIdx := endIdx - p.bodyLen - 4 // 4 = length header only
+
+	if p.onMsgComplete != nil {
+		p.onMsgComplete(pgwire.MsgStartup, startIdx, endIdx)
+	}
+
+	p.resetForNextMessage()
+}
+
+// pgbackendstream parses server->client messages.
+// Handles SSL response ('S'/'N' single byte) then normal messages.
+type pgbackendstream struct {
+	pgstream
+	startup bool // true while in startup phase
+}
+
+// NewBackendStream creates a parser for server->client messages.
+func NewBackendStream(onComplete func(pgwire.MsgType, int64, int64)) *pgbackendstream {
+	return &pgbackendstream{
+		pgstream: pgstream{onMsgComplete: onComplete},
+		startup:  true,
+	}
+}
+
+// SetNormalPhase transitions to normal message parsing.
+func (p *pgbackendstream) SetNormalPhase() {
+	p.startup = false
+}
+
+// Write implements io.Writer.
+func (p *pgbackendstream) Write(b []byte) (int, error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
+	if p.startup {
+		return p.writeStartup(b)
+	}
+	return p.pgstream.Write(b)
+}
+
+// writeStartup handles SSL response detection.
+func (p *pgbackendstream) writeStartup(b []byte) (int, error) {
+	written := 0
+
+	// Check for SSL response (single byte 'S' or 'N')
+	if p.state == pgbufstateIdle {
+		ch := b[0]
+		if ch == 'S' || ch == 'N' {
+			startIdx := p.curIdx
+			p.curIdx++
+			if p.onMsgComplete != nil {
+				p.onMsgComplete(pgwire.MsgType(ch), startIdx, p.curIdx)
+			}
+			b = b[1:]
+			written++
+			if len(b) == 0 {
+				return written, nil
+			}
+		}
+		// Not an SSL response - switch to normal phase
+		p.startup = false
+	}
+
+	// Continue with normal message parsing
+	n, err := p.pgstream.Write(b)
+	return written + n, err
 }
