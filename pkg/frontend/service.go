@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgerrcode"
-	"github.com/jackc/pgx/v5/pgproto3"
 
 	"github.com/justjake/pglink/pkg/backend"
 	"github.com/justjake/pglink/pkg/config"
@@ -398,22 +397,10 @@ func (s *Service) connHandler(ctx context.Context, conn *pgserver.ClientConn) er
 	s.activeConns.Add(1)
 	defer s.activeConns.Add(-1)
 
-	// Send startup messages BEFORE creating pgproxy.Session
-	// (pgproxy.Session will take ownership of the connection and start a ring buffer)
-	conn.Frontend.Send(&pgproto3.BackendKeyData{
-		ProcessID: uint32(conn.ProcessID),
-		SecretKey: uint32(conn.SecretKey),
-	})
-	for key, value := range conn.StartupParameters {
-		conn.Frontend.Send(&pgproto3.ParameterStatus{
-			Name:  key,
-			Value: value,
-		})
-	}
-	conn.Frontend.Send(&pgproto3.ReadyForQuery{TxStatus: byte(pgwire.TxIdle)})
-	if err := conn.Frontend.Flush(); err != nil {
-		return fmt.Errorf("failed to send startup messages: %w", err)
-	}
+	// NOTE: Startup messages (ParameterStatus, BackendKeyData, ReadyForQuery) are
+	// already sent by pgserver.sendStartupMessages() before this handler is called.
+	// Do NOT send them again here - duplicate ReadyForQuery causes pgx to misparse
+	// Prepare responses.
 
 	// Run the pgproxy-based proxy loop
 	return s.runProxyLoop(ctx, conn, authData)

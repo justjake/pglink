@@ -647,6 +647,14 @@ func (ps *proxyState) handleServerError(ctx context.Context, pos pgproxy.Pos, ms
 // ============================================================================
 
 func (ps *proxyState) acquireBackend(ctx context.Context) (pgproxy.Backend, error) {
+	// Return existing backend if already acquired.
+	// This is important because Session.AcquireBackend may call this callback
+	// during restoreVariables or message forwarding, and we must return the
+	// same backend to avoid acquiring multiple connections from the pool.
+	if ps.pooledBackend != nil {
+		return ps.pooledBackend, nil
+	}
+
 	acquireCtx, cancel := context.WithTimeout(ctx, ps.dbConfig.PoolAcquireTimeout())
 	// DON'T defer cancel() - call it explicitly BEFORE restoreVariables
 	// to avoid pgconn setting deadline when context is cancelled
