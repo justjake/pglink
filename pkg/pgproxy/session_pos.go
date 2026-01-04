@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgerrcode"
 	"github.com/justjake/pglink/pkg/pgwire"
+	"github.com/justjake/pglink/pkg/pure"
 )
 
 var ErrPosAlreadyHandled = errors.New("pos already handled")
@@ -210,8 +211,9 @@ func (p *pos) Rewrite(ctx context.Context, rewritten pgwire.Message) error {
 	return p.session.QueueSend(ctx, rewritten)
 }
 
-func (p *pos) Dispatch(ctx context.Context, action Action) error {
+func (p *pos) Dispatch(ctx context.Context, action Action) (err error) {
 	unwrapped := action.unwrap()
+
 	if unwrapped.incoming != nil {
 		if unwrapped.incoming.Source() != p.RingMsg {
 			return fmt.Errorf("%w: %v: action source %v != pos %v", ErrPosActionMismatch, action, unwrapped.incoming.Source(), p.RingMsg)
@@ -219,8 +221,39 @@ func (p *pos) Dispatch(ctx context.Context, action Action) error {
 	}
 
 	p.Logger().Debug("dispatch", "action", action)
+	if unwrapped.responseHandler != nil {
+		panic(fmt.Errorf("dispatch %v: response handler not implemented yet", action))
+	}
 
-	// TODO: effects? or are we getting rid of those?
+	defer func() {
+		if err != nil {
+			p.Logger().Error("dispatch", "action", action, "error", err)
+		} else {
+			// TODO: possibly remove effect concept entirely.
+			// New code should not use effects.
+			var errs []error
+			var cleanupEffects []pure.Effect
+			for _, effect := range unwrapped.effects {
+				cleanup, effectErr := effect.Apply(ctx)
+				if effectErr != nil {
+					errs = append(errs, effectErr)
+				}
+				if cleanup != nil {
+					cleanupEffects = append(cleanupEffects, cleanup)
+				}
+			}
+
+			if len(errs) > 0 {
+				err = fmt.Errorf("dispatch %v: effect error: %w", action, errors.Join(errs...))
+				for _, cleanup := range cleanupEffects {
+					_, cleanupErr := cleanup.Apply(ctx)
+					if cleanupErr != nil {
+						p.Logger().Error("ignored effect rollback error", "rollback", cleanup, "error", cleanupErr, "cause", err)
+					}
+				}
+			}
+		}
+	}()
 
 	switch unwrapped.t {
 	case ProxyForward:

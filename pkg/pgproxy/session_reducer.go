@@ -9,11 +9,14 @@ import (
 type WithAction[S any] struct {
 	State  S
 	Action Action
+	Ctx    context.Context
 }
 
 type SessionReducer[S any] = pure.Reducer[WithAction[S], Pos]
 
-func ReduceSessionMessages[S any](ctx context.Context, session *Session, reducer SessionReducer[S], state S) (S, error) {
+// RunSessionReducer provides a functional approach to writing proxy logic.
+// It runs the reducer for each message in the session, and dispatches the returned action.
+func RunSessionReducer[S any](ctx context.Context, session *Session, reducer SessionReducer[S], state S) (S, error) {
 	for {
 		pos, err := session.Next(ctx)
 		if err != nil {
@@ -26,10 +29,16 @@ func ReduceSessionMessages[S any](ctx context.Context, session *Session, reducer
 		}
 
 		if changed {
+			if newState.Ctx != nil {
+				ctx = newState.Ctx
+			}
 			reducer = newReducer
 			state = newState.State
 		}
 
-		// pos.SetAction(newState.Action)
+		actionErr := pos.Dispatch(pos.Ctx(), newState.Action)
+		if actionErr != nil {
+			return state, actionErr
+		}
 	}
 }

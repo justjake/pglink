@@ -19,24 +19,41 @@ var ErrSessionClosed = errors.New("session closed")
 var ErrBackendNotAcquired = errors.New("backend not acquired")
 var noHealthCheckChan = make(chan time.Time)
 
+// MessageTracker is a pluggable mechanism for tracking state as messages are processed.
 type MessageTracker interface {
+	// TrackMessage tracks the message.
+	// The tracker may return a modified context for tracing.
 	TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error)
 }
 
+// Conn represents a connection to a frontend (client) or backend (server).
 type Conn interface {
+	// AcquireNetConn takes exclusive ownership of the Conn's underlying net.Conn.
+	// While acquired, Conn should not attempt to use the net.Conn.
+	// It should return an error if the net.Conn is already acquired.
 	AcquireNetConn(ctx context.Context) (net.Conn, error)
+	// ReleaseNetConn releases the net.Conn back to the Conn.
+	// It should return an error if the net.Conn is not acquired.
 	ReleaseNetConn() error
+	// Terminate terminates the connection.
+	// The implementation may handle `err` as it sees fit, although typically the proxy already sends a termination message.
 	Terminate(ctx context.Context, err error) error
+	// MessageTrackers returns the trackers for messages read from or written to the connection,
+	// that must be updated for the Conn's internal state to stay valid.
 	MessageTrackers() []MessageTracker
 	fmt.Stringer
 }
 
+// Frontend represents a connection to a client.
 type Frontend interface {
 	Conn
 }
 
+// Backend represents a connection to a server.
 type Backend interface {
 	Conn
+	// Release releases the backend connection back to some underlying pool.
+	// It is expected that calling backend methods after Release may panic.
 	Release()
 }
 
@@ -115,8 +132,17 @@ type Session struct {
 	logger    *slog.Logger
 }
 
+// NewSession creates a new session.
+// The provided `ctx` is expected to be valid for the lifetime of the session.
+// However, you must always call [Session.Close] if NewSession returns successfully, do not rely on context cancellation.
 func NewSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	session := &Session{cfg: cfg}
+	if cfg.Frontend == nil {
+		return nil, fmt.Errorf("Frontend is required")
+	}
+	if cfg.AcquireBackend == nil {
+		return nil, fmt.Errorf("AcquireBackend is required")
+	}
 
 	clientNetConn, err := cfg.Frontend.AcquireNetConn(ctx)
 	if err != nil {

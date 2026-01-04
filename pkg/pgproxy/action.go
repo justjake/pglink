@@ -108,6 +108,7 @@ func (a *action) Err() error {
 	return a.err
 }
 
+// WithEffects is deprecated. We are considering removing the effects concept entirely.
 func (a *action) WithEffects(effects ...pure.Effect) Action {
 	if len(effects) == 0 {
 		return a

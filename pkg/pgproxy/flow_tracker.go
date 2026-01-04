@@ -19,9 +19,12 @@ type ClientFlowReducers[T any] = pgwire.ClientHandlers[MessageFlowState[T], Mess
 type FlowTracker[T any] interface {
 	Flow() (T, bool)
 	Active() bool
+	TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error)
 	TrackEffect(msg pgwire.Message) pure.Effect
 	ResetEffect() pure.Effect
 }
+
+var _ MessageTracker = (FlowTracker[any])(nil)
 
 type FlowState[T any] struct {
 	// Should be set by the flow reducer.
@@ -92,6 +95,11 @@ func (t *flowTracker[T]) ResetEffect() pure.Effect {
 		t.reset()
 		return cleanup, nil
 	})
+}
+
+func (t *flowTracker[T]) TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error) {
+	_, err := t.updateNow(ctx, msg)
+	return ctx, err
 }
 
 func (t *flowTracker[T]) updateNow(ctx context.Context, msg pgwire.Message) (bool, error) {
