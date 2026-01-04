@@ -95,10 +95,12 @@ type pos struct {
 
 // var _ Pos = (*pos)(nil)
 
-func (p *pos) reset(cursor *pgwire.Cursor, from ProxyRole) {
+func (p *pos) reset(session *Session, cursor *pgwire.Cursor, from ProxyRole) {
+	p.session = session
 	p.Cursor = cursor
 	p.RingMsg = &cursor.RingMsg
 	p.from = from
+	p.baseLogger = session.Logger()
 	p.logger = nil
 	p.handled = false
 }

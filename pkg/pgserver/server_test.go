@@ -2,9 +2,9 @@ package pgserver
 
 import (
 	"context"
-	crand "crypto/rand"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	crand "crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -455,9 +455,9 @@ func TestPeekedConn_SingleByteRead(t *testing.T) {
 
 func TestIsTLSHandshake(t *testing.T) {
 	tests := []struct {
-		name     string
+		name      string
 		firstByte byte
-		wantTLS  bool
+		wantTLS   bool
 	}{
 		{"TLS ClientHello", 0x16, true},
 		{"PostgreSQL StartupMessage", 0x00, false},

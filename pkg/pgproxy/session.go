@@ -478,12 +478,12 @@ func (s *Session) getCursor(from ProxyRole) *pgwire.Cursor {
 }
 
 func (s *Session) resetClientPos() *pos {
-	s.clientPos.reset(s.clientCursor, RoleClient)
+	s.clientPos.reset(s, s.clientCursor, RoleClient)
 	return &s.clientPos
 }
 
 func (s *Session) resetBackendPos() *pos {
-	s.backendPos.reset(s.backendCursor, RoleServer)
+	s.backendPos.reset(s, s.backendCursor, RoleServer)
 	return &s.backendPos
 }
 
