@@ -9,3 +9,28 @@ go run ./cmd/doc "$@"
 # Copy README.md to cmd/pglink for embedding
 cp README.md cmd/pglink/README.md
 echo "Copied README.md to cmd/pglink/README.md for embedding"
+
+# If stdout is a TTY, start a doc server and open the browser
+if [ -t 1 ]; then
+    PORT="${PORT:-6060}"
+    URL="http://localhost:$PORT/github.com/justjake/pglink"
+
+    echo "Starting pkgsite on port $PORT..."
+
+    # Start pkgsite in background
+    go run golang.org/x/pkgsite/cmd/pkgsite@latest -http=":$PORT" . &
+    PKGSITE_PID=$!
+
+    # Give it a moment to start (or fail)
+    sleep 1
+
+    # Only open browser if pkgsite is still running
+    if kill -0 "$PKGSITE_PID" 2>/dev/null; then
+        echo "Opening $URL"
+        open "$URL"
+        wait "$PKGSITE_PID"
+    else
+        echo "pkgsite failed to start"
+        exit 1
+    fi
+fi

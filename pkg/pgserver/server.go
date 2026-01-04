@@ -310,6 +310,7 @@ func (s *Server) Serve(l net.Listener) error {
 		if cc := s.ConnContext; cc != nil {
 			newCtx, err := cc(ctx, rawConn)
 			if err != nil {
+				rawConn.Close() // Close rejected connection
 				err = fmt.Errorf("%w: %w", ErrValidateFailed, err)
 				updateTempDelay()
 				connLogger.Error("rejected conn", "error", err, "retryDelay", tempDelay)
@@ -502,6 +503,13 @@ func (c *conn) serve(ctx context.Context) {
 		return
 	}
 
+	// Send startup completion messages to client
+	if err := c.sendStartupMessages(startupCtx, startedConn); err != nil {
+		c.logger.Error("startup error", "error", err)
+		c.sendErr(err)
+		return
+	}
+
 	key, err := s.ConnMap.Add(startedConn)
 	if err != nil {
 		c.logger.Error("startup error", "error", err)
@@ -546,7 +554,8 @@ loop:
 			return nil, nil, ctxErr
 		}
 
-		msg, err := frontend.ReceiveStartupMessage()
+		var msg pgproto3.FrontendMessage
+		msg, err = frontend.ReceiveStartupMessage()
 		if err != nil {
 			return nil, nil, pgwire.NewProtocolViolation(fmt.Errorf("%w: reading first message: %w", ErrStartupFailed, err), nil)
 		}
@@ -583,7 +592,9 @@ loop:
 			break loop
 		case *pgproto3.StartupMessage:
 			c.frontend = frontend
-			if s.TLSConfig != nil && !s.TLSOptional {
+			// Reject plaintext connections when TLS is required.
+			// c.tls is set by updateToTLS() when TLS handshake completes (via SSLRequest or fast-start).
+			if s.TLSConfig != nil && !s.TLSOptional && c.tls == nil {
 				err = pgwire.NewProtocolViolation(fmt.Errorf("%w: TLS required", ErrTLSFailed), pgwire.Client(msg))
 				break loop
 			}
@@ -668,6 +679,31 @@ func (c *conn) updateToTLS(ctx context.Context, conn net.Conn) (*tls.Conn, error
 	c.logger.Debug("TLS handshake completed")
 	c.tls = tlsConn
 	return tlsConn, nil
+}
+
+// sendStartupMessages sends the ParameterStatus, BackendKeyData, and ReadyForQuery messages
+// that complete the PostgreSQL startup sequence.
+func (c *conn) sendStartupMessages(ctx context.Context, conn *ClientConn) error {
+	// Send ParameterStatus messages
+	for key, value := range conn.StartupParameters {
+		c.frontend.Send(&pgproto3.ParameterStatus{Name: key, Value: value})
+	}
+
+	// Send BackendKeyData
+	c.frontend.Send(&pgproto3.BackendKeyData{
+		ProcessID: uint32(conn.ProcessID),
+		SecretKey: uint32(conn.SecretKey),
+	})
+
+	// Send ReadyForQuery
+	c.frontend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+
+	// Flush all messages
+	if err := c.frontend.Flush(); err != nil {
+		return fmt.Errorf("%w: sending startup messages: %w", ErrStartupFailed, err)
+	}
+
+	return nil
 }
 
 func (c *conn) sendErr(err error) {

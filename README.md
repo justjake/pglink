@@ -129,6 +129,12 @@ A single database that clients can connect to.
 | `backend` | [BackendConfig](#backendconfig) | Yes | The PostgreSQL server to proxy connections to. |
 | `pool_acquire_timeout_milliseconds` | integer | No | PoolAcquireTimeout specifies the max time to wait for a connection from the backend connection pool. Default: `1` |
 | `track_extra_parameters` | []string | No | A list of additional PostgreSQL startup parameters to track and forward to the backend. By default, only standard parameters like client_encoding and application_name are tracked. |
+| `message_buffer_bytes` | ByteSize | No | The byte capacity for the ring buffer used to proxy messages between client and server. Must be a power of 2: 4KiB, 8KiB, 16KiB, 32KiB, 64KiB, 128KiB, 256KiB, 512KiB, 1MiB. Default: `"16KiB"` |
+| `prepared_statement_cache_size` | integer | No | The maximum number of prepared statements to cache per database for statement reuse across backend connections. This enables transaction-mode pooling to work with extended query protocol. Set to 0 to disable caching. Default: `10` |
+| `query_timeout` | Duration | No | The maximum time a query can execute before being terminated. Uses Go duration format: "30s", "5m", "500ms". Default: 0 (disabled). PgBouncer behavior (query_timeout): - Timer starts: When client sends Query/Sync message (client.c:1594-1596) - Timer resets: When server sends ReadyForQuery AND outstanding_requests==0 (server.c:579-585) - Timeout check: Only when server not ready (!server->ready), using age = now - client->request_time - Action: disconnect_server() - sends error to client, Terminate to backend, closes both - COPY: NOT suspended - long COPY operations CAN timeout pglink behavior: - Timer starts: When RequestFlow starts (PushRequest called for first request in flow) - Timer resets: When ReadyForQuery received and ActiveRequestFlow becomes nil - Timeout check: Only when ActiveRequestFlow != nil, using flow.StartTime - Action: Configurable via `timeout_action` - COPY: NOT suspended (matches pgbouncer) - Pipelining: Timeout covers entire pipeline from first request to final ReadyForQuery |
+| `idle_transaction_timeout` | Duration | No | The maximum time a session can be idle in a transaction. Uses Go duration format: "30s", "5m", "500ms". Default: 0 (disabled). PgBouncer behavior (idle_transaction_timeout): - Timer starts: When server sends ReadyForQuery with 'T' or 'E' (idle_tx=true, server.c:396) - Timer resets: When client sends next query (client->request_time updated) - Timeout check: Only when server->idle_tx==true AND not ready, using age = now - server->request_time - Action: disconnect_server() pglink behavior: - Timer starts: When ReadyForQuery received (LastReadyForQueryTime set on ALL ReadyForQuery) - Timer resets: When client sends query (ActiveRequestFlow becomes non-nil) - Timeout check: Only when TxStatus in {'T','E'} AND ActiveRequestFlow==nil - Action: Configurable via `timeout_action` - Note: LastReadyForQueryTime set unconditionally; check condition filters by TxStatus |
+| `transaction_timeout` | Duration | No | The maximum total time for a transaction. Uses Go duration format: "30s", "5m", "500ms". Default: 0 (disabled). PgBouncer behavior (transaction_timeout): - Timer starts: When client sends first query (xact_start = query_start, client.c:1600-1602) - Timer resets: When server sends ReadyForQuery with 'I' (xact_start=0, server.c:596-599) - Timer persists: Through ReadyForQuery with 'T'/'E' - stays set during transaction - Timeout check: When not ready, using age = now - client->xact_start - Action: disconnect_server() pglink behavior: - Timer starts: When RequestFlow starts AND TxStartTime is zero (first query of potential tx) - Timer resets: When ReadyForQuery received with TxStatus 'I' - Timer persists: Through ReadyForQuery with 'T'/'E' - TxStartTime kept - Timeout check: When TxStartTime != zero - Action: Configurable via `timeout_action` |
+| `timeout_action` | TimeoutAction | No | What to do when a timeout fires. Default: "terminate" "terminate": Send error to client, close both connections. Matches pgbouncer behavior exactly. Simple and works even if backend is unresponsive. Backend may continue executing query until it notices connection closed. |
 
 
 ### UserConfig
@@ -171,7 +177,6 @@ The backend PostgreSQL server to proxy to.
 | `sslpassword` | string | No | The password for the encrypted client private key. |
 | `statement_cache_capacity` | integer | No | The prepared statement cache size. Set to 0 to disable caching. Default: `512` |
 | `description_cache_capacity` | integer | No | The statement description cache size. Set to 0 to disable caching. Default: `512` |
-| `prepared_statement_cache_size` | integer | No | The maximum number of prepared statements to cache per database for statement reuse across backend connections. This is pglink's own cache, separate from pgx's statement cache. Set to 0 to disable caching. Default: `1000` |
 | `pool_max_conns` | integer | Yes | The maximum number of connections in the pool. This is required and must be greater than 0. |
 | `pool_min_idle_conns` | integer | No | The minimum number of idle connections to maintain. The total across all users must not exceed `pool_max_conns`. |
 | `pool_max_conn_lifetime` | string | No | The maximum lifetime of a connection (e.g., "1h"). Connections older than this are closed and replaced. |
@@ -211,6 +216,16 @@ Automatic snapshot triggers.
 | `cooldown` | Duration | No | The minimum time between automatic trigger captures. This prevents flooding with snapshots during sustained issues. Does not affect manual triggers (signal, HTTP). Default: "60s". |
 
 
+### OTLPLogsConfig
+
+OTLP log export (e.g., to Loki 3.0+).
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `enabled` | boolean | Yes | Whether logs are exported via OTLP. |
+| `endpoint` | string | No | Endpoint for OTLP logs (e.g., "http://localhost:13100/otlp" for Loki). If empty, uses the main OTLPEndpoint. |
+
+
 ### OpenTelemetryConfig
 
 `opentelemetry` distributed tracing.
@@ -226,6 +241,8 @@ Automatic snapshot triggers.
 | `traceparent_startup_parameter` | string | No | The name of the startup parameter used to pass W3C trace context from clients. Default: "traceparent". |
 | `traceparent_sql_regex` | BoolOrString | Yes | Extraction of W3C trace context from SQL comments. - true: use default regex /*traceparent='([^']+)'*/ - false: disable SQL comment extraction - string: custom regex with capture group for traceparent value This field is REQUIRED when `opentelemetry` is enabled. |
 | `application_name_sql_regex` | BoolOrString | No | `application_name_sql_regex` extracts per-query application_name from SQL. - true: use default regex matching comments and SET statements - false: disable (default) - string: custom regex with capture group for application_name value |
+| `extra_attributes` | map[string]string | No | Additional resource attributes to all spans. Format: key=value pairs. Useful for tagging traces with bench_id, git info, etc. Example: {"bench_id": "abc123", "git.sha": "d2169b0", "target": "pglink"} |
+| `logs` | OTLPLogsConfig | No | OTLP log export (e.g., to Loki 3.0+). |
 
 
 ### PrometheusConfig
@@ -237,6 +254,19 @@ If this config is present in the config file, Prometheus metrics are enabled.
 |-------|------|----------|-------------|
 | `listen` | string | No | The address to listen on for the metrics HTTP server. Format: "host:port" or ":port" Default: ":9090" |
 | `path` | string | No | The HTTP path for the metrics endpoint. Default: "/metrics" |
+| `push` | PrometheusPushConfig | No | Push-based metrics export to Prometheus remote-write endpoint. When set, metrics are pushed to the endpoint in addition to being exposed via HTTP. |
+| `extra_labels` | map[string]string | No | Additional labels to all metrics. Useful for tagging metrics with bench_id, git info, target, etc. Example: {"bench_id": "abc123", "git_sha": "d2169b0", "target": "pglink"} |
+| `pgbouncer_exporter_metric_names` | boolean | No | The metric name prefix. When false (default), metrics use "pglink_" prefix (e.g., pglink_stats_queries_total). When true, metrics use "pgbouncer_" prefix (e.g., pgbouncer_stats_queries_total) for drop-in compatibility with existing pgbouncer_exporter dashboards. |
+
+
+### PrometheusPushConfig
+
+Push-based metrics export to Prometheus remote-write endpoint.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `endpoint` | string | Yes | The Prometheus remote-write endpoint URL. Example: "http://localhost:19090/api/v1/write" |
+| `push_interval` | Duration | No | How often to push metrics. Default: 10s. |
 
 
 
@@ -263,6 +293,15 @@ These mirror PostgreSQL's sslmode settings but apply to the proxy as a server.
 | `allow` | Both TLS and plaintext connections are accepted from clients. |
 | `prefer` | TLS is preferred but plaintext connections are accepted if the client doesn't support TLS. |
 | `require` | TLS is required for all connections. Plaintext connections are rejected. |
+
+
+### TimeoutAction
+
+TimeoutAction specifies the action to take when a timeout fires.
+
+| Value | Description |
+|-------|-------------|
+| `terminate` | TimeoutActionTerminate sends error to client, closes both connections. This matches pgbouncer's behavior exactly. |
 
 
 ## License

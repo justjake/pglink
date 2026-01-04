@@ -41,6 +41,9 @@ func (c *ConnMap) Add(conn *ClientConn) (ConnKey, error) {
 	key := c.key(conn)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.conns == nil {
+		c.conns = make(map[ConnKey]*ClientConn)
+	}
 	if _, ok := c.conns[key]; ok {
 		return ConnKey{}, fmt.Errorf("%w: ProcessId=%v SecretKey=<redacted>", ErrConnAlreadyExists, key.ProcessID)
 	}
