@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync/atomic"
 
 	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/justjake/pglink/pkg/config"
@@ -89,6 +91,12 @@ func (d *Database) poolConfigForUser(ctx context.Context, user config.UserConfig
 	// Set tracer if enabled (uses global tracer provider set by observability.NewTracerProvider)
 	if d.tracingEnabled {
 		cfg.ConnConfig.Tracer = otelpgx.NewTracer()
+	}
+
+	// Wrap net.Conn with deadline tracing for debugging.
+	// This helps identify where deadlines are being set unexpectedly.
+	cfg.ConnConfig.AfterNetConnect = func(ctx context.Context, pgcfg *pgconn.Config, conn net.Conn) (net.Conn, error) {
+		return pgwire.NewDeadlineTraceConn(conn, d.logger.With("backend", d.Name(), "user", username)), nil
 	}
 
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {

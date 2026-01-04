@@ -36,9 +36,8 @@ var (
 // ServerAuthenticationCleartextPassword wraps *pgproto3.AuthenticationCleartextPassword from the server.
 type ServerAuthenticationCleartextPassword FromServer[*pgproto3.AuthenticationCleartextPassword]
 
-func (*ServerAuthenticationCleartextPassword) Server()            {}
-func (*ServerAuthenticationCleartextPassword) Startup()           {}
-func (t *ServerAuthenticationCleartextPassword) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerAuthenticationCleartextPassword) Server()  {}
+func (*ServerAuthenticationCleartextPassword) Startup() {}
 func (m *ServerAuthenticationCleartextPassword) Parse() *pgproto3.AuthenticationCleartextPassword {
 	return (*FromServer[*pgproto3.AuthenticationCleartextPassword])(m).Parse()
 }
@@ -59,9 +58,8 @@ func (m ServerAuthenticationCleartextPassword) Retain() ServerAuthenticationClea
 // ServerAuthenticationGSS wraps *pgproto3.AuthenticationGSS from the server.
 type ServerAuthenticationGSS FromServer[*pgproto3.AuthenticationGSS]
 
-func (*ServerAuthenticationGSS) Server()            {}
-func (*ServerAuthenticationGSS) Startup()           {}
-func (t *ServerAuthenticationGSS) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerAuthenticationGSS) Server()  {}
+func (*ServerAuthenticationGSS) Startup() {}
 func (m *ServerAuthenticationGSS) Parse() *pgproto3.AuthenticationGSS {
 	return (*FromServer[*pgproto3.AuthenticationGSS])(m).Parse()
 }
@@ -80,9 +78,8 @@ func (m ServerAuthenticationGSS) Retain() ServerAuthenticationGSS {
 // ServerAuthenticationGSSContinue wraps *pgproto3.AuthenticationGSSContinue from the server.
 type ServerAuthenticationGSSContinue FromServer[*pgproto3.AuthenticationGSSContinue]
 
-func (*ServerAuthenticationGSSContinue) Server()            {}
-func (*ServerAuthenticationGSSContinue) Startup()           {}
-func (t *ServerAuthenticationGSSContinue) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerAuthenticationGSSContinue) Server()  {}
+func (*ServerAuthenticationGSSContinue) Startup() {}
 func (m *ServerAuthenticationGSSContinue) Parse() *pgproto3.AuthenticationGSSContinue {
 	return (*FromServer[*pgproto3.AuthenticationGSSContinue])(m).Parse()
 }
@@ -101,9 +98,8 @@ func (m ServerAuthenticationGSSContinue) Retain() ServerAuthenticationGSSContinu
 // ServerAuthenticationMD5Password wraps *pgproto3.AuthenticationMD5Password from the server.
 type ServerAuthenticationMD5Password FromServer[*pgproto3.AuthenticationMD5Password]
 
-func (*ServerAuthenticationMD5Password) Server()            {}
-func (*ServerAuthenticationMD5Password) Startup()           {}
-func (t *ServerAuthenticationMD5Password) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerAuthenticationMD5Password) Server()  {}
+func (*ServerAuthenticationMD5Password) Startup() {}
 func (m *ServerAuthenticationMD5Password) Parse() *pgproto3.AuthenticationMD5Password {
 	return (*FromServer[*pgproto3.AuthenticationMD5Password])(m).Parse()
 }
@@ -122,9 +118,8 @@ func (m ServerAuthenticationMD5Password) Retain() ServerAuthenticationMD5Passwor
 // ServerAuthenticationOk wraps *pgproto3.AuthenticationOk from the server.
 type ServerAuthenticationOk FromServer[*pgproto3.AuthenticationOk]
 
-func (*ServerAuthenticationOk) Server()            {}
-func (*ServerAuthenticationOk) Startup()           {}
-func (t *ServerAuthenticationOk) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerAuthenticationOk) Server()  {}
+func (*ServerAuthenticationOk) Startup() {}
 func (m *ServerAuthenticationOk) Parse() *pgproto3.AuthenticationOk {
 	return (*FromServer[*pgproto3.AuthenticationOk])(m).Parse()
 }
@@ -143,9 +138,8 @@ func (m ServerAuthenticationOk) Retain() ServerAuthenticationOk {
 // ServerAuthenticationSASL wraps *pgproto3.AuthenticationSASL from the server.
 type ServerAuthenticationSASL FromServer[*pgproto3.AuthenticationSASL]
 
-func (*ServerAuthenticationSASL) Server()            {}
-func (*ServerAuthenticationSASL) Startup()           {}
-func (t *ServerAuthenticationSASL) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerAuthenticationSASL) Server()  {}
+func (*ServerAuthenticationSASL) Startup() {}
 func (m *ServerAuthenticationSASL) Parse() *pgproto3.AuthenticationSASL {
 	return (*FromServer[*pgproto3.AuthenticationSASL])(m).Parse()
 }
@@ -164,9 +158,8 @@ func (m ServerAuthenticationSASL) Retain() ServerAuthenticationSASL {
 // ServerAuthenticationSASLContinue wraps *pgproto3.AuthenticationSASLContinue from the server.
 type ServerAuthenticationSASLContinue FromServer[*pgproto3.AuthenticationSASLContinue]
 
-func (*ServerAuthenticationSASLContinue) Server()            {}
-func (*ServerAuthenticationSASLContinue) Startup()           {}
-func (t *ServerAuthenticationSASLContinue) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerAuthenticationSASLContinue) Server()  {}
+func (*ServerAuthenticationSASLContinue) Startup() {}
 func (m *ServerAuthenticationSASLContinue) Parse() *pgproto3.AuthenticationSASLContinue {
 	return (*FromServer[*pgproto3.AuthenticationSASLContinue])(m).Parse()
 }
@@ -185,9 +178,8 @@ func (m ServerAuthenticationSASLContinue) Retain() ServerAuthenticationSASLConti
 // ServerAuthenticationSASLFinal wraps *pgproto3.AuthenticationSASLFinal from the server.
 type ServerAuthenticationSASLFinal FromServer[*pgproto3.AuthenticationSASLFinal]
 
-func (*ServerAuthenticationSASLFinal) Server()            {}
-func (*ServerAuthenticationSASLFinal) Startup()           {}
-func (t *ServerAuthenticationSASLFinal) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerAuthenticationSASLFinal) Server()  {}
+func (*ServerAuthenticationSASLFinal) Startup() {}
 func (m *ServerAuthenticationSASLFinal) Parse() *pgproto3.AuthenticationSASLFinal {
 	return (*FromServer[*pgproto3.AuthenticationSASLFinal])(m).Parse()
 }
@@ -207,9 +199,8 @@ func (m ServerAuthenticationSASLFinal) Retain() ServerAuthenticationSASLFinal {
 // This should be already captured when we establish the connection.
 type ServerBackendKeyData FromServer[*pgproto3.BackendKeyData]
 
-func (*ServerBackendKeyData) Server()            {}
-func (*ServerBackendKeyData) Startup()           {}
-func (t *ServerBackendKeyData) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerBackendKeyData) Server()  {}
+func (*ServerBackendKeyData) Startup() {}
 func (m *ServerBackendKeyData) Parse() *pgproto3.BackendKeyData {
 	return (*FromServer[*pgproto3.BackendKeyData])(m).Parse()
 }
@@ -434,9 +425,8 @@ var (
 // Response to Parse.
 type ServerParseComplete FromServer[*pgproto3.ParseComplete]
 
-func (*ServerParseComplete) Server()            {}
-func (*ServerParseComplete) ExtendedQuery()     {}
-func (t *ServerParseComplete) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerParseComplete) Server()        {}
+func (*ServerParseComplete) ExtendedQuery() {}
 func (m *ServerParseComplete) Parse() *pgproto3.ParseComplete {
 	return (*FromServer[*pgproto3.ParseComplete])(m).Parse()
 }
@@ -455,9 +445,8 @@ func (m ServerParseComplete) Retain() ServerParseComplete {
 // Response to Bind.
 type ServerBindComplete FromServer[*pgproto3.BindComplete]
 
-func (*ServerBindComplete) Server()            {}
-func (*ServerBindComplete) ExtendedQuery()     {}
-func (t *ServerBindComplete) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerBindComplete) Server()        {}
+func (*ServerBindComplete) ExtendedQuery() {}
 func (m *ServerBindComplete) Parse() *pgproto3.BindComplete {
 	return (*FromServer[*pgproto3.BindComplete])(m).Parse()
 }
@@ -476,9 +465,8 @@ func (m ServerBindComplete) Retain() ServerBindComplete {
 // Response to Describe of prepared statement.
 type ServerParameterDescription FromServer[*pgproto3.ParameterDescription]
 
-func (*ServerParameterDescription) Server()            {}
-func (*ServerParameterDescription) ExtendedQuery()     {}
-func (t *ServerParameterDescription) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerParameterDescription) Server()        {}
+func (*ServerParameterDescription) ExtendedQuery() {}
 func (m *ServerParameterDescription) Parse() *pgproto3.ParameterDescription {
 	return (*FromServer[*pgproto3.ParameterDescription])(m).Parse()
 }
@@ -497,9 +485,8 @@ func (m ServerParameterDescription) Retain() ServerParameterDescription {
 // Response to Describe of portal or statement that returns data.
 type ServerRowDescription FromServer[*pgproto3.RowDescription]
 
-func (*ServerRowDescription) Server()            {}
-func (*ServerRowDescription) ExtendedQuery()     {}
-func (t *ServerRowDescription) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerRowDescription) Server()        {}
+func (*ServerRowDescription) ExtendedQuery() {}
 func (m *ServerRowDescription) Parse() *pgproto3.RowDescription {
 	return (*FromServer[*pgproto3.RowDescription])(m).Parse()
 }
@@ -520,7 +507,6 @@ type ServerNoData FromServer[*pgproto3.NoData]
 
 func (*ServerNoData) Server()                                 {}
 func (*ServerNoData) ExtendedQuery()                          {}
-func (t *ServerNoData) MsgType() MsgType                      { return t.source.MessageType() }
 func (m *ServerNoData) Parse() *pgproto3.NoData               { return (*FromServer[*pgproto3.NoData])(m).Parse() }
 func (m *ServerNoData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerNoData) Source() RawMessageSource              { return m.source }
@@ -538,9 +524,8 @@ func (m ServerNoData) Retain() ServerNoData {
 // complete during the Execute call, the client should call Execute again.
 type ServerPortalSuspended FromServer[*pgproto3.PortalSuspended]
 
-func (*ServerPortalSuspended) Server()            {}
-func (*ServerPortalSuspended) ExtendedQuery()     {}
-func (t *ServerPortalSuspended) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerPortalSuspended) Server()        {}
+func (*ServerPortalSuspended) ExtendedQuery() {}
 func (m *ServerPortalSuspended) Parse() *pgproto3.PortalSuspended {
 	return (*FromServer[*pgproto3.PortalSuspended])(m).Parse()
 }
@@ -559,9 +544,8 @@ func (m ServerPortalSuspended) Retain() ServerPortalSuspended {
 // Response to Close of prepared statement or portal.
 type ServerCloseComplete FromServer[*pgproto3.CloseComplete]
 
-func (*ServerCloseComplete) Server()            {}
-func (*ServerCloseComplete) ExtendedQuery()     {}
-func (t *ServerCloseComplete) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerCloseComplete) Server()        {}
+func (*ServerCloseComplete) ExtendedQuery() {}
 func (m *ServerCloseComplete) Parse() *pgproto3.CloseComplete {
 	return (*FromServer[*pgproto3.CloseComplete])(m).Parse()
 }
@@ -758,9 +742,8 @@ var (
 // Starts CopyIn mode.
 type ServerCopyInResponse FromServer[*pgproto3.CopyInResponse]
 
-func (*ServerCopyInResponse) Server()            {}
-func (*ServerCopyInResponse) Copy()              {}
-func (t *ServerCopyInResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerCopyInResponse) Server() {}
+func (*ServerCopyInResponse) Copy()   {}
 func (m *ServerCopyInResponse) Parse() *pgproto3.CopyInResponse {
 	return (*FromServer[*pgproto3.CopyInResponse])(m).Parse()
 }
@@ -781,9 +764,8 @@ func (m ServerCopyInResponse) Retain() ServerCopyInResponse {
 // Starts CopyOut mode.
 type ServerCopyOutResponse FromServer[*pgproto3.CopyOutResponse]
 
-func (*ServerCopyOutResponse) Server()            {}
-func (*ServerCopyOutResponse) Copy()              {}
-func (t *ServerCopyOutResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerCopyOutResponse) Server() {}
+func (*ServerCopyOutResponse) Copy()   {}
 func (m *ServerCopyOutResponse) Parse() *pgproto3.CopyOutResponse {
 	return (*FromServer[*pgproto3.CopyOutResponse])(m).Parse()
 }
@@ -802,9 +784,8 @@ func (m ServerCopyOutResponse) Retain() ServerCopyOutResponse {
 // Response to Replication.
 type ServerCopyBothResponse FromServer[*pgproto3.CopyBothResponse]
 
-func (*ServerCopyBothResponse) Server()            {}
-func (*ServerCopyBothResponse) Copy()              {}
-func (t *ServerCopyBothResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerCopyBothResponse) Server() {}
+func (*ServerCopyBothResponse) Copy()   {}
 func (m *ServerCopyBothResponse) Parse() *pgproto3.CopyBothResponse {
 	return (*FromServer[*pgproto3.CopyBothResponse])(m).Parse()
 }
@@ -823,9 +804,8 @@ func (m ServerCopyBothResponse) Retain() ServerCopyBothResponse {
 // Copy Mode: data row.
 type ServerCopyData FromServer[*pgproto3.CopyData]
 
-func (*ServerCopyData) Server()            {}
-func (*ServerCopyData) Copy()              {}
-func (t *ServerCopyData) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerCopyData) Server() {}
+func (*ServerCopyData) Copy()   {}
 func (m *ServerCopyData) Parse() *pgproto3.CopyData {
 	return (*FromServer[*pgproto3.CopyData])(m).Parse()
 }
@@ -844,9 +824,8 @@ func (m ServerCopyData) Retain() ServerCopyData {
 // Copy Mode: copy completed.
 type ServerCopyDone FromServer[*pgproto3.CopyDone]
 
-func (*ServerCopyDone) Server()            {}
-func (*ServerCopyDone) Copy()              {}
-func (t *ServerCopyDone) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerCopyDone) Server() {}
+func (*ServerCopyDone) Copy()   {}
 func (m *ServerCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromServer[*pgproto3.CopyDone])(m).Parse()
 }
@@ -1016,9 +995,8 @@ var (
 // Extended Query mode: response to Sync; backend no longer ignoring messages, ready for next command.
 type ServerReadyForQuery FromServer[*pgproto3.ReadyForQuery]
 
-func (*ServerReadyForQuery) Server()            {}
-func (*ServerReadyForQuery) Response()          {}
-func (t *ServerReadyForQuery) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerReadyForQuery) Server()   {}
+func (*ServerReadyForQuery) Response() {}
 func (m *ServerReadyForQuery) Parse() *pgproto3.ReadyForQuery {
 	return (*FromServer[*pgproto3.ReadyForQuery])(m).Parse()
 }
@@ -1037,9 +1015,8 @@ func (m ServerReadyForQuery) Retain() ServerReadyForQuery {
 // SQL command completed normally.
 type ServerCommandComplete FromServer[*pgproto3.CommandComplete]
 
-func (*ServerCommandComplete) Server()            {}
-func (*ServerCommandComplete) Response()          {}
-func (t *ServerCommandComplete) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerCommandComplete) Server()   {}
+func (*ServerCommandComplete) Response() {}
 func (m *ServerCommandComplete) Parse() *pgproto3.CommandComplete {
 	return (*FromServer[*pgproto3.CommandComplete])(m).Parse()
 }
@@ -1060,7 +1037,6 @@ type ServerDataRow FromServer[*pgproto3.DataRow]
 
 func (*ServerDataRow) Server()                                 {}
 func (*ServerDataRow) Response()                               {}
-func (t *ServerDataRow) MsgType() MsgType                      { return t.source.MessageType() }
 func (m *ServerDataRow) Parse() *pgproto3.DataRow              { return (*FromServer[*pgproto3.DataRow])(m).Parse() }
 func (m *ServerDataRow) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
 func (m *ServerDataRow) Source() RawMessageSource              { return m.source }
@@ -1077,9 +1053,8 @@ func (m ServerDataRow) Retain() ServerDataRow {
 // Response to empty query.
 type ServerEmptyQueryResponse FromServer[*pgproto3.EmptyQueryResponse]
 
-func (*ServerEmptyQueryResponse) Server()            {}
-func (*ServerEmptyQueryResponse) Response()          {}
-func (t *ServerEmptyQueryResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerEmptyQueryResponse) Server()   {}
+func (*ServerEmptyQueryResponse) Response() {}
 func (m *ServerEmptyQueryResponse) Parse() *pgproto3.EmptyQueryResponse {
 	return (*FromServer[*pgproto3.EmptyQueryResponse])(m).Parse()
 }
@@ -1098,9 +1073,8 @@ func (m ServerEmptyQueryResponse) Retain() ServerEmptyQueryResponse {
 // Error response.
 type ServerErrorResponse FromServer[*pgproto3.ErrorResponse]
 
-func (*ServerErrorResponse) Server()            {}
-func (*ServerErrorResponse) Response()          {}
-func (t *ServerErrorResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerErrorResponse) Server()   {}
+func (*ServerErrorResponse) Response() {}
 func (m *ServerErrorResponse) Parse() *pgproto3.ErrorResponse {
 	return (*FromServer[*pgproto3.ErrorResponse])(m).Parse()
 }
@@ -1119,9 +1093,8 @@ func (m ServerErrorResponse) Retain() ServerErrorResponse {
 // Response to function call.
 type ServerFunctionCallResponse FromServer[*pgproto3.FunctionCallResponse]
 
-func (*ServerFunctionCallResponse) Server()            {}
-func (*ServerFunctionCallResponse) Response()          {}
-func (t *ServerFunctionCallResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerFunctionCallResponse) Server()   {}
+func (*ServerFunctionCallResponse) Response() {}
 func (m *ServerFunctionCallResponse) Parse() *pgproto3.FunctionCallResponse {
 	return (*FromServer[*pgproto3.FunctionCallResponse])(m).Parse()
 }
@@ -1300,9 +1273,8 @@ var (
 // Warning message.
 type ServerNoticeResponse FromServer[*pgproto3.NoticeResponse]
 
-func (*ServerNoticeResponse) Server()            {}
-func (*ServerNoticeResponse) Async()             {}
-func (t *ServerNoticeResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerNoticeResponse) Server() {}
+func (*ServerNoticeResponse) Async()  {}
 func (m *ServerNoticeResponse) Parse() *pgproto3.NoticeResponse {
 	return (*FromServer[*pgproto3.NoticeResponse])(m).Parse()
 }
@@ -1321,9 +1293,8 @@ func (m ServerNoticeResponse) Retain() ServerNoticeResponse {
 // LISTEN/NOTIFY notification.
 type ServerNotificationResponse FromServer[*pgproto3.NotificationResponse]
 
-func (*ServerNotificationResponse) Server()            {}
-func (*ServerNotificationResponse) Async()             {}
-func (t *ServerNotificationResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerNotificationResponse) Server() {}
+func (*ServerNotificationResponse) Async()  {}
 func (m *ServerNotificationResponse) Parse() *pgproto3.NotificationResponse {
 	return (*FromServer[*pgproto3.NotificationResponse])(m).Parse()
 }
@@ -1342,9 +1313,8 @@ func (m ServerNotificationResponse) Retain() ServerNotificationResponse {
 // Informs client that runtime parameter value changed.
 type ServerParameterStatus FromServer[*pgproto3.ParameterStatus]
 
-func (*ServerParameterStatus) Server()            {}
-func (*ServerParameterStatus) Async()             {}
-func (t *ServerParameterStatus) MsgType() MsgType { return t.source.MessageType() }
+func (*ServerParameterStatus) Server() {}
+func (*ServerParameterStatus) Async()  {}
 func (m *ServerParameterStatus) Parse() *pgproto3.ParameterStatus {
 	return (*FromServer[*pgproto3.ParameterStatus])(m).Parse()
 }

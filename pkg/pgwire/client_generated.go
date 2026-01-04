@@ -34,9 +34,8 @@ var (
 // ClientGSSEncRequest wraps *pgproto3.GSSEncRequest from the client.
 type ClientGSSEncRequest FromClient[*pgproto3.GSSEncRequest]
 
-func (*ClientGSSEncRequest) Client()            {}
-func (*ClientGSSEncRequest) Startup()           {}
-func (t *ClientGSSEncRequest) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientGSSEncRequest) Client()  {}
+func (*ClientGSSEncRequest) Startup() {}
 func (m *ClientGSSEncRequest) Parse() *pgproto3.GSSEncRequest {
 	return (*FromClient[*pgproto3.GSSEncRequest])(m).Parse()
 }
@@ -55,9 +54,8 @@ func (m ClientGSSEncRequest) Retain() ClientGSSEncRequest {
 // ClientGSSResponse wraps *pgproto3.GSSResponse from the client.
 type ClientGSSResponse FromClient[*pgproto3.GSSResponse]
 
-func (*ClientGSSResponse) Client()            {}
-func (*ClientGSSResponse) Startup()           {}
-func (t *ClientGSSResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientGSSResponse) Client()  {}
+func (*ClientGSSResponse) Startup() {}
 func (m *ClientGSSResponse) Parse() *pgproto3.GSSResponse {
 	return (*FromClient[*pgproto3.GSSResponse])(m).Parse()
 }
@@ -76,9 +74,8 @@ func (m ClientGSSResponse) Retain() ClientGSSResponse {
 // ClientPasswordMessage wraps *pgproto3.PasswordMessage from the client.
 type ClientPasswordMessage FromClient[*pgproto3.PasswordMessage]
 
-func (*ClientPasswordMessage) Client()            {}
-func (*ClientPasswordMessage) Startup()           {}
-func (t *ClientPasswordMessage) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientPasswordMessage) Client()  {}
+func (*ClientPasswordMessage) Startup() {}
 func (m *ClientPasswordMessage) Parse() *pgproto3.PasswordMessage {
 	return (*FromClient[*pgproto3.PasswordMessage])(m).Parse()
 }
@@ -97,9 +94,8 @@ func (m ClientPasswordMessage) Retain() ClientPasswordMessage {
 // ClientSASLInitialResponse wraps *pgproto3.SASLInitialResponse from the client.
 type ClientSASLInitialResponse FromClient[*pgproto3.SASLInitialResponse]
 
-func (*ClientSASLInitialResponse) Client()            {}
-func (*ClientSASLInitialResponse) Startup()           {}
-func (t *ClientSASLInitialResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientSASLInitialResponse) Client()  {}
+func (*ClientSASLInitialResponse) Startup() {}
 func (m *ClientSASLInitialResponse) Parse() *pgproto3.SASLInitialResponse {
 	return (*FromClient[*pgproto3.SASLInitialResponse])(m).Parse()
 }
@@ -118,9 +114,8 @@ func (m ClientSASLInitialResponse) Retain() ClientSASLInitialResponse {
 // ClientSASLResponse wraps *pgproto3.SASLResponse from the client.
 type ClientSASLResponse FromClient[*pgproto3.SASLResponse]
 
-func (*ClientSASLResponse) Client()            {}
-func (*ClientSASLResponse) Startup()           {}
-func (t *ClientSASLResponse) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientSASLResponse) Client()  {}
+func (*ClientSASLResponse) Startup() {}
 func (m *ClientSASLResponse) Parse() *pgproto3.SASLResponse {
 	return (*FromClient[*pgproto3.SASLResponse])(m).Parse()
 }
@@ -139,9 +134,8 @@ func (m ClientSASLResponse) Retain() ClientSASLResponse {
 // ClientSSLRequest wraps *pgproto3.SSLRequest from the client.
 type ClientSSLRequest FromClient[*pgproto3.SSLRequest]
 
-func (*ClientSSLRequest) Client()            {}
-func (*ClientSSLRequest) Startup()           {}
-func (t *ClientSSLRequest) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientSSLRequest) Client()  {}
+func (*ClientSSLRequest) Startup() {}
 func (m *ClientSSLRequest) Parse() *pgproto3.SSLRequest {
 	return (*FromClient[*pgproto3.SSLRequest])(m).Parse()
 }
@@ -160,9 +154,8 @@ func (m ClientSSLRequest) Retain() ClientSSLRequest {
 // ClientStartupMessage wraps *pgproto3.StartupMessage from the client.
 type ClientStartupMessage FromClient[*pgproto3.StartupMessage]
 
-func (*ClientStartupMessage) Client()            {}
-func (*ClientStartupMessage) Startup()           {}
-func (t *ClientStartupMessage) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientStartupMessage) Client()  {}
+func (*ClientStartupMessage) Startup() {}
 func (m *ClientStartupMessage) Parse() *pgproto3.StartupMessage {
 	return (*FromClient[*pgproto3.StartupMessage])(m).Parse()
 }
@@ -357,7 +350,6 @@ type ClientQuery FromClient[*pgproto3.Query]
 
 func (*ClientQuery) Client()                                   {}
 func (*ClientQuery) SimpleQuery()                              {}
-func (t *ClientQuery) MsgType() MsgType                        { return t.source.MessageType() }
 func (m *ClientQuery) Parse() *pgproto3.Query                  { return (*FromClient[*pgproto3.Query])(m).Parse() }
 func (m *ClientQuery) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientQuery) Source() RawMessageSource                { return m.source }
@@ -374,9 +366,8 @@ func (m ClientQuery) Retain() ClientQuery {
 // Call a function; seems to work like a simple query? Or maybe it works with both modes?
 type ClientFunctionCall FromClient[*pgproto3.FunctionCall]
 
-func (*ClientFunctionCall) Client()            {}
-func (*ClientFunctionCall) SimpleQuery()       {}
-func (t *ClientFunctionCall) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientFunctionCall) Client()      {}
+func (*ClientFunctionCall) SimpleQuery() {}
 func (m *ClientFunctionCall) Parse() *pgproto3.FunctionCall {
 	return (*FromClient[*pgproto3.FunctionCall])(m).Parse()
 }
@@ -505,7 +496,6 @@ type ClientParse FromClient[*pgproto3.Parse]
 
 func (*ClientParse) Client()                                   {}
 func (*ClientParse) ExtendedQuery()                            {}
-func (t *ClientParse) MsgType() MsgType                        { return t.source.MessageType() }
 func (m *ClientParse) Parse() *pgproto3.Parse                  { return (*FromClient[*pgproto3.Parse])(m).Parse() }
 func (m *ClientParse) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientParse) Source() RawMessageSource                { return m.source }
@@ -524,7 +514,6 @@ type ClientBind FromClient[*pgproto3.Bind]
 
 func (*ClientBind) Client()                                   {}
 func (*ClientBind) ExtendedQuery()                            {}
-func (t *ClientBind) MsgType() MsgType                        { return t.source.MessageType() }
 func (m *ClientBind) Parse() *pgproto3.Bind                   { return (*FromClient[*pgproto3.Bind])(m).Parse() }
 func (m *ClientBind) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientBind) Source() RawMessageSource                { return m.source }
@@ -550,7 +539,6 @@ type ClientExecute FromClient[*pgproto3.Execute]
 
 func (*ClientExecute) Client()                                   {}
 func (*ClientExecute) ExtendedQuery()                            {}
-func (t *ClientExecute) MsgType() MsgType                        { return t.source.MessageType() }
 func (m *ClientExecute) Parse() *pgproto3.Execute                { return (*FromClient[*pgproto3.Execute])(m).Parse() }
 func (m *ClientExecute) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientExecute) Source() RawMessageSource                { return m.source }
@@ -584,7 +572,6 @@ type ClientSync FromClient[*pgproto3.Sync]
 
 func (*ClientSync) Client()                                   {}
 func (*ClientSync) ExtendedQuery()                            {}
-func (t *ClientSync) MsgType() MsgType                        { return t.source.MessageType() }
 func (m *ClientSync) Parse() *pgproto3.Sync                   { return (*FromClient[*pgproto3.Sync])(m).Parse() }
 func (m *ClientSync) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientSync) Source() RawMessageSource                { return m.source }
@@ -620,9 +607,8 @@ func (m ClientSync) Retain() ClientSync {
 // zeroes in this case.
 type ClientDescribe FromClient[*pgproto3.Describe]
 
-func (*ClientDescribe) Client()            {}
-func (*ClientDescribe) ExtendedQuery()     {}
-func (t *ClientDescribe) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientDescribe) Client()        {}
+func (*ClientDescribe) ExtendedQuery() {}
 func (m *ClientDescribe) Parse() *pgproto3.Describe {
 	return (*FromClient[*pgproto3.Describe])(m).Parse()
 }
@@ -645,7 +631,6 @@ type ClientClose FromClient[*pgproto3.Close]
 
 func (*ClientClose) Client()                                   {}
 func (*ClientClose) ExtendedQuery()                            {}
-func (t *ClientClose) MsgType() MsgType                        { return t.source.MessageType() }
 func (m *ClientClose) Parse() *pgproto3.Close                  { return (*FromClient[*pgproto3.Close])(m).Parse() }
 func (m *ClientClose) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientClose) Source() RawMessageSource                { return m.source }
@@ -670,7 +655,6 @@ type ClientFlush FromClient[*pgproto3.Flush]
 
 func (*ClientFlush) Client()                                   {}
 func (*ClientFlush) ExtendedQuery()                            {}
-func (t *ClientFlush) MsgType() MsgType                        { return t.source.MessageType() }
 func (m *ClientFlush) Parse() *pgproto3.Flush                  { return (*FromClient[*pgproto3.Flush])(m).Parse() }
 func (m *ClientFlush) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
 func (m *ClientFlush) Source() RawMessageSource                { return m.source }
@@ -861,9 +845,8 @@ var (
 // ClientCopyData wraps *pgproto3.CopyData from the client.
 type ClientCopyData FromClient[*pgproto3.CopyData]
 
-func (*ClientCopyData) Client()            {}
-func (*ClientCopyData) Copy()              {}
-func (t *ClientCopyData) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientCopyData) Client() {}
+func (*ClientCopyData) Copy()   {}
 func (m *ClientCopyData) Parse() *pgproto3.CopyData {
 	return (*FromClient[*pgproto3.CopyData])(m).Parse()
 }
@@ -882,9 +865,8 @@ func (m ClientCopyData) Retain() ClientCopyData {
 // ClientCopyDone wraps *pgproto3.CopyDone from the client.
 type ClientCopyDone FromClient[*pgproto3.CopyDone]
 
-func (*ClientCopyDone) Client()            {}
-func (*ClientCopyDone) Copy()              {}
-func (t *ClientCopyDone) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientCopyDone) Client() {}
+func (*ClientCopyDone) Copy()   {}
 func (m *ClientCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromClient[*pgproto3.CopyDone])(m).Parse()
 }
@@ -903,9 +885,8 @@ func (m ClientCopyDone) Retain() ClientCopyDone {
 // ClientCopyFail wraps *pgproto3.CopyFail from the client.
 type ClientCopyFail FromClient[*pgproto3.CopyFail]
 
-func (*ClientCopyFail) Client()            {}
-func (*ClientCopyFail) Copy()              {}
-func (t *ClientCopyFail) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientCopyFail) Client() {}
+func (*ClientCopyFail) Copy()   {}
 func (m *ClientCopyFail) Parse() *pgproto3.CopyFail {
 	return (*FromClient[*pgproto3.CopyFail])(m).Parse()
 }
@@ -1040,9 +1021,8 @@ var (
 // ClientCancelRequest wraps *pgproto3.CancelRequest from the client.
 type ClientCancelRequest FromClient[*pgproto3.CancelRequest]
 
-func (*ClientCancelRequest) Client()            {}
-func (*ClientCancelRequest) Cancel()            {}
-func (t *ClientCancelRequest) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientCancelRequest) Client() {}
+func (*ClientCancelRequest) Cancel() {}
 func (m *ClientCancelRequest) Parse() *pgproto3.CancelRequest {
 	return (*FromClient[*pgproto3.CancelRequest])(m).Parse()
 }
@@ -1149,9 +1129,8 @@ var (
 // ClientTerminate wraps *pgproto3.Terminate from the client.
 type ClientTerminate FromClient[*pgproto3.Terminate]
 
-func (*ClientTerminate) Client()            {}
-func (*ClientTerminate) TerminateConn()     {}
-func (t *ClientTerminate) MsgType() MsgType { return t.source.MessageType() }
+func (*ClientTerminate) Client()        {}
+func (*ClientTerminate) TerminateConn() {}
 func (m *ClientTerminate) Parse() *pgproto3.Terminate {
 	return (*FromClient[*pgproto3.Terminate])(m).Parse()
 }

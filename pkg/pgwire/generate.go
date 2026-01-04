@@ -361,7 +361,7 @@ func generateCode(pkgName string, imports []string, from string, groups []typeGr
 			// Marker methods
 			fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, from)
 			fmt.Fprintf(&buf, "func (*%s) %s() {}\n", newTypeName, group.prefix)
-			fmt.Fprintf(&buf, "func (t *%s) MsgType() MsgType { return t.source.MessageType() }\n", newTypeName)
+			// MsgType() is defined in message_msg_type.go to handle nil source
 
 			// Parse method
 			fmt.Fprintf(&buf, "func (m *%s) Parse() %s { return (*%s[%s])(m).Parse() }\n", newTypeName, ti.qualified, lazyType, ti.qualified)

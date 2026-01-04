@@ -232,7 +232,10 @@ func (c *PooledBackend) AcquireNetConn(ctx context.Context) (net.Conn, error) {
 		return nil, fmt.Errorf("net.Conn already acquired")
 	}
 	c.netConnAcquired = true
-	return c.conn.Value().Conn().PgConn().Conn(), nil
+
+	conn := c.conn.Value().Conn().PgConn().Conn()
+	c.session.logger.Debug("acquired net.Conn", "localAddr", conn.LocalAddr(), "remoteAddr", conn.RemoteAddr())
+	return conn, nil
 }
 
 // ReleaseNetConn implements pgproxy.Conn.

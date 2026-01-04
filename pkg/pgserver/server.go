@@ -217,7 +217,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		config.StartupHandler = DefaultStartupHandler
 	}
 	if config.Handler == nil {
-		return nil, errors.New("Handler is required")
+		return nil, errors.New("handler is required")
 	}
 	server := &Server{ServerConfig: config, ConnMap: &ConnMap{}}
 
@@ -251,10 +251,14 @@ func (s *Server) ListenAndServe() error {
 	return s.Serve(ln)
 }
 
-func (s *Server) Serve(l net.Listener) error {
+func (s *Server) Serve(l net.Listener) (err error) {
 	origListener := l
 	l = &onceCloseListener{Listener: l}
-	defer l.Close()
+	defer func() {
+		if closeErr := l.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	if !s.trackListener(&l, true) {
 		return ErrServerClosed
@@ -290,7 +294,8 @@ func (s *Server) Serve(l net.Listener) error {
 			if s.shuttingDown() {
 				return ErrServerClosed
 			}
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+			// Retry on timeout errors with exponential backoff
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				updateTempDelay()
 				logger.Error("accept error", "error", err, "retryDelay", tempDelay)
 				time.Sleep(tempDelay)
@@ -451,7 +456,6 @@ type conn struct {
 	tlsCert  *x509.Certificate // Server cert used for this connection (captured from GetCertificate)
 	state    atomic.Uint32
 	server   *Server
-	ready    *ClientConn
 	logger   *slog.Logger
 	frontend *pgproto3.Backend
 }
@@ -615,6 +619,7 @@ loop:
 				FrontendConn: FrontendConn{
 					Conn:     conn,
 					Frontend: frontend,
+					Logger:   c.logger,
 				},
 				CancelMessage: msg,
 			}
@@ -655,6 +660,7 @@ loop:
 				FrontendConn: FrontendConn{
 					Conn:     conn,
 					Frontend: frontend,
+					Logger:   c.logger,
 				},
 				StartupMessage:       msg,
 				TLSState:             tlsState,

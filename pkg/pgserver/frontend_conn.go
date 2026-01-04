@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
@@ -20,6 +21,9 @@ type FrontendConn struct {
 	Conn         net.Conn
 	Frontend     *pgproto3.Backend
 	connAcquired bool
+	// Logger is used for debug tracing of deadline operations.
+	// If nil, no deadline tracing is done.
+	Logger *slog.Logger
 	// extraData stores arbitrary data associated with this connection.
 	// Used to pass data between auth and startup handlers.
 	extraData map[any]any
@@ -57,7 +61,11 @@ func (f *FrontendConn) Receive(ctx context.Context) (pgwire.ClientMessage, error
 		if err := f.Conn.SetReadDeadline(deadline); err != nil {
 			return nil, fmt.Errorf("failed to set read deadline: %w", err)
 		}
-		defer f.Conn.SetReadDeadline(time.Time{})
+		defer func() {
+			if err := f.Conn.SetReadDeadline(time.Time{}); err != nil && f.Logger != nil {
+				f.Logger.Debug("failed to clear read deadline", "error", err)
+			}
+		}()
 	}
 
 	msg, err := f.Frontend.Receive()
@@ -90,7 +98,11 @@ func (f *FrontendConn) Send(ctx context.Context, msg pgproto3.BackendMessage) er
 		if err := f.Conn.SetWriteDeadline(deadline); err != nil {
 			return fmt.Errorf("failed to set write deadline: %w", err)
 		}
-		defer f.Conn.SetWriteDeadline(time.Time{})
+		defer func() {
+			if err := f.Conn.SetWriteDeadline(time.Time{}); err != nil && f.Logger != nil {
+				f.Logger.Debug("failed to clear write deadline", "error", err)
+			}
+		}()
 	}
 
 	f.Frontend.Send(msg)
@@ -111,7 +123,13 @@ func (f *FrontendConn) AcquireNetConn(ctx context.Context) (net.Conn, error) {
 		return nil, ErrNetConnInUse
 	}
 	f.connAcquired = true
-	return f.Conn, nil
+
+	conn := f.Conn
+	// Wrap conn with deadline tracing if logger is available
+	if f.Logger != nil {
+		conn = pgwire.NewDeadlineTraceConn(conn, f.Logger)
+	}
+	return conn, nil
 }
 
 func (f *FrontendConn) ReleaseNetConn(ctx context.Context) error {
