@@ -522,10 +522,9 @@ func (r *RingMsg) NewReader() io.Reader {
 	return r.in.Slice(r.msgIdx, r.msgIdx+1).NewReader()
 }
 
-// WriteTo implements [RawMessageSource].
-func (r *RingMsg) WriteTo(w io.Writer) (int, error) {
-	n, err := r.in.ring.WriteMessage(r.msgIdx, w)
-	return int(n), err
+// WriteTo implements [RawMessageSource] and [io.WriterTo].
+func (r *RingMsg) WriteTo(w io.Writer) (int64, error) {
+	return r.in.ring.WriteMessage(r.msgIdx, w)
 }
 
 func (r *RingMsg) MsgIdx() int64 {

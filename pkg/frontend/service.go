@@ -117,7 +117,7 @@ func (s *Service) Listen() error {
 		AuthHandler:    s.makeAuthHandler(),
 		StartupHandler: s.startupHandler,
 		Handler:        s.connHandler,
-		CancelHandler:  s.cancelHandler,
+		CancelHandler:  pgserver.DefaultCancelHandler,
 		Logger:         s.logger,
 	})
 	if err != nil {
@@ -509,15 +509,6 @@ func (s *Service) connHandler(ctx context.Context, conn *pgserver.ClientConn) er
 
 	// Run the pgproxy-based proxy loop
 	return s.runProxyLoop(ctx, conn, authData)
-}
-
-// cancelHandler implements pgserver.CancelHandler.
-func (s *Service) cancelHandler(ctx context.Context, conn *pgserver.CancelConn) error {
-	req := conn.CancelMessage
-	return s.handleCancelRequest(&pgproto3.CancelRequest{
-		ProcessID: req.ProcessID,
-		SecretKey: req.SecretKey,
-	})
 }
 
 // connContext implements connection limiting via pgserver.ConnContext.

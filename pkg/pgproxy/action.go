@@ -113,8 +113,7 @@ func (a *action) WithEffects(effects ...pure.Effect) Action {
 	if len(effects) == 0 {
 		return a
 	}
-	var b action
-	b = *a
+	b := *a
 	b.effects = make(pure.Effects, len(a.effects)+len(effects))
 	copy(b.effects, a.effects)
 	copy(b.effects[len(a.effects):], effects)

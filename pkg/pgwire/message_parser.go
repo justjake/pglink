@@ -15,7 +15,7 @@ type MessageHeader struct {
 
 type MessageParser struct{ Rest []byte }
 
-func (p *MessageParser) ReadByte() byte {
+func (p *MessageParser) NextByte() byte {
 	b := p.Rest[0]
 	p.Rest = p.Rest[1:]
 	return b
@@ -40,7 +40,7 @@ func (p *MessageParser) ReadInt32() int32 {
 }
 
 func (p *MessageParser) ReadMessageHeader() MessageHeader {
-	msgType := p.ReadByte()
+	msgType := p.NextByte()
 	len := p.ReadInt32()
 	return MessageHeader{
 		MsgType: MsgType(msgType),

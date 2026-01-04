@@ -116,7 +116,7 @@ func (d *BindData) Len() int {
 
 func (d *BindData) appendHeader(buf []byte) []byte {
 	encoder := MessageEncoder{buf}
-	encoder.WriteByte(byte(MsgClientBind))
+	encoder.AppendByte(byte(MsgClientBind))
 	encoder.WriteInt32(int32(d.Len() - 1))
 	encoder.WriteString(d.PreparedStatement)
 	encoder.WriteString(d.DestinationPortal)
@@ -160,14 +160,14 @@ func (d *BindData) Body() []byte {
 	return d.Bytes()[5:]
 }
 
-func (d *BindData) WriteTo(w io.Writer) (int, error) {
+func (d *BindData) WriteTo(w io.Writer) (int64, error) {
 	header := d.appendHeader(nil)
 	n, err := w.Write(header)
 	if err != nil {
-		return n, err
+		return int64(n), err
 	}
 	n2, err := w.Write(d.Rest)
-	return n + n2, err
+	return int64(n + n2), err
 }
 
 // MessageType implements [RawMessageSource].

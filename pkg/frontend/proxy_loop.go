@@ -103,6 +103,24 @@ func (s *Service) runProxyLoop(ctx context.Context, conn *pgserver.ClientConn, a
 		metrics:                  s.metrics,
 	}
 
+	// Set the cancel handler on the ClientConn so pgserver can route cancel requests to us.
+	// CancelRequest opens a NEW TCP connection to send the cancel, so it's safe to call
+	// from this separate goroutine without synchronization with the main loop.
+	conn.CancelHandler = func(ctx context.Context, clientConn *pgserver.ClientConn, cancelConn *pgserver.CancelConn) error {
+		if state.pooledBackend == nil {
+			state.logger.Debug("cancel request but no backend connected")
+			return nil
+		}
+		cancelCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := state.pooledBackend.PgConn().CancelRequest(cancelCtx); err != nil {
+			state.logger.Warn("failed to send cancel request to backend", "error", err)
+			return err
+		}
+		state.logger.Info("sent cancel request to backend")
+		return nil
+	}
+
 	// Copy startup parameters
 	for k, v := range conn.StartupParameters {
 		state.parameterStatuses[k] = v

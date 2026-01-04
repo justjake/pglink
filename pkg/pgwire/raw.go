@@ -34,8 +34,8 @@ type RawMessageSource interface {
 	// Returns a a new io.Reader that reads the message bytes.
 	NewReader() io.Reader
 
-	// Writes the message to the writer.
-	WriteTo(w io.Writer) (int, error)
+	// Writes the message to the writer. Implements io.WriterTo.
+	WriteTo(w io.Writer) (int64, error)
 
 	// AppendTo appends the message to the buffer, returning the new buffer slice.
 	AppendTo(buf []byte) ([]byte, error)
@@ -55,7 +55,7 @@ func SliceFromBody(t MsgType, body []byte) SliceMsg {
 	encoder := MessageEncoder{make([]byte, 0, 5+len(body))}
 	sp := encoder.Start(t)
 	encoder.WriteBytes(body)
-	encoder.End(sp)
+	_ = encoder.End(sp) // End never fails for in-memory buffer
 	return SliceMsg{encoder.Buffer}
 }
 
@@ -92,8 +92,9 @@ func (r SliceMsg) NewReader() io.Reader {
 	return bytes.NewReader(r.Slice)
 }
 
-func (r SliceMsg) WriteTo(w io.Writer) (int, error) {
-	return w.Write(r.Slice)
+func (r SliceMsg) WriteTo(w io.Writer) (int64, error) {
+	n, err := w.Write(r.Slice)
+	return int64(n), err
 }
 
 func (r SliceMsg) AppendTo(buf []byte) ([]byte, error) {

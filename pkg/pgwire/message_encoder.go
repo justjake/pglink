@@ -16,7 +16,7 @@ func (e *MessageEncoder) Start(msgType MsgType) int {
 	return sp
 }
 
-func (e *MessageEncoder) WriteByte(b byte) {
+func (e *MessageEncoder) AppendByte(b byte) {
 	e.Buffer = append(e.Buffer, b)
 }
 

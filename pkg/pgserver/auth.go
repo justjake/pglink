@@ -170,7 +170,8 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		cbType, _ := scram.ParseChannelBindingType(cbTypeStr)
 
 		// Compute channel binding data using the requested type
-		cbData, err := scram.ChannelBindingData(connState, conn.ServerTLSCertificate, cbType)
+		var cbData []byte
+		cbData, err = scram.ChannelBindingData(connState, conn.ServerTLSCertificate, cbType)
 		if err != nil {
 			return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "failed to compute channel binding data", err)
 		}

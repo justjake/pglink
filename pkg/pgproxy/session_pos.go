@@ -86,7 +86,6 @@ type pos struct {
 	*pgwire.RingMsg
 	Cursor     *pgwire.Cursor
 	from       ProxyRole
-	action     Action
 	baseLogger *slog.Logger
 	logger     *slog.Logger
 	ctx        context.Context
