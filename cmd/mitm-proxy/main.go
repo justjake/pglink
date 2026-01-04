@@ -242,9 +242,8 @@ func (p *MitmProxy) StartupHandler(ctx context.Context, conn *pgserver.Authorize
 // Handler proxies messages between frontend and backend.
 func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (returnedErr error) {
 	hijacked := conn.ExtraData.(*pgconn.HijackedConn)
-	defer func() {
-		returnedErr = errors.Join(returnedErr, hijacked.Conn.Close())
-	}()
+	// NOTE: Don't close hijacked.Conn here - session.Close() calls ReleaseBackend()
+	// which calls HijackedBackend.Release() to close the connection.
 
 	p.Logger.Info("session started",
 		"user", conn.User,
