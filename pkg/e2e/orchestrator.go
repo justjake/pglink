@@ -101,6 +101,11 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 		return nil, fmt.Errorf("failed to init output dir: %w", err)
 	}
 
+	// Build all required binaries into output directory
+	if err := o.buildAllBinaries(ctx); err != nil {
+		return nil, fmt.Errorf("failed to build binaries: %w", err)
+	}
+
 	// Update latest symlink immediately so users can monitor progress
 	if err := o.updateLatestSymlink(); err != nil {
 		o.Logger.Warn("failed to update latest symlink", "error", err)
@@ -206,6 +211,12 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 			return nil, fmt.Errorf("failed to start %s: %w", target.Name, err)
 		}
 		needsStop = true
+		// Ensure process is stopped on exit (even on panic)
+		defer func() {
+			if needsStop {
+				o.stopTargetProcess(target.Name)
+			}
+		}()
 	}
 
 	// Build result structure
@@ -234,9 +245,9 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		o.Logger.Info("running round", "target", target.Name, "round", round, "total", o.Config.Rounds)
 
 		// On the last round, start CPU profile collection concurrently (if pprof enabled)
-		// This captures the profile while there's actual load on pglink
+		// This captures the profile while there's actual load on the target
 		isLastRound := round == o.Config.Rounds
-		if isLastRound && o.Config.Pprof && target.Type == TargetTypePglink {
+		if isLastRound && o.Config.Pprof && (target.Type == TargetTypePglink || target.Type == TargetTypeMitmProxy) {
 			cpuProfileWg.Add(1)
 			go func() {
 				defer cpuProfileWg.Done()
@@ -352,15 +363,16 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 	}
 
 	// Collect profiles before stopping the target (if pprof enabled)
-	if needsStop && o.Config.Pprof && target.Type == TargetTypePglink {
+	if needsStop && o.Config.Pprof && (target.Type == TargetTypePglink || target.Type == TargetTypeMitmProxy) {
 		if err := o.collectProfiles(ctx, target); err != nil {
 			o.Logger.Warn("failed to collect profiles", "target", target.Name, "error", err)
 		}
 	}
 
-	// Stop target process
+	// Stop target process explicitly, then mark as stopped so defer doesn't try again
 	if needsStop {
 		o.stopTargetProcess(target.Name)
+		needsStop = false
 	}
 
 	return result, nil
@@ -384,12 +396,13 @@ func (o *Orchestrator) startTargetProcess(ctx context.Context, target *TargetCon
 func (o *Orchestrator) startPglink(ctx context.Context, target *TargetConfig) error {
 	binaryPath := target.BinaryPath
 	if binaryPath == "" {
-		binaryPath = filepath.Join(o.currentWorktree, "out", "pglink")
+		// Use binary built into output directory
+		binaryPath = filepath.Join(o.outputDir, "bin", "pglink")
 	}
 
 	// Ensure binary exists
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		return fmt.Errorf("pglink binary not found at %s", binaryPath)
+		return fmt.Errorf("pglink binary not found at %s (was buildAllBinaries called?)", binaryPath)
 	}
 
 	// Generate benchmark config and write as pglink JSON
@@ -637,12 +650,19 @@ func (o *Orchestrator) startPgbouncer(ctx context.Context, target *TargetConfig)
 func (o *Orchestrator) startMitmProxy(ctx context.Context, target *TargetConfig) error {
 	binaryPath := target.BinaryPath
 	if binaryPath == "" {
-		binaryPath = filepath.Join(o.currentWorktree, "out", "mitm-proxy")
+		// Use binary built into output directory
+		binaryPath = filepath.Join(o.outputDir, "bin", "mitm-proxy")
 	}
 
 	// Ensure binary exists
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		return fmt.Errorf("mitm-proxy binary not found at %s", binaryPath)
+		return fmt.Errorf("mitm-proxy binary not found at %s (was buildAllBinaries called?)", binaryPath)
+	}
+
+	// Determine metrics port for pprof
+	metricsPort := target.Port + 3000 // e.g., 16434 -> 19434
+	if target.MetricsPort != 0 {
+		metricsPort = target.MetricsPort
 	}
 
 	// Build args - mitm-proxy connects to the backend postgres
@@ -650,6 +670,13 @@ func (o *Orchestrator) startMitmProxy(ctx context.Context, target *TargetConfig)
 	args := []string{
 		"-backend", "host=localhost port=15432 sslmode=disable",
 		"-addr", fmt.Sprintf(":%d", target.Port),
+	}
+
+	// Add pprof flag if profiling enabled
+	if o.Config.Pprof {
+		args = append(args, "-pprof", fmt.Sprintf(":%d", metricsPort))
+		// Record metrics port for profile collection
+		o.metricsPorts[target.Name] = metricsPort
 	}
 
 	args = append(args, target.ExtraArgs...)
@@ -688,7 +715,7 @@ func (o *Orchestrator) startMitmProxy(ctx context.Context, target *TargetConfig)
 	}
 
 	o.processes[target.Name] = cmd
-	o.Logger.Info("started mitm-proxy", "target", target.Name, "pid", cmd.Process.Pid, "port", target.Port)
+	o.Logger.Info("started mitm-proxy", "target", target.Name, "pid", cmd.Process.Pid, "port", target.Port, "pprof_port", metricsPort)
 
 	// Wait for mitm-proxy to be ready
 	time.Sleep(2 * time.Second)
@@ -795,6 +822,60 @@ func (o *Orchestrator) initOutputDir() error {
 	}
 
 	o.Logger.Info("created output directory", "path", o.outputDir)
+	return nil
+}
+
+// buildAllBinaries builds all required binaries into the output directory.
+func (o *Orchestrator) buildAllBinaries(ctx context.Context) error {
+	// Determine which binaries we need to build
+	needPglink := false
+	needMitmProxy := false
+
+	for _, target := range o.Config.Targets {
+		switch target.Type {
+		case TargetTypePglink:
+			needPglink = true
+		case TargetTypeMitmProxy:
+			needMitmProxy = true
+		}
+	}
+
+	binDir := filepath.Join(o.outputDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return fmt.Errorf("failed to create bin dir: %w", err)
+	}
+
+	if needPglink {
+		if err := o.buildBinary(ctx, "./cmd/pglink", filepath.Join(binDir, "pglink")); err != nil {
+			return fmt.Errorf("failed to build pglink: %w", err)
+		}
+	}
+
+	if needMitmProxy {
+		if err := o.buildBinary(ctx, "./cmd/mitm-proxy", filepath.Join(binDir, "mitm-proxy")); err != nil {
+			return fmt.Errorf("failed to build mitm-proxy: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// buildBinary builds a Go binary using bin/go.
+func (o *Orchestrator) buildBinary(ctx context.Context, pkg, outputPath string) error {
+	o.Logger.Info("building binary", "pkg", pkg, "output", outputPath)
+
+	// Use bin/go to build with correct environment
+	goBin := filepath.Join(o.currentWorktree, "bin", "go")
+	cmd := exec.CommandContext(ctx, goBin, "build", "-o", outputPath, pkg)
+	cmd.Dir = o.currentWorktree
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go build %s: %w", pkg, err)
+	}
+
+	o.Logger.Info("built binary", "output", outputPath)
 	return nil
 }
 

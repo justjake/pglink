@@ -11,6 +11,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -27,6 +29,7 @@ func main() {
 	backendURI := flag.String("backend", "", "PostgreSQL backend URI (e.g., postgres://localhost:5432/mydb)")
 	listenAddr := flag.String("addr", ":15432", "listen address")
 	logLevel := flag.String("log-level", "info", "log level: debug, info, warn, error")
+	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g., :6060)")
 	flag.Parse()
 
 	if *backendURI == "" {
@@ -56,6 +59,29 @@ func main() {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel}))
 	slog.SetDefault(logger)
+
+	// Start pprof server if enabled
+	if *pprofAddr != "" {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+		// Try to listen first to catch port conflicts early
+		pprofListener, err := net.Listen("tcp", *pprofAddr)
+		if err != nil {
+			logger.Error("failed to start pprof server", "addr", *pprofAddr, "error", err)
+			os.Exit(1)
+		}
+		logger.Info("starting pprof server", "addr", pprofListener.Addr())
+		go func() {
+			if err := http.Serve(pprofListener, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("pprof server failed", "error", err)
+			}
+		}()
+	}
 
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -321,8 +347,10 @@ type HijackedBackend struct {
 }
 
 func NewHijackedBackend(hijacked *pgconn.HijackedConn, logger *slog.Logger) *HijackedBackend {
-	// Wrap the connection to log all writes at debug level
-	hijacked.Conn = &loggingConn{Conn: hijacked.Conn, label: "backend", logger: logger}
+	// Only wrap connection for debug logging if debug is enabled
+	if logger.Enabled(context.Background(), slog.LevelDebug) {
+		hijacked.Conn = &loggingConn{Conn: hijacked.Conn, label: "backend", logger: logger}
+	}
 	return &HijackedBackend{hijacked: hijacked}
 }
 

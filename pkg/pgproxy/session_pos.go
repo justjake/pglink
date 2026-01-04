@@ -222,7 +222,9 @@ func (p *pos) Dispatch(ctx context.Context, action Action) (err error) {
 		}
 	}
 
-	p.Logger().Debug("dispatch", "action", action)
+	if p.baseLogger.Enabled(ctx, slog.LevelDebug) {
+		p.Logger().Debug("dispatch", "action", action)
+	}
 	if unwrapped.responseHandler != nil {
 		panic(fmt.Errorf("dispatch %v: response handler not implemented yet", action))
 	}
@@ -327,7 +329,9 @@ func (p *pos) tryMarkHandled(action string) error {
 	if p.handled {
 		return fmt.Errorf("cannot %s: %w: %v", action, ErrPosAlreadyHandled, p)
 	}
-	p.Logger().Debug("handled", "action", action)
+	if p.baseLogger.Enabled(p.ctx, slog.LevelDebug) {
+		p.Logger().Debug("handled", "action", action)
+	}
 	p.handled = true
 	return nil
 }
