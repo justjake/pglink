@@ -156,6 +156,58 @@ func (c *Cursor) TryNextBatch() (bool, error) {
 	return false, nil
 }
 
+// BlockingNextBatch blocks until at least one message is available for processing.
+// Used for synchronous I/O mode where the caller does blocking reads directly.
+//
+// This method:
+// 1. Releases the previous batch (if any)
+// 2. Loops calling ring.ReadOnce() until messages are available
+// 3. Sets up the cursor state for iteration via NextMsg()
+//
+// Returns nil when messages are ready, or an error (including io.EOF) on failure.
+// Must only be used when no background reader goroutine is running.
+func (c *Cursor) BlockingNextBatch() error {
+	// Release previous batch (if any)
+	if c.endIdx > 0 {
+		c.ring.ReleaseThrough(c.endIdx)
+	}
+
+	for {
+		// Check for new messages
+		newEnd := c.ring.PublishedMsgCount()
+		if newEnd > c.endIdx {
+			oldEnd := c.endIdx
+			c.startIdx = c.endIdx
+			c.endIdx = newEnd
+			c.msgIdx = c.startIdx - 1 // NextMsg will increment
+
+			// Record batch stats if enabled
+			if Stats.Enabled {
+				msgCount := newEnd - oldEnd
+				var byteCount int64
+				if msgCount > 0 {
+					startOffset := c.ring.MessageOffset(oldEnd)
+					endOffset := c.ring.MessageEnd(newEnd - 1)
+					byteCount = endOffset - startOffset
+				}
+				RecordBatch(msgCount, byteCount)
+			}
+
+			return nil
+		}
+
+		// Check for terminal error
+		if err := c.ring.Error(); err != nil {
+			return err
+		}
+
+		// Blocking read - this will block on network I/O
+		if _, err := c.ring.ReadOnce(); err != nil {
+			return err
+		}
+	}
+}
+
 // Ready returns a channel that signals when new messages may be available.
 // Use in select with other cursors for multiplexing.
 func (c *Cursor) Ready() <-chan struct{} {

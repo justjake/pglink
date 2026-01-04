@@ -231,10 +231,17 @@ type RingBuffer struct {
 
 	// State tracking for observability
 	state atomic.Int32 // RingBufferState
+
+	// Tracks whether StartNetConnReader has been called.
+	// Uses atomic for thread-safe idempotent start.
+	readerStarted atomic.Bool
 }
 
 func (r *RingBuffer) initChannels() {
-	r.streamDone = make(chan error)
+	// streamDone is buffered (size 1) to support synchronous mode.
+	// In sync mode, completeStreaming() sends before ReadOnce() can receive,
+	// so buffering prevents deadlock.
+	r.streamDone = make(chan error, 1)
 	r.writerWake = make(chan struct{}, 1)
 	r.readerWake = make(chan struct{}, 1)
 	r.done = make(chan struct{})
@@ -328,9 +335,13 @@ func (r *RingBuffer) setState(s RingBufferState) {
 
 // === Writer methods ===
 
+// StartNetConnReader starts a background goroutine that reads from src into the ring buffer.
+// This method is idempotent: subsequent calls after the first are no-ops.
+// The reader runs until the connection is closed, an error occurs, or StopNetConnReader is called.
 func (r *RingBuffer) StartNetConnReader(ctx context.Context, src net.Conn) {
-	if r.conn != nil {
-		panic("RingBuffer.StartNetConnReader called more than once")
+	// Atomic swap ensures only one caller proceeds (idempotent, thread-safe)
+	if !r.readerStarted.CompareAndSwap(false, true) {
+		return
 	}
 	r.conn = src
 	r.readerDone = make(chan struct{})
@@ -341,6 +352,12 @@ func (r *RingBuffer) StartNetConnReader(ctx context.Context, src net.Conn) {
 		// The return value is the same error, so we don't need to handle it here.
 		r.ReadFrom(ctx, src) //nolint:errcheck
 	}()
+}
+
+// ResetReaderStarted allows restarting the background reader after it has been stopped.
+// Only call this after the previous reader has fully stopped (readerDone closed).
+func (r *RingBuffer) ResetReaderStarted() {
+	r.readerStarted.Store(false)
 }
 
 // SetConn sets the connection for poll-mode reading without starting a reader goroutine.
@@ -537,6 +554,134 @@ func (r *RingBuffer) StopNetConnReader() error {
 
 func (r *RingBuffer) Running() bool {
 	return r.conn != nil
+}
+
+// ReadOnce performs a single blocking read from the connection into the ring buffer.
+// Used for synchronous I/O mode (no background reader goroutine).
+//
+// Returns (messagesAvailable, error) where messagesAvailable is true if new
+// messages were published and are ready to be consumed.
+//
+// Call this in a loop from Cursor.BlockingNextBatch() until messages are available.
+// Must be called only when no background reader goroutine is running.
+// The caller must have previously set the connection via SetConn().
+func (r *RingBuffer) ReadOnce() (bool, error) {
+	if r.conn == nil {
+		return false, fmt.Errorf("ReadOnce: no connection set")
+	}
+
+	// Handle completion of previous streaming message
+	if r.streaming.active {
+		select {
+		case err := <-r.streamDone:
+			if err != nil {
+				r.setError(err)
+				return false, err
+			}
+			// Reset streaming state (same as handleStreamingMessage)
+			r.parsePos += r.streaming.totalLen
+			r.rawEnd = r.parsePos
+			r.streaming.active = false
+			atomic.StoreInt64(&r.publishedBytes, r.parsePos)
+			if r.debugLog != nil {
+				r.debugLog("ring: ReadOnce completed streaming",
+					"parsePos", r.parsePos)
+			}
+		default:
+			// Consumer hasn't finished streaming yet.
+			// This means caller didn't fully process the previous batch.
+			return false, fmt.Errorf("ReadOnce: streaming message not yet consumed")
+		}
+	}
+
+	// Check for existing error
+	if err := r.Error(); err != nil {
+		return false, err
+	}
+
+	// Refresh cached positions
+	r.refreshCachedPositions()
+
+	// Try to parse existing unparsed data first.
+	// This handles the case where we had unparsed data but no metadata slots.
+	unparsedData := r.rawEnd - r.parsePos
+	if unparsedData >= 5 {
+		usedMeta := r.localMsgCnt - r.cachedConsumedMsgs
+		if usedMeta < int64(len(r.offsets)) {
+			prevMsgCnt := r.localMsgCnt
+			msgsCounter := spaceCheckMsgs
+			r.parseCompleteMessages(&msgsCounter)
+			if r.localMsgCnt > prevMsgCnt {
+				if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
+					r.publish()
+				}
+				return true, nil
+			}
+		}
+	}
+
+	// Calculate available space
+	used := r.rawEnd - r.cachedConsumedBytes
+	available := int64(len(r.data)) - used - r.HeadroomBytes
+
+	if available <= 0 {
+		// Buffer is full. This shouldn't happen if caller releases batches properly.
+		// Return false to let caller handle it (they should release messages first).
+		return false, nil
+	}
+
+	// Get contiguous region for reading (handle wraparound)
+	writeOff := r.rawEnd & r.dataMask
+	contiguous := int64(len(r.data)) - writeOff
+	if contiguous > available {
+		contiguous = available
+	}
+
+	// Blocking read from network
+	r.setState(RingBufferStateReading)
+	n, err := r.conn.Read(r.data[writeOff : writeOff+contiguous])
+	if r.debugLog != nil {
+		r.debugLog("ring: ReadOnce network read",
+			"bytesRead", n,
+			"err", err,
+			"writeOff", writeOff,
+			"contiguous", contiguous)
+	}
+
+	if n > 0 {
+		r.rawEnd += int64(n)
+
+		// Parse all complete messages from the new data
+		msgsCounter := spaceCheckMsgs
+		r.parseCompleteMessages(&msgsCounter)
+
+		// Publish if we have new complete messages
+		if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
+			r.publish()
+			return true, nil
+		}
+	}
+
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			r.setError(io.EOF)
+			return false, io.EOF
+		}
+		r.setError(err)
+		return false, err
+	}
+
+	// No error but no complete messages yet (partial message in buffer)
+	return false, nil
+}
+
+// CancelRead interrupts any blocking Read() or ReadOnce() call by setting
+// a deadline in the past. Use this to unblock goroutines during shutdown.
+// Safe to call from any goroutine.
+func (r *RingBuffer) CancelRead() {
+	if r.conn != nil {
+		_ = r.conn.SetReadDeadline(time.Now()) // Intentionally ignore error during shutdown
+	}
 }
 
 func (r *RingBuffer) String() string {

@@ -15,6 +15,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -31,7 +32,13 @@ func main() {
 	logLevel := flag.String("log-level", "info", "log level: debug, info, warn, error")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g., :6060)")
 	enableStats := flag.Bool("stats", false, "enable pgwire stats collection (logged on shutdown)")
+	useSplit := flag.Bool("split", false, "use 2-goroutine split I/O mode (experimental)")
+	maxProcs := flag.Int("gomaxprocs", 0, "set GOMAXPROCS (0 = use default)")
 	flag.Parse()
+
+	if *maxProcs > 0 {
+		runtime.GOMAXPROCS(*maxProcs)
+	}
 
 	if *backendURI == "" {
 		fmt.Fprintln(os.Stderr, "error: -backend is required")
@@ -110,6 +117,7 @@ func main() {
 	proxy := &MitmProxy{
 		BackendCfg: backendCfg,
 		Logger:     logger,
+		UseSplit:   *useSplit,
 	}
 
 	server, err := pgserver.NewServer(pgserver.ServerConfig{
@@ -136,6 +144,7 @@ func main() {
 type MitmProxy struct {
 	BackendCfg *pgconn.Config
 	Logger     *slog.Logger
+	UseSplit   bool // Use IOModeSplit (2-goroutine model)
 }
 
 // AuthHandler implements cleartext password auth and validates credentials against the backend.
@@ -242,11 +251,18 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) erro
 		"user", conn.User,
 		"database", conn.Database,
 		"pid", conn.ProcessID,
-		"backend", hijacked.Conn.RemoteAddr())
+		"backend", hijacked.Conn.RemoteAddr(),
+		"split_mode", p.UseSplit)
 
 	// Create pgproxy session
 	frontendAdapter := &PgxFrontend{ClientConn: conn}
 	backendAdapter := NewHijackedBackend(hijacked, p.Logger)
+
+	// Determine IO mode
+	ioMode := pgproxy.IOModeDefault
+	if p.UseSplit {
+		ioMode = pgproxy.IOModeSplit
+	}
 
 	session, err := pgproxy.NewSession(ctx, pgproxy.SessionConfig{
 		Frontend: frontendAdapter,
@@ -254,17 +270,18 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) erro
 			return backendAdapter, nil
 		},
 		Logger: p.Logger,
+		IOMode: ioMode,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 	defer session.Close(ctx)
 
-	// Proxy loop
-	for pos, err := range session.Stream(ctx) {
+	// Proxy using Run() which dispatches based on IOMode
+	return session.Run(ctx, func(pos pgproxy.Pos, err error) error {
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-				return nil
+				return io.EOF // Signal normal termination to Run()
 			}
 			return err
 		}
@@ -286,7 +303,7 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) erro
 				if err := pos.Skip(); err != nil {
 					return err
 				}
-				return nil
+				return io.EOF // Signal normal termination
 			}
 		}
 
@@ -294,9 +311,9 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) erro
 		if err := pos.Forward(ctx); err != nil {
 			return fmt.Errorf("forward: %w", err)
 		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 // parseBackendURI parses and validates the backend URI.

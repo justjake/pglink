@@ -19,6 +19,21 @@ var ErrSessionClosed = errors.New("session closed")
 var ErrBackendNotAcquired = errors.New("backend not acquired")
 var noHealthCheckChan = make(chan time.Time)
 
+// IOMode determines how the session handles I/O between client and backend.
+type IOMode int
+
+const (
+	// IOModeDefault uses a single orchestrating goroutine with background readers.
+	// This is the original 3-goroutine model: 1 main + 2 background readers.
+	IOModeDefault IOMode = iota
+
+	// IOModeSplit uses 2 goroutines that each do blocking reads from their side.
+	// Client goroutine: blocking read → lock → process → flush → unlock → repeat
+	// Server goroutine: blocking read → lock → process → flush → unlock → repeat
+	// This reduces channel overhead and goroutine switching.
+	IOModeSplit
+)
+
 // MessageTracker is a pluggable mechanism for tracking state as messages are processed.
 type MessageTracker interface {
 	// TrackMessage tracks the message.
@@ -84,6 +99,10 @@ type SessionConfig struct {
 	// If not set, defaults to slog.Default().
 	Logger *slog.Logger
 
+	// IOMode determines how the session handles I/O.
+	// If not set, defaults to IOModeDefault.
+	IOMode IOMode
+
 	// Optional: sets ring buffer size.
 	pgwire.RingBufferConfig
 }
@@ -130,6 +149,38 @@ type Session struct {
 	closed    bool
 	closeOnce sync.Once
 	logger    *slog.Logger
+
+	// Split mode state (IOModeSplit only)
+	mu    sync.Mutex  // Protects all session state in split mode
+	split *splitState // Non-nil while Run() is active in split mode
+}
+
+// splitState holds state for split-mode (IOModeSplit) execution.
+type splitState struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	handler func(Pos, error) error
+	wg      sync.WaitGroup
+	errCh   chan error // Buffered with capacity for all workers
+}
+
+// runWorker runs fn in a goroutine with panic recovery and WaitGroup tracking.
+// All split-mode goroutines use this to ensure consistent error/panic handling.
+func (ss *splitState) runWorker(name string, fn func() error) {
+	ss.wg.Add(1)
+	go func() {
+		defer ss.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				ss.errCh <- fmt.Errorf("%s panic: %v", name, r)
+				ss.cancel()
+			}
+		}()
+		if err := fn(); err != nil {
+			ss.errCh <- err
+			ss.cancel()
+		}
+	}()
 }
 
 // NewSession creates a new session.
@@ -152,7 +203,7 @@ func NewSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	session.ringCtx, session.cancelRingCtx = context.WithCancel(ctx)
 	session.clientConn = cfg.Frontend
 	session.clientNetConn = clientNetConn
-	session.clientRingBuffer = session.newRingBuffer(session.ringCtx, clientNetConn)
+	session.clientRingBuffer = session.newRingBuffer(clientNetConn)
 	session.clientCursor = pgwire.NewClientCursor(session.clientRingBuffer)
 
 	return session, nil
@@ -169,6 +220,16 @@ func (s *Session) Close(ctx context.Context) error {
 		defer func() {
 			s.closed = true
 		}()
+
+		// If split mode is active, cancel it and wait for goroutines
+		if s.split != nil {
+			s.split.cancel()
+			s.clientRingBuffer.CancelRead()
+			if s.backendRingBuffer != nil {
+				s.backendRingBuffer.CancelRead()
+			}
+			s.split.wg.Wait()
+		}
 
 		if s.cancelWaitCtx != nil {
 			s.cancelWaitCtx()
@@ -304,10 +365,22 @@ func (s *Session) AcquireBackend(ctx context.Context) (Backend, error) {
 
 	s.backendConn = backend
 	s.backendNetConn = netConn
-	s.backendRingBuffer = s.newRingBuffer(ctx, netConn)
+	s.backendRingBuffer = s.newRingBuffer(netConn)
 	s.backendCursor = pgwire.NewServerCursor(s.backendRingBuffer)
 	s.backendTrackers = trackers
 	s.logger = nil // refresh
+
+	// Start backend I/O based on mode:
+	// - Split mode: start server goroutine to process backend messages
+	// - Default mode: start background reader goroutine
+	if s.split != nil {
+		s.split.runWorker("server", func() error {
+			return s.splitSideLoop(s.split.ctx, RoleServer, s.split.handler)
+		})
+	} else {
+		// Default mode: start background reader (idempotent)
+		s.backendRingBuffer.StartNetConnReader(s.ringCtx, s.backendNetConn)
+	}
 
 	return backend, nil
 }
@@ -516,17 +589,20 @@ func (s *Session) Logger() *slog.Logger {
 	return logger
 }
 
-// TODO: ensure ctx passed here has the expected lifetime: that of the Session as a whole,
-// not the deadline for AcquireBackend() or ReleaseBackend().
-func (s *Session) newRingBuffer(ctx context.Context, netConn net.Conn) *pgwire.RingBuffer {
+// newRingBuffer creates a ring buffer without starting the background reader.
+// The reader is started lazily:
+// - Default mode: started in runDefault() or Stream() via StartNetConnReader()
+// - Split mode: not started; uses BlockingNextBatch() via ReadOnce() directly
+func (s *Session) newRingBuffer(netConn net.Conn) *pgwire.RingBuffer {
 	ring := pgwire.NewRingBuffer(s.cfg.RingBufferConfig)
 	logger := s.Logger()
-	if logger.Enabled(ctx, slog.LevelDebug) {
+	if logger.Enabled(context.Background(), slog.LevelDebug) {
 		ring.SetDebugLog(func(msg string, args ...any) {
 			logger.Debug(msg, args...)
 		})
 	}
-	ring.StartNetConnReader(s.ringCtx, netConn)
+	// Set connection but don't start reader - done lazily by Run() or Stream()
+	ring.SetConn(netConn)
 	return ring
 }
 
@@ -585,6 +661,9 @@ func (s *Session) Stream(ctx context.Context) iter.Seq2[Pos, error] {
 
 		s.SetWaitCtx(ctx)
 
+		// Start background reader for default mode (idempotent - safe if already started)
+		s.clientRingBuffer.StartNetConnReader(s.ringCtx, s.clientNetConn)
+
 		s.isStreaming = true
 		defer func() {
 			s.isStreaming = false
@@ -621,6 +700,166 @@ func (s *Session) Next(ctx context.Context) (Pos, error) {
 	}
 
 	return pos, err
+}
+
+// Run executes the session using the configured IOMode.
+// The handler is called for each message position and any errors.
+// Run returns when the session ends (EOF, error, or handler returns error).
+//
+// Run will panic if called while already streaming.
+func (s *Session) Run(ctx context.Context, handler func(Pos, error) error) error {
+	if s.isStreaming {
+		panic("already streaming")
+	}
+
+	switch s.cfg.IOMode {
+	case IOModeSplit:
+		return s.runSplit(ctx, handler)
+	default:
+		return s.runDefault(ctx, handler)
+	}
+}
+
+// runDefault runs the session using the default orchestrated model.
+// It wraps Stream() with the handler callback.
+func (s *Session) runDefault(ctx context.Context, handler func(Pos, error) error) error {
+	// Start background readers for default mode
+	s.clientRingBuffer.StartNetConnReader(s.ringCtx, s.clientNetConn)
+
+	for pos, err := range s.Stream(ctx) {
+		if err := handler(pos, err); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runSplit runs the session using the 2-goroutine split model.
+// Each side (client, server) has its own goroutine doing blocking reads.
+func (s *Session) runSplit(ctx context.Context, handler func(Pos, error) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Set up wait context for flush operations
+	s.SetWaitCtx(ctx)
+
+	s.split = &splitState{
+		ctx:     ctx,
+		cancel:  cancel,
+		handler: handler,
+		errCh:   make(chan error, 3), // Capacity for client + server + healthcheck
+	}
+	defer func() { s.split = nil }()
+
+	// Health check goroutine (if configured)
+	if s.cfg.HealthCheck != nil {
+		s.split.runWorker("healthcheck", s.runHealthCheck)
+	}
+
+	// Client goroutine
+	s.split.runWorker("client", func() error {
+		return s.splitSideLoop(ctx, RoleClient, handler)
+	})
+
+	// Server goroutine is started by AcquireBackend() when needed
+
+	// Wait for first error OR completion (normal termination sends io.EOF)
+	err := <-s.split.errCh
+
+	// Unblock any blocking reads
+	s.clientRingBuffer.CancelRead()
+	if s.backendRingBuffer != nil {
+		s.backendRingBuffer.CancelRead()
+	}
+
+	// Wait for all goroutines to finish
+	s.split.wg.Wait()
+
+	// io.EOF is normal termination
+	if err == io.EOF {
+		return nil
+	}
+	return err
+}
+
+// splitSideLoop processes one side using blocking reads. Called from its own goroutine.
+func (s *Session) splitSideLoop(ctx context.Context, from ProxyRole, handler func(Pos, error) error) error {
+	cursor := s.getCursor(from)
+	if cursor == nil {
+		// No cursor yet (e.g., backend not acquired) - wait for it
+		// For client, cursor is always available. For server, we wait until acquired.
+		if from == RoleClient {
+			return fmt.Errorf("client cursor is nil")
+		}
+		// Server goroutine: wait until backend is acquired and cursor exists
+		// This shouldn't happen since we start server goroutine in AcquireBackend
+		return nil
+	}
+
+	for {
+		// Check context before blocking read
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Blocking read WITHOUT lock - this is where I/O overlaps
+		if err := cursor.BlockingNextBatch(); err != nil {
+			// Handle graceful shutdown - EOF means connection closed
+			if errors.Is(err, io.EOF) {
+				return io.EOF
+			}
+			// Pass error to handler under lock
+			return s.processBatchUnderLock(ctx, from, handler, err)
+		}
+
+		// Process batch under lock using existing iterCursor()
+		if err := s.processBatchUnderLock(ctx, from, handler, nil); err != nil {
+			return err
+		}
+	}
+}
+
+// processBatchUnderLock holds lock for entire batch processing including Flush.
+// Separated to ensure defer Unlock() runs even on panic.
+// If batchErr is non-nil, it's passed to handler as an error.
+func (s *Session) processBatchUnderLock(ctx context.Context, from ProxyRole, handler func(Pos, error) error, batchErr error) error {
+	var flushErr error
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Handle batch-level error (e.g., connection error)
+	if batchErr != nil {
+		return handler(nil, batchErr)
+	}
+
+	for pos, iterErr := range s.iterCursor(from, &flushErr) {
+		if err := handler(pos, iterErr); err != nil {
+			return err
+		}
+	}
+	// iterCursor's defer (Flush) already ran here, still under lock
+
+	return flushErr
+}
+
+// runHealthCheck runs periodic health checks under the session lock.
+// Returns error to work with runWorker helper.
+func (s *Session) runHealthCheck() error {
+	ticker := time.NewTicker(s.healthCheckPeriod())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.split.ctx.Done():
+			return nil // Normal shutdown
+		case <-ticker.C:
+			s.mu.Lock()
+			err := s.cfg.HealthCheck(s.split.ctx)
+			s.mu.Unlock()
+			if err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (s *Session) yieldMsgs(yield func(*pos, error) bool) {

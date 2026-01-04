@@ -61,6 +61,8 @@ func main() {
 	includePgbouncer := flag.Bool("pgbouncer", true, "include pgbouncer benchmark")
 	includePglink := flag.Bool("pglink", true, "include pglink benchmark")
 	includeMitmProxy := flag.Bool("mitm-proxy", false, "include mitm-proxy benchmark")
+	mitmSplit := flag.Bool("mitm-split", false, "use split I/O mode for mitm-proxy (2-goroutine model)")
+	mitmSingleThread := flag.Bool("mitm-single-thread", false, "run mitm-proxy with GOMAXPROCS=1 (single-threaded)")
 
 	// Debug flags
 	debug := flag.Bool("debug", false, "enable debug logging for spawned pglink processes")
@@ -220,6 +222,42 @@ func main() {
 			mitmTarget.ExtraArgs = append(mitmTarget.ExtraArgs, "-stats")
 		}
 		cfg.Targets = append(cfg.Targets, mitmTarget)
+	}
+
+	// Add mitm-proxy-split target if requested (2-goroutine I/O mode)
+	if *mitmSplit {
+		mitmSplitTarget := e2e.TargetConfig{
+			Name:      "mitm-proxy-split",
+			Type:      e2e.TargetTypeMitmProxy,
+			Port:      16435,
+			ExtraArgs: []string{"-split"},
+		}
+		if *debug {
+			mitmSplitTarget.ExtraArgs = append(mitmSplitTarget.ExtraArgs, "-log-level", "debug")
+		}
+		if *stats {
+			mitmSplitTarget.ExtraArgs = append(mitmSplitTarget.ExtraArgs, "-stats")
+		}
+		cfg.Targets = append(cfg.Targets, mitmSplitTarget)
+	}
+
+	// Add mitm-proxy with different GOMAXPROCS values if requested
+	if *mitmSingleThread {
+		for i, procs := range []int{1, 2, 4} {
+			target := e2e.TargetConfig{
+				Name:      fmt.Sprintf("mitm-%dcpu", procs),
+				Type:      e2e.TargetTypeMitmProxy,
+				Port:      16436 + i,
+				ExtraArgs: []string{"-gomaxprocs", fmt.Sprintf("%d", procs)},
+			}
+			if *debug {
+				target.ExtraArgs = append(target.ExtraArgs, "-log-level", "debug")
+			}
+			if *stats {
+				target.ExtraArgs = append(target.ExtraArgs, "-stats")
+			}
+			cfg.Targets = append(cfg.Targets, target)
+		}
 	}
 
 	// Create orchestrator
