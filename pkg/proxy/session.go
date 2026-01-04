@@ -19,10 +19,39 @@ var ErrSessionClosed = errors.New("session closed")
 var ErrBackendNotAcquired = errors.New("backend not acquired")
 var noHealthCheckChan = make(chan time.Time)
 
+type MessageTracker interface {
+	TrackMessage(ctx context.Context, msg pgwire.Message) error
+}
+
+type Conn interface {
+	AcquireNetConn(ctx context.Context) (net.Conn, error)
+	ReleaseNetConn() error
+	Terminate(ctx context.Context, err error) error
+	MessageTrackers() []MessageTracker
+	fmt.Stringer
+}
+
+type Frontend interface {
+	Conn
+}
+
+type Backend interface {
+	Conn
+	Release()
+}
+
 // SessionConfig configures a [Session].
 type SessionConfig struct {
 	// The client. Required.
 	Frontend Frontend
+
+	// FrontendTrackers are called when messages are read from or written to the frontend,
+	// in addition to trackers in [Conn.Trackers].
+	FrontendTrackers []MessageTracker
+	// MakeBackendTrackers are called when messages are read from or written to the backend,
+	// in addition to trackers in [Conn.Trackers].
+	// Called when a new backend is acquired.
+	MakeBackendTrackers func(ctx context.Context, backend Backend) ([]MessageTracker, error)
 
 	// Function to acquire a [Backend] connection.
 	// Should perform whatever setup is needed on a backend before it can be used for this session.
@@ -64,9 +93,9 @@ type Session struct {
 	backendRingBuffer *pgwire.RingBuffer
 	backendCursor     *pgwire.Cursor
 	backendPos        pos
+	backendTrackers   []MessageTracker
 	bwq               pgwire.WriteQueue
 
-	// TODO: trackers
 	// TODO: otel
 
 	healthCheckTicker *time.Ticker
@@ -126,15 +155,17 @@ func (s *Session) Close(ctx context.Context) error {
 
 		s.cancelRingCtx()
 
+		var errs []error
 		if err := s.ReleaseBackend(ctx); err != nil {
-			res = fmt.Errorf("failed to release backend: %w", err)
-			return
+			errs = append(errs, err)
 		}
 
 		if err := s.releaseClient(ctx); err != nil {
-			res = fmt.Errorf("failed to release client: %w", err)
+			errs = append(errs, err)
 			return
 		}
+
+		res = errors.Join(errs...)
 	})
 
 	return res
@@ -142,7 +173,7 @@ func (s *Session) Close(ctx context.Context) error {
 
 // FlushDest flushes pending writes to the given destination.
 func (s *Session) FlushDest(ctx context.Context, dest ProxyRole) error {
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("flush"); closedErr != nil {
 		return closedErr
 	}
 	return s.flush(ctx, dest)
@@ -150,7 +181,7 @@ func (s *Session) FlushDest(ctx context.Context, dest ProxyRole) error {
 
 // Flush flushes pending writes to the client and backend.
 func (s *Session) Flush(ctx context.Context) error {
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("flush"); closedErr != nil {
 		return closedErr
 	}
 
@@ -167,18 +198,12 @@ func (s *Session) Flush(ctx context.Context) error {
 
 // FlushBackend flushes pending writes to the backend.
 func (s *Session) FlushBackend(ctx context.Context) error {
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
-		return closedErr
-	}
-	return s.flush(ctx, RoleServer)
+	return s.FlushDest(ctx, RoleServer)
 }
 
 // FlushClient flushes pending writes to the client.
 func (s *Session) FlushClient(ctx context.Context) error {
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
-		return closedErr
-	}
-	return s.flush(ctx, RoleClient)
+	return s.FlushDest(ctx, RoleClient)
 }
 
 func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
@@ -214,7 +239,7 @@ func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
 
 // Backend returns the currently acquired backend, or nil if no backend is acquired.
 func (s *Session) Backend() Backend {
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("use backend"); closedErr != nil {
 		panic(closedErr)
 	}
 	return s.backendConn
@@ -226,7 +251,7 @@ func (s *Session) Backend() Backend {
 //
 // If a backend is already acquired, it is returned immediately.
 func (s *Session) AcquireBackend(ctx context.Context) (Backend, error) {
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("acquire backend"); closedErr != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBackendNotAcquired, closedErr)
 	}
 	if s.backendConn != nil {
@@ -242,11 +267,19 @@ func (s *Session) AcquireBackend(ctx context.Context) (Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBackendNotAcquired, err)
 	}
+	var trackers []MessageTracker
+	if s.cfg.MakeBackendTrackers != nil {
+		trackers, err = s.cfg.MakeBackendTrackers(ctx, backend)
+		if err != nil {
+			return nil, fmt.Errorf("%w: MakeBackendTrackers: %w", ErrBackendNotAcquired, err)
+		}
+	}
 
 	s.backendConn = backend
 	s.backendNetConn = netConn
 	s.backendRingBuffer = s.newRingBuffer(ctx, netConn)
 	s.backendCursor = pgwire.NewServerCursor(s.backendRingBuffer)
+	s.backendTrackers = trackers
 	s.logger = nil // refresh
 
 	return backend, nil
@@ -271,6 +304,7 @@ func (s *Session) ReleaseBackend(ctx context.Context) error {
 
 	s.backendConn.Release()
 	s.backendConn = nil
+	s.backendTrackers = nil
 	s.logger = nil // refresh
 
 	return nil
@@ -279,7 +313,7 @@ func (s *Session) ReleaseBackend(ctx context.Context) error {
 // QueueSendBytes queues writing bytes to dest.
 func (s *Session) QueueSendBytes(dest ProxyRole, bytes []byte) error {
 	// TODO: track write
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
 		return closedErr
 	}
 	_, err := s.writeQueue(dest).Write(bytes)
@@ -291,8 +325,11 @@ func (s *Session) QueueSendBytes(dest ProxyRole, bytes []byte) error {
 // Messages from the client are queued to the backend. During flush, backend will be acquired if needed.
 func (s *Session) QueueSend(msg pgwire.Message) error {
 	// TODO: track write
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
 		return closedErr
+	}
+	if err := s.trackMessage(dest(msg), msg); err != nil {
+		return err
 	}
 	writeQueue := s.writeQueue(dest(msg))
 	return writeQueue.WriteMsg(msg)
@@ -300,21 +337,22 @@ func (s *Session) QueueSend(msg pgwire.Message) error {
 
 func (s *Session) QueueSendPos(pos Pos) error {
 	// TODO: track write
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
 		return closedErr
 	}
-	writeQueue := s.writeQueue(pos.From().Flipped())
-	return writeQueue.WriteRingMsg(pos.unwrap().RingMsg)
+	unwrapped := pos.unwrap()
+	if err := s.trackPos(unwrapped.From().Flipped(), unwrapped); err != nil {
+		return err
+	}
+	writeQueue := s.writeQueue(unwrapped.From().Flipped())
+	return writeQueue.WriteRingMsg(unwrapped.RingMsg)
 }
 
-// ClearQueue clears the write queue for the given destination.
-func (s *Session) ClearQueue(dest ProxyRole) {
-	s.writeQueue(dest).Clear()
-}
-
+// TerminateClient sends terminationMessage to the client, flushes pending writes, and terminates the client connection.
+// We may still have pending client messages in the ring buffer.
 func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwire.Err) error {
 	logger := s.Logger().WithGroup("terminate").With("endpoint", RoleClient, "message", terminationMessage)
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("terminate client"); closedErr != nil {
 		logger.Warn("cannot terminate client: session already closed", "err", closedErr)
 		return closedErr
 	}
@@ -335,9 +373,11 @@ func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwir
 	return nil
 }
 
+// TerminateBackend flushes pending writes to the backend and terminates the backend connection.
+// The backend is released after termination.
 func (s *Session) TerminateBackend(ctx context.Context, cause error) error {
 	logger := s.Logger().WithGroup("terminate").With("endpoint", RoleServer, "cause", cause)
-	if closedErr := s.alreadyClosedError(); closedErr != nil {
+	if closedErr := s.alreadyClosedError("terminate backend"); closedErr != nil {
 		logger.Warn("cannot terminate backend: session already closed", "err", closedErr)
 		return closedErr
 	}
@@ -394,14 +434,6 @@ func (s *Session) releaseClient(ctx context.Context) error {
 	return nil
 }
 
-func (s *Session) getPos(from ProxyRole) *pos {
-	if from == RoleServer {
-		return s.getBackendPos()
-	} else {
-		return s.getClientPos()
-	}
-}
-
 func (s *Session) getCursor(from ProxyRole) *pgwire.Cursor {
 	if from == RoleServer {
 		return s.backendCursor
@@ -410,19 +442,19 @@ func (s *Session) getCursor(from ProxyRole) *pgwire.Cursor {
 	}
 }
 
-func (s *Session) getClientPos() *pos {
+func (s *Session) resetClientPos() *pos {
 	s.clientPos.reset(s.clientCursor, RoleClient)
 	return &s.clientPos
 }
 
-func (s *Session) getBackendPos() *pos {
+func (s *Session) resetBackendPos() *pos {
 	s.backendPos.reset(s.backendCursor, RoleServer)
 	return &s.backendPos
 }
 
-func (s *Session) alreadyClosedError() error {
+func (s *Session) alreadyClosedError(operation string) error {
 	if s.closed {
-		return ErrSessionClosed
+		return fmt.Errorf("cannot %s: %w", operation, ErrSessionClosed)
 	}
 	return nil
 }
@@ -641,11 +673,11 @@ func (s *Session) yieldBatches(yield func(ProxyRole, error) bool) {
 			select {
 			case <-s.waitCtx().Done():
 			case <-s.clientCursor.Ready():
-			case <-s.backendCursor.Ready():
+			case <-s.backendReadyChan():
 			case <-s.clientCursor.Done():
 				yield(RoleClient, s.clientCursor.Err())
 				return
-			case <-s.backendCursor.Done():
+			case <-s.backendDoneChan():
 				yield(RoleServer, s.backendCursor.Err())
 				return
 			case <-s.healthCheckChan():
@@ -658,6 +690,10 @@ func (s *Session) yieldBatches(yield func(ProxyRole, error) bool) {
 func (s *Session) iterCursor(from ProxyRole, flushErr *error) iter.Seq2[*pos, error] {
 	return func(yield func(*pos, error) bool) {
 		cursor := s.getCursor(from)
+		if cursor == nil {
+			return
+		}
+
 		var err error
 		var pos *pos
 
@@ -665,28 +701,27 @@ func (s *Session) iterCursor(from ProxyRole, flushErr *error) iter.Seq2[*pos, er
 			*flushErr = s.Flush(s.waitCtx())
 		}()
 
-		for cursor.NextMsg() {
+		// if cursor changes (like backend release/re-acquire), drop the loop (and messages)
+		for s.getCursor(from) == cursor && cursor.NextMsg() {
 			if from == RoleServer {
 				_, err = cursor.AsServer()
-				pos = s.getBackendPos()
+				pos = s.resetBackendPos()
 			} else {
 				_, err = cursor.AsClient()
-				pos = s.getClientPos()
+				pos = s.resetClientPos()
 			}
 
 			if !s.yieldSinglePos(yield, pos, err) {
 				return
 			}
+		}
 
-			if s.waitCtx().Err() != nil {
-				yield(nil, s.waitCtx().Err())
-				return
-			}
+		if s.getCursor(from) != cursor {
+			s.logger.Debug("cursor changed, dropping loop", "from", from, "old", cursor, "new", s.getCursor(from))
 		}
 	}
 }
 
-// This kind of shit tells me we should make actions imperative too...
 func (s *Session) yieldSinglePos(yield func(*pos, error) bool, pos *pos, err error) (loop bool) {
 	if err != nil {
 		return yield(pos, err)
@@ -708,8 +743,56 @@ func (s *Session) yieldSinglePos(yield func(*pos, error) bool, pos *pos, err err
 	return loop
 }
 
+func (s *Session) Trackers(role ProxyRole) iter.Seq[MessageTracker] {
+	return func(yield func(MessageTracker) bool) {
+		var configTrackers []MessageTracker
+		if role == RoleClient {
+			configTrackers = s.cfg.FrontendTrackers
+		} else {
+			configTrackers = s.backendTrackers
+		}
+		for _, tracker := range configTrackers {
+			if !yield(tracker) {
+				return
+			}
+		}
+
+		if conn := s.conn(role); conn != nil {
+			for _, tracker := range conn.MessageTrackers() {
+				if !yield(tracker) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *Session) trackPos(role ProxyRole, pos *pos) error {
+	msg, err := pos.AsMessage()
+	if err != nil {
+		return fmt.Errorf("track %s: %v: %w", role, pos, err)
+	}
+
+	return s.trackMessage(role, msg)
+}
+
+func (s *Session) trackMessage(role ProxyRole, msg pgwire.Message) error {
+	var errs []error
+	for tracker := range s.Trackers(role) {
+		if err := tracker.TrackMessage(s.waitCtx(), msg); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("track %v: %T: %w", role, msg, errors.Join(errs...))
+	}
+	return nil
+}
+
 func (s *Session) beforeReadPos(pos *pos) error {
-	// TODO: track read
+	if err := s.trackPos(pos.From(), pos); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -735,6 +818,29 @@ func (s *Session) netConn(dest ProxyRole) net.Conn {
 		return s.clientNetConn
 	}
 }
+
+func (s *Session) conn(dest ProxyRole) Conn {
+	if dest == RoleServer {
+		return s.backendConn
+	} else {
+		return s.clientConn
+	}
+}
+
+func (s *Session) backendReadyChan() <-chan struct{} {
+	if s.backendCursor == nil {
+		return nil
+	}
+	return s.backendCursor.Ready()
+}
+
+func (s *Session) backendDoneChan() <-chan struct{} {
+	if s.backendCursor == nil {
+		return nil
+	}
+	return s.backendCursor.Done()
+}
+
 func releaseRingBuffer(ringBuffer **pgwire.RingBuffer) error {
 	if ringBuffer == nil {
 		return nil

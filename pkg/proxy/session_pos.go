@@ -25,6 +25,8 @@ type Pos interface {
 	// Index of the message in the `From()` message stream.
 	FromMsgIdx() int64
 
+	AsMessage() (pgwire.Message, error)
+
 	// If From() is RoleClient, returns the client message.
 	// Panics if the message is not a valid client message.
 	ClientMsg() pgwire.ClientMessage
@@ -101,6 +103,14 @@ func (p *pos) FromClient() bool {
 // FromServer implements [Pos].
 func (p *pos) FromServer() bool {
 	return p.from == RoleServer
+}
+
+func (p *pos) AsMessage() (pgwire.Message, error) {
+	if p.FromClient() {
+		return p.AsClient()
+	} else {
+		return p.AsServer()
+	}
 }
 
 func (p *pos) AsClient() (pgwire.ClientMessage, error) {

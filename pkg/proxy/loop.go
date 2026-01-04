@@ -3,8 +3,6 @@ package proxy
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net"
 
 	"github.com/justjake/pglink/pkg/pgwire"
 	"github.com/justjake/pglink/pkg/pure"
@@ -12,33 +10,6 @@ import (
 
 type Tracker interface {
 	TrackEffect(msg pgwire.Message) pure.Effect
-}
-
-type Releaser interface {
-	Release()
-}
-
-type Terminater interface {
-	Terminate(ctx context.Context, err error) error
-}
-
-type Conn[Rx pgwire.Message, Tx pgwire.Message] interface {
-	AcquireNetConn(ctx context.Context) (net.Conn, error)
-	ReleaseNetConn() error
-	Terminater
-	fmt.Stringer
-}
-
-type Frontend interface {
-	Conn[pgwire.ClientMessage, pgwire.ServerMessage]
-	StartupParameters() pgwire.ParameterStatuses
-	ParameterStatuses() pgwire.ParameterStatuses
-}
-
-type Backend interface {
-	Conn[pgwire.ServerMessage, pgwire.ClientMessage]
-	ParameterStatuses() pgwire.ParameterStatuses
-	Releaser
 }
 
 var ErrLoopTrackingFailed = errors.New("proxy loop: tracking failed")
