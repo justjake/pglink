@@ -12,17 +12,17 @@ var Stats struct {
 	Enabled bool // Set to true to enable stats collection
 
 	// Read side: TryNextBatch statistics
-	BatchCalls     atomic.Int64 // Number of TryNextBatch calls that returned true
-	BatchMsgs      atomic.Int64 // Total messages across all batches
-	BatchBytes     atomic.Int64 // Total bytes across all batches
-	BatchSizeHist  [8]atomic.Int64 // Histogram: [0]=1msg, [1]=2msg, [2]=3-4msg, [3]=5-8msg, [4]=9-16msg, [5]=17-32msg, [6]=33-64msg, [7]=65+msg
+	BatchCalls    atomic.Int64    // Number of TryNextBatch calls that returned true
+	BatchMsgs     atomic.Int64    // Total messages across all batches
+	BatchBytes    atomic.Int64    // Total bytes across all batches
+	BatchSizeHist [8]atomic.Int64 // Histogram: [0]=1msg, [1]=2msg, [2]=3-4msg, [3]=5-8msg, [4]=9-16msg, [5]=17-32msg, [6]=33-64msg, [7]=65+msg
 
 	// Write side: writev statistics
-	WritevCalls      atomic.Int64 // Number of writeToConn calls
-	WritevBufs       atomic.Int64 // Total number of buffers passed to writev
-	WritevBytes      atomic.Int64 // Total bytes written via writev
-	WritevRingBufs   atomic.Int64 // Number of ring buffer slices
-	WritevRingBytes  atomic.Int64 // Bytes from ring buffer
+	WritevCalls       atomic.Int64 // Number of writeToConn calls
+	WritevBufs        atomic.Int64 // Total number of buffers passed to writev
+	WritevBytes       atomic.Int64 // Total bytes written via writev
+	WritevRingBufs    atomic.Int64 // Number of ring buffer slices
+	WritevRingBytes   atomic.Int64 // Bytes from ring buffer
 	WritevPrefixBytes atomic.Int64 // Bytes from prefix buffers
 	WritevWrapArounds atomic.Int64 // Number of wrap-arounds (2 slices from ring)
 

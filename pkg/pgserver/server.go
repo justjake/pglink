@@ -319,7 +319,9 @@ func (s *Server) Serve(l net.Listener) (err error) {
 		if cc := s.ConnContext; cc != nil {
 			newCtx, err := cc(ctx, rawConn)
 			if err != nil {
-				rawConn.Close() // Close rejected connection
+				if closeErr := rawConn.Close(); closeErr != nil {
+					connLogger.Warn("failed to close rejected connection", "error", closeErr)
+				}
 				err = fmt.Errorf("%w: %w", ErrValidateFailed, err)
 				updateTempDelay()
 				connLogger.Error("rejected conn", "error", err, "retryDelay", tempDelay)

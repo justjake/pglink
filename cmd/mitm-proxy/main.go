@@ -193,22 +193,19 @@ func (p *MitmProxy) AuthHandler(ctx context.Context, conn *pgserver.Unauthorized
 
 	// SyncConn drains any buffered data before hijacking
 	if err := backend.SyncConn(ctx); err != nil {
-		backend.Close(ctx)
-		return nil, fmt.Errorf("failed to sync backend connection: %w", err)
+		return nil, errors.Join(fmt.Errorf("failed to sync backend connection: %w", err), backend.Close(ctx))
 	}
 
 	// Hijack the connection to take full ownership from pgconn.
 	// This is necessary because pgproxy will read/write directly to the net.Conn.
 	hijacked, err := backend.Hijack()
 	if err != nil {
-		backend.Close(ctx)
-		return nil, fmt.Errorf("failed to hijack backend connection: %w", err)
+		return nil, errors.Join(fmt.Errorf("failed to hijack backend connection: %w", err), backend.Close(ctx))
 	}
 
 	// Send auth success
 	if err := conn.Send(ctx, &pgproto3.AuthenticationOk{}); err != nil {
-		hijacked.Conn.Close()
-		return nil, err
+		return nil, errors.Join(err, hijacked.Conn.Close())
 	}
 
 	return &pgserver.AuthorizedConn{
@@ -243,9 +240,11 @@ func (p *MitmProxy) StartupHandler(ctx context.Context, conn *pgserver.Authorize
 }
 
 // Handler proxies messages between frontend and backend.
-func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) error {
+func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (returnedErr error) {
 	hijacked := conn.ExtraData.(*pgconn.HijackedConn)
-	defer hijacked.Conn.Close()
+	defer func() {
+		returnedErr = errors.Join(returnedErr, hijacked.Conn.Close())
+	}()
 
 	p.Logger.Info("session started",
 		"user", conn.User,
@@ -275,7 +274,9 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) erro
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
-	defer session.Close(ctx)
+	defer func() {
+		returnedErr = errors.Join(returnedErr, session.Close(ctx))
+	}()
 
 	// Proxy using Run() which dispatches based on IOMode
 	return session.Run(ctx, func(pos pgproxy.Pos, err error) error {
@@ -437,7 +438,15 @@ func (b *HijackedBackend) MessageTrackers() []pgproxy.MessageTracker {
 }
 
 func (b *HijackedBackend) Release() {
-	b.hijacked.Conn.Close()
+	if err := b.hijacked.Conn.Close(); err != nil {
+		slog.Warn("failed to close hijacked backend connection on release", "error", err)
+	}
+}
+
+func (b *HijackedBackend) OutstandingRequests() *pgproxy.OutstandingRequestQueue {
+	// mitm-proxy doesn't use response handlers, so we return nil.
+	// This is acceptable since we don't attach response handlers in the proxy loop.
+	return nil
 }
 
 func (b *HijackedBackend) String() string {
@@ -448,6 +457,9 @@ func (b *HijackedBackend) String() string {
 }
 
 func mustJSON(v any) string {
-	b, _ := json.Marshal(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("<json error: %v>", err)
+	}
 	return string(b)
 }

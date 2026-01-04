@@ -383,7 +383,7 @@ func TestNewServer_Validation(t *testing.T) {
 		},
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Handler")
+	assert.Contains(t, err.Error(), "handler")
 
 	// Valid config
 	server, err := NewServer(ServerConfig{

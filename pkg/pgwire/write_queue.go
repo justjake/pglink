@@ -41,13 +41,6 @@ func (q *WriteQueue) back() *queueItem {
 	return &q.overflow[q.len-2] // overflow[0] is items[1]
 }
 
-func (q *WriteQueue) front() *queueItem {
-	if q.len == 0 {
-		return nil
-	}
-	return &q.items[0]
-}
-
 func (q *WriteQueue) at(i int) *queueItem {
 	if i == 0 {
 		return &q.items[0]
