@@ -41,7 +41,7 @@ func (d ProxyRole) String() string {
 	return s
 }
 
-func (d ProxyRole) Flipped() ProxyRole {
+func (d ProxyRole) To() ProxyRole {
 	if d == RoleClient {
 		return RoleServer
 	} else {
@@ -78,7 +78,7 @@ func (a *action) Type() ActionType {
 
 func (a *action) From() ProxyRole {
 	if a.incoming == nil {
-		return a.To().Flipped()
+		return a.To().To()
 	}
 	switch a.incoming.(type) {
 	case pgwire.ClientMessage:
@@ -92,7 +92,7 @@ func (a *action) From() ProxyRole {
 
 func (a *action) To() ProxyRole {
 	if a.outgoing == nil {
-		return a.From().Flipped()
+		return a.From().To()
 	}
 	switch a.outgoing.(type) {
 	case pgwire.ClientMessage:
@@ -126,7 +126,7 @@ func (a *action) String() string {
 	case ProxyForward:
 		return fmt.Sprintf("Forward(%T -> %s %v)", a.incoming, a.To(), a.effects)
 	case ProxyRespond:
-		return fmt.Sprintf("Respond(req %T -> %s, res %T -> %s %v)", a.incoming, a.From().Flipped(), a.outgoing, a.To(), a.effects)
+		return fmt.Sprintf("Respond(req %T -> %s, res %T -> %s %v)", a.incoming, a.From().To(), a.outgoing, a.To(), a.effects)
 	case ProxyRewrite:
 		return fmt.Sprintf("Rewrite(%T to %T -> %s %v)", a.incoming, a.outgoing, a.To(), a.effects)
 	case ProxySend:

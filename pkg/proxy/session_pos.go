@@ -43,15 +43,15 @@ type Pos interface {
 	// Forward the message to the destination.
 	// If the destination is the backend, an optional response handler can be provided.
 	// Returns an error if the message has already been handled.
-	Forward() error
+	Forward(ctx context.Context) error
 	// Replace the message with a new message for the destination.
 	// Returns an error if the rewritten message is for the source.
 	// Returns an error if the message has already been handled.
-	Rewrite(rewritten pgwire.Message) error
+	Rewrite(ctx context.Context, rewritten pgwire.Message) error
 	// Respond to the message with a message for the source.
 	// Returns an error if the response is for the destination.
 	// Returns an error if the message has already been handled.
-	Respond(response pgwire.Message) error
+	Respond(ctx context.Context, response pgwire.Message) error
 	// Returns true if the message has been handled by any action above.
 	Handled() bool
 
@@ -60,10 +60,8 @@ type Pos interface {
 
 	String() string
 
-	// Ctx returns a context derived from the one passed to [Session.Next] or [Session.Stream].
-	// The context is cancelled when [Session.Close] is called.
-	//
-	// TODO: possibly pass OTEL context from client message here.
+	// Ctx returns a context derived from the one passed to [Session.Next] or [Session.Stream],
+	// modified by [MessageTracker]s.
 	Ctx() context.Context
 
 	// Readers for message data.
@@ -167,31 +165,31 @@ func (p *pos) Skip() error {
 	return p.tryMarkHandled("skip")
 }
 
-func (p *pos) Forward() error {
+func (p *pos) Forward(ctx context.Context) error {
 	if err := p.tryMarkHandled("forward"); err != nil {
 		return err
 	}
-	return p.session.QueueSendPos(p)
+	return p.session.QueueSendPos(ctx, p)
 }
 
-func (p *pos) Respond(response pgwire.Message) error {
+func (p *pos) Respond(ctx context.Context, response pgwire.Message) error {
 	if dest(response) != p.from {
 		return fmt.Errorf("cannot respond: %w: %T -> %v != %v", ErrWrongDestination, response, dest(response), p.from)
 	}
 	if err := p.tryMarkHandled("respond"); err != nil {
 		return err
 	}
-	return p.session.QueueSend(response)
+	return p.session.QueueSend(ctx, response)
 }
 
-func (p *pos) Rewrite(rewritten pgwire.Message) error {
-	if dest(rewritten) != p.from.Flipped() {
-		return fmt.Errorf("cannot rewrite: %w: %T -> %v != %v", ErrWrongDestination, rewritten, dest(rewritten), p.from.Flipped())
+func (p *pos) Rewrite(ctx context.Context, rewritten pgwire.Message) error {
+	if dest(rewritten) != p.from.To() {
+		return fmt.Errorf("cannot rewrite: %w: %T -> %v != %v", ErrWrongDestination, rewritten, dest(rewritten), p.from.To())
 	}
 	if err := p.tryMarkHandled("rewrite"); err != nil {
 		return err
 	}
-	return p.session.QueueSend(rewritten)
+	return p.session.QueueSend(ctx, rewritten)
 }
 
 func (p *pos) Handled() bool {

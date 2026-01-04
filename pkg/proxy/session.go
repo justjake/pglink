@@ -20,7 +20,7 @@ var ErrBackendNotAcquired = errors.New("backend not acquired")
 var noHealthCheckChan = make(chan time.Time)
 
 type MessageTracker interface {
-	TrackMessage(ctx context.Context, msg pgwire.Message) error
+	TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error)
 }
 
 type Conn interface {
@@ -323,29 +323,38 @@ func (s *Session) QueueSendBytes(dest ProxyRole, bytes []byte) error {
 // QueueSend queues a message to be sent to its destination.
 // Messages from the backend are queued to the client.
 // Messages from the client are queued to the backend. During flush, backend will be acquired if needed.
-func (s *Session) QueueSend(msg pgwire.Message) error {
+func (s *Session) QueueSend(ctx context.Context, msg pgwire.Message) error {
 	// TODO: track write
 	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
 		return closedErr
 	}
-	if err := s.trackMessage(dest(msg), msg); err != nil {
+	if dest(msg) == RoleServer {
+		if _, err := s.AcquireBackend(ctx); err != nil {
+			return fmt.Errorf("queue send: %w", err)
+		}
+	}
+	if _, err := s.trackMessage(ctx, dest(msg), msg); err != nil {
 		return err
 	}
-	writeQueue := s.writeQueue(dest(msg))
-	return writeQueue.WriteMsg(msg)
+	return s.writeQueue(dest(msg)).WriteMsg(msg)
 }
 
-func (s *Session) QueueSendPos(pos Pos) error {
+func (s *Session) QueueSendPos(ctx context.Context, pos Pos) error {
 	// TODO: track write
 	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
 		return closedErr
 	}
 	unwrapped := pos.unwrap()
-	if err := s.trackPos(unwrapped.From().Flipped(), unwrapped); err != nil {
+	to := unwrapped.From().To()
+	if to == RoleServer {
+		if _, err := s.AcquireBackend(ctx); err != nil {
+			return fmt.Errorf("queue pos: %w", err)
+		}
+	}
+	if _, err := s.trackPos(ctx, to, unwrapped); err != nil {
 		return err
 	}
-	writeQueue := s.writeQueue(unwrapped.From().Flipped())
-	return writeQueue.WriteRingMsg(unwrapped.RingMsg)
+	return s.writeQueue(to).WriteRingMsg(unwrapped.RingMsg)
 }
 
 // TerminateClient sends terminationMessage to the client, flushes pending writes, and terminates the client connection.
@@ -357,7 +366,7 @@ func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwir
 		return closedErr
 	}
 
-	if err := s.QueueSend(terminationMessage.ToMessage()); err != nil {
+	if err := s.QueueSend(ctx, terminationMessage.ToMessage()); err != nil {
 		logger.Warn("ignored error sending termination message", "err", err)
 	}
 
@@ -767,32 +776,38 @@ func (s *Session) Trackers(role ProxyRole) iter.Seq[MessageTracker] {
 	}
 }
 
-func (s *Session) trackPos(role ProxyRole, pos *pos) error {
+func (s *Session) trackPos(rootCtx context.Context, role ProxyRole, pos *pos) (context.Context, error) {
 	msg, err := pos.AsMessage()
 	if err != nil {
-		return fmt.Errorf("track %s: %v: %w", role, pos, err)
+		return rootCtx, fmt.Errorf("track %s: %v: %w", role, pos, err)
 	}
 
-	return s.trackMessage(role, msg)
+	return s.trackMessage(rootCtx, role, msg)
 }
 
-func (s *Session) trackMessage(role ProxyRole, msg pgwire.Message) error {
+func (s *Session) trackMessage(rootCtx context.Context, role ProxyRole, msg pgwire.Message) (context.Context, error) {
 	var errs []error
+	ctx := rootCtx
 	for tracker := range s.Trackers(role) {
-		if err := tracker.TrackMessage(s.waitCtx(), msg); err != nil {
+		nextCtx, err := tracker.TrackMessage(ctx, msg)
+		if err != nil {
 			errs = append(errs, err)
+		} else if nextCtx != nil {
+			ctx = nextCtx
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("track %v: %T: %w", role, msg, errors.Join(errs...))
+		return rootCtx, fmt.Errorf("track %v: %T: %w", role, msg, errors.Join(errs...))
 	}
-	return nil
+	return ctx, nil
 }
 
 func (s *Session) beforeReadPos(pos *pos) error {
-	if err := s.trackPos(pos.From(), pos); err != nil {
+	ctx, err := s.trackPos(pos.Ctx(), pos.From(), pos)
+	if err != nil {
 		return err
 	}
+	pos.ctx = ctx
 	return nil
 }
 
