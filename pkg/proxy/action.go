@@ -109,6 +109,9 @@ func (a *action) Err() error {
 }
 
 func (a *action) WithEffects(effects ...pure.Effect) Action {
+	if len(effects) == 0 {
+		return a
+	}
 	var b action
 	b = *a
 	b.effects = make(pure.Effects, len(a.effects)+len(effects))
@@ -146,101 +149,90 @@ func (a *action) String() string {
 	}
 }
 
-func Forward(msg pgwire.Message, effects ...pure.Effect) Action {
+func Forward(msg pgwire.Message) Action {
 	return &action{
 		t:        ProxyForward,
 		incoming: msg,
 		outgoing: msg,
-		effects:  effects,
 	}
 }
 
-func ForwardAndHandleResponse(msg pgwire.ClientMessage, responseHandler ResponseHandler, effects ...pure.Effect) Action {
+func ForwardAndHandleResponse(msg pgwire.ClientMessage, responseHandler ResponseHandler) Action {
 	return &action{
 		t:               ProxyForward,
 		incoming:        msg,
 		outgoing:        msg,
 		responseHandler: responseHandler,
-		effects:         effects,
 	}
 }
 
-func Rewrite(msg pgwire.Message, rewritten pgwire.Message, effects ...pure.Effect) Action {
+func Rewrite(msg pgwire.Message, rewritten pgwire.Message) Action {
 	return &action{
 		t:        ProxyRewrite,
 		incoming: msg,
 		outgoing: rewritten,
-		effects:  effects,
 	}
 }
 
-func RewriteAndHandleResponse(msg pgwire.ClientMessage, rewritten pgwire.ClientMessage, responseHandler ResponseHandler, effects ...pure.Effect) Action {
+func RewriteAndHandleResponse(msg pgwire.ClientMessage, rewritten pgwire.ClientMessage, responseHandler ResponseHandler) Action {
 	return &action{
 		t:               ProxyRewrite,
 		incoming:        msg,
 		outgoing:        rewritten,
 		responseHandler: responseHandler,
-		effects:         effects,
 	}
 }
 
-func SendToServerAndHandleResponse(msg pgwire.ClientMessage, responseHandler ResponseHandler, effects ...pure.Effect) Action {
+func SendToServerAndHandleResponse(msg pgwire.ClientMessage, responseHandler ResponseHandler) Action {
 	return &action{
 		t:               ProxySend,
 		outgoing:        msg,
 		responseHandler: responseHandler,
-		effects:         effects,
 	}
 }
 
-func SendToClient(msg pgwire.ServerMessage, effects ...pure.Effect) Action {
+func SendToClient(msg pgwire.ServerMessage) Action {
 	return &action{
 		t:        ProxySend,
 		outgoing: msg,
-		effects:  effects,
 	}
 }
 
-func Skip(msg pgwire.Message, effects ...pure.Effect) Action {
+func Skip(msg pgwire.Message) Action {
 	return &action{
 		t:        ProxySkip,
 		incoming: msg,
-		effects:  effects,
 	}
 }
 
-func TerminateClient(msg pgwire.ClientMessage, err error, effects ...pure.Effect) Action {
+func TerminateClient(msg pgwire.ClientMessage, err error) Action {
 	return &action{
 		t:        ProxyTerminateClient,
 		incoming: msg,
 		err:      err,
-		effects:  effects,
 	}
 }
 
-func TerminateServer(msg pgwire.ServerMessage, err error, effects ...pure.Effect) Action {
+func TerminateServer(msg pgwire.ServerMessage, err error) Action {
 	return &action{
 		t:        ProxyTerminateServer,
 		incoming: msg,
 		err:      err,
-		effects:  effects,
 	}
 }
 
-func TerminateBoth(msg pgwire.Message, err error, effects ...pure.Effect) Action {
+func TerminateBoth(msg pgwire.Message, err error) Action {
 	return &action{
 		t:        ProxyTerminateBoth,
 		incoming: msg,
 		err:      err,
-		effects:  effects,
 	}
 }
 
-func UnexpectedError(msg pgwire.Message, err error, effects ...pure.Effect) Action {
+func UnexpectedError(msg pgwire.Message, err error) Action {
 	return &action{
 		t:        ProxyUnexpectedError,
 		incoming: msg,
 		err:      err,
-		effects:  effects,
 	}
 }

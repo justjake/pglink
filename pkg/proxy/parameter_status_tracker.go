@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/justjake/pglink/pkg/pgwire"
@@ -12,7 +13,7 @@ type ParameterStatusTracker struct {
 	Parameters []string
 }
 
-var _ Tracker = (*ParameterStatusTracker)(nil)
+var _ MessageTracker = (*ParameterStatusTracker)(nil)
 
 func (t *ParameterStatusTracker) SetState(state pgwire.ParameterStatuses) {
 	t.ParameterStatuses = state
@@ -31,6 +32,11 @@ func (t *ParameterStatusTracker) TrackNow(msg pgwire.Message) {
 		}
 		t.ParameterStatuses[data.Name] = data.Value
 	}
+}
+
+func (t *ParameterStatusTracker) TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error) {
+	t.TrackNow(msg)
+	return ctx, nil
 }
 
 func (t *ParameterStatusTracker) TrackEffect(msg pgwire.Message) pure.Effect {

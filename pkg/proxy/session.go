@@ -413,7 +413,7 @@ func (s *Session) TerminateBackend(ctx context.Context, cause error) error {
 	return nil
 }
 
-func (s *Session) TerminateBoth(ctx context.Context, dest ProxyRole, terminationMessage *pgwire.Err) error {
+func (s *Session) TerminateBoth(ctx context.Context, terminationMessage *pgwire.Err) error {
 	clientErr := s.TerminateClient(ctx, terminationMessage)
 	backendErr := s.TerminateBackend(ctx, terminationMessage)
 	return errors.Join(clientErr, backendErr)
@@ -424,7 +424,7 @@ func (s *Session) TerminateBothUnexpectedError(ctx context.Context, cause error)
 	if !errors.As(cause, &pgErr) {
 		pgErr = pgwire.NewErr(pgwire.ErrorPanic, pgerrcode.InternalError, "unexpected error", cause)
 	}
-	return s.TerminateBoth(ctx, RoleProxy, pgErr)
+	return s.TerminateBoth(ctx, pgErr)
 }
 
 func (s *Session) releaseClient(ctx context.Context) error {

@@ -14,7 +14,7 @@ type OutstandingRequestQueue struct {
 	lastCompleted *OutstandingRequest
 }
 
-var _ Tracker = &OutstandingRequestQueue{}
+var _ MessageTracker = (*OutstandingRequestQueue)(nil)
 
 func (q *OutstandingRequestQueue) Len() int {
 	return len(q.outstanding)
@@ -59,6 +59,11 @@ func (q *OutstandingRequestQueue) TrackEffect(msg pgwire.Message) pure.Effect {
 		_, err = q.trackNow(ctx, msg)
 		return
 	})
+}
+
+func (q *OutstandingRequestQueue) TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error) {
+	_, err := q.trackNow(ctx, msg)
+	return ctx, err
 }
 
 func (q *OutstandingRequestQueue) trackNow(ctx context.Context, msg pgwire.Message) (bool, error) {
@@ -132,7 +137,11 @@ func (r *OutstandingRequest) Handle(ctx context.Context, msg pgwire.ServerMessag
 		effect = r.SetResponseHandlerEffect(state)
 	}
 	if action == nil {
-		return Forward(msg, effect), true
+		action = Forward(msg)
+		if effect != nil {
+			action = action.WithEffects(effect)
+		}
+		return action, true
 	} else {
 		return action.WithEffects(effect), true
 	}

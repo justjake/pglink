@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 var ErrPosAlreadyHandled = errors.New("pos already handled")
 var ErrPosNotHandled = errors.New("pos not handled")
 var ErrWrongDestination = errors.New("wrong destination")
+var ErrPosActionMismatch = errors.New("pos action mismatch")
 
 // Pos represents a position in a message stream of a proxy [Session].
 // Pos is only valid until the next call to [Session.Next].
@@ -25,6 +27,11 @@ type Pos interface {
 	// Index of the message in the `From()` message stream.
 	FromMsgIdx() int64
 
+	// Returns the message at this position.
+	// Panics if the message is not a valid message.
+	Msg() pgwire.Message
+	// Returns the message at this position.
+	// Returns an error if the message is not a valid message.
 	AsMessage() (pgwire.Message, error)
 
 	// If From() is RoleClient, returns the client message.
@@ -52,6 +59,8 @@ type Pos interface {
 	// Returns an error if the response is for the destination.
 	// Returns an error if the message has already been handled.
 	Respond(ctx context.Context, response pgwire.Message) error
+	// Dispatch an Action object as an alternative to calling a method directly.
+	Dispatch(ctx context.Context, action Action) error
 	// Returns true if the message has been handled by any action above.
 	Handled() bool
 
@@ -101,6 +110,15 @@ func (p *pos) FromClient() bool {
 // FromServer implements [Pos].
 func (p *pos) FromServer() bool {
 	return p.from == RoleServer
+}
+
+// Msg implements [Pos].
+func (p *pos) Msg() pgwire.Message {
+	msg, err := p.AsMessage()
+	if err != nil {
+		panic(err)
+	}
+	return msg
 }
 
 func (p *pos) AsMessage() (pgwire.Message, error) {
@@ -190,6 +208,65 @@ func (p *pos) Rewrite(ctx context.Context, rewritten pgwire.Message) error {
 		return err
 	}
 	return p.session.QueueSend(ctx, rewritten)
+}
+
+func (p *pos) Dispatch(ctx context.Context, action Action) error {
+	unwrapped := action.unwrap()
+	if unwrapped.incoming != nil {
+		if unwrapped.incoming.Source() != p.RingMsg {
+			return fmt.Errorf("%w: %v: action source %v != pos %v", ErrPosActionMismatch, action, unwrapped.incoming.Source(), p.RingMsg)
+		}
+	}
+
+	p.Logger().Debug("dispatch", "action", action)
+
+	// TODO: effects? or are we getting rid of those?
+
+	switch unwrapped.t {
+	case ProxyForward:
+		return p.Forward(ctx)
+	case ProxyRespond:
+		return p.Respond(ctx, unwrapped.outgoing)
+	case ProxyRewrite:
+		return p.Rewrite(ctx, unwrapped.outgoing)
+	case ProxySend:
+		if err := p.Skip(); err != nil {
+			return fmt.Errorf("%w: %v", err, action)
+		}
+		return p.session.QueueSend(ctx, unwrapped.outgoing)
+	case ProxySkip:
+		return p.Skip()
+	case ProxyTerminateBoth:
+		if !p.Handled() {
+			_ = p.Skip()
+		}
+		var pgErr *pgwire.Err
+		if !errors.As(unwrapped.err, &pgErr) {
+			pgErr = pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InternalError, "unexpected error", unwrapped.err)
+		}
+		return p.session.TerminateBoth(ctx, pgErr)
+	case ProxyTerminateClient:
+		if !p.Handled() {
+			_ = p.Skip()
+		}
+		var pgErr *pgwire.Err
+		if !errors.As(unwrapped.err, &pgErr) {
+			pgErr = pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InternalError, "unexpected error", unwrapped.err)
+		}
+		return p.session.TerminateClient(ctx, pgErr)
+	case ProxyTerminateServer:
+		if !p.Handled() {
+			_ = p.Skip()
+		}
+		return p.session.TerminateBackend(ctx, unwrapped.err)
+	case ProxyUnexpectedError:
+		if !p.Handled() {
+			_ = p.Skip()
+		}
+		return p.session.TerminateBothUnexpectedError(ctx, unwrapped.err)
+	default:
+		panic(fmt.Sprintf("unexpected proxy.ActionType: %#v", unwrapped.t))
+	}
 }
 
 func (p *pos) Handled() bool {
