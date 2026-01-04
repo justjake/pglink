@@ -419,6 +419,31 @@ func (s *serverTrackers) trackConn(c *conn, add bool) {
 	}
 }
 
+// closeListeners closes all tracked listeners.
+func (s *serverTrackers) closeListeners() error {
+	s.mu.Lock()
+	listeners := make([]net.Listener, 0, len(s.listeners))
+	for ln := range s.listeners {
+		listeners = append(listeners, *ln)
+	}
+	s.mu.Unlock()
+
+	var lastErr error
+	for _, ln := range listeners {
+		if err := ln.Close(); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+// Close immediately closes all active listeners.
+// Active connections will finish handling their current request before being closed.
+func (s *Server) Close() error {
+	s.inShutdown.Store(true)
+	return s.closeListeners()
+}
+
 type conn struct {
 	raw      net.Conn
 	conn     net.Conn

@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -18,6 +19,8 @@ import (
 	"github.com/justjake/pglink/pkg/backend"
 	"github.com/justjake/pglink/pkg/config"
 	"github.com/justjake/pglink/pkg/observability"
+	"github.com/justjake/pglink/pkg/pgserver"
+	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // Service handles incoming client connections.
@@ -29,6 +32,9 @@ type Service struct {
 	config    *config.Config
 	secrets   *config.SecretCache
 	tlsConfig *tls.Config
+
+	// pgserver handles listener, TLS, auth, and cancel requests
+	server *pgserver.Server
 
 	listener  net.Listener
 	databases map[*config.DatabaseConfig]*backend.Database
@@ -100,8 +106,26 @@ func (s *Service) Listen() error {
 		s.databases[dbConfig] = db
 	}
 
-	// Set up listener
+	// Create pgserver.Server
 	addr := s.config.GetListenAddr()
+	server, err := pgserver.NewServer(pgserver.ServerConfig{
+		Addr:           addr.String(),
+		TLSConfig:      s.tlsConfig,
+		TLSOptional:    !s.config.TLSRequired(),
+		BaseContext:    func(net.Listener) context.Context { return s.ctx },
+		ConnContext:    s.connContext, // Connection limiting
+		AuthHandler:    s.makeAuthHandler(),
+		StartupHandler: s.startupHandler,
+		Handler:        s.connHandler,
+		CancelHandler:  s.cancelHandler,
+		Logger:         s.logger,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create server: %w", err)
+	}
+	s.server = server
+
+	// Set up listener
 	ln, err := net.Listen("tcp", addr.String())
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
@@ -112,26 +136,32 @@ func (s *Service) Listen() error {
 	// Start periodic pool stats collection for metrics
 	s.startPoolStatsCollection(s.ctx)
 
-	// Start a goroutine to close listener and cancel sessions when context is cancelled
+	// Start a goroutine to close listener and shutdown server when context is cancelled
 	go func() {
 		<-s.ctx.Done()
-		_ = s.listener.Close()
+		_ = s.server.Close()
 		s.cancelAllSessions()
 	}()
 
-	// Run accept loop (blocks until listener is closed or error)
-	acceptErr := s.acceptLoop(ln)
+	// Run the server (blocks until server is closed or error)
+	serverErr := s.server.Serve(ln)
 
 	// Wait for all sessions to finish
 	s.sessionsWg.Wait()
 
-	// Return context error if that's why we stopped, otherwise return accept error
+	// Return context error if that's why we stopped, otherwise return server error
 	if s.ctx.Err() != nil {
 		return s.ctx.Err()
 	}
-	return acceptErr
+	if errors.Is(serverErr, pgserver.ErrServerClosed) {
+		return nil
+	}
+	return serverErr
 }
 
+// DEPRECATED: acceptLoop is dead code now that pgserver.Server handles connections.
+// This function and related code (newSession, rejectConnection, Session.Run) should be
+// removed once the pgserver migration is fully validated.
 // acceptLoop accepts connections on the given listener until it is closed.
 func (s *Service) acceptLoop(ln net.Listener) error {
 	maxConns := s.config.GetMaxClientConnections()
@@ -187,6 +217,7 @@ func (s *Service) acceptLoop(ln net.Listener) error {
 	}
 }
 
+// DEPRECATED: rejectConnection is dead code. See acceptLoop.
 // rejectConnection sends an error to the client and closes the connection.
 func (s *Service) rejectConnection(conn net.Conn, reason string) {
 	defer func() { _ = conn.Close() }()
@@ -208,6 +239,7 @@ func (s *Service) rejectConnection(conn net.Conn, reason string) {
 	)
 }
 
+// DEPRECATED: newSession is dead code. See acceptLoop.
 // newSession creates a new Session for the given connection.
 func (s *Service) newSession(conn net.Conn) *Session {
 	ctx, cancel := context.WithCancel(s.ctx)
@@ -406,4 +438,272 @@ func (s *Service) handleCancelRequest(req *pgproto3.CancelRequest) error {
 		s.logger.Info("cancelled query", "pid", req.ProcessID)
 	}
 	return nil
+}
+
+// ============================================================================
+// pgserver handlers for Phase 3 migration
+// ============================================================================
+
+// authConnData stores authentication-related data that needs to be passed
+// from the authorizer to the handler via the connection context.
+type authConnData struct {
+	dbConfig   *config.DatabaseConfig
+	userConfig *config.UserConfig
+	database   *backend.Database
+}
+
+type authConnDataKey struct{}
+
+// passwordAuthorizer implements pgserver.PasswordAuthorizer.
+// It looks up the database and user config and returns credentials.
+func (s *Service) passwordAuthorizer(ctx context.Context, conn *pgserver.UnauthorizedConn) (pgwire.UserSecretData, error) {
+	params := pgwire.ParameterStatuses(conn.StartupMessage.Parameters)
+	databaseName := params.Database()
+	userName := params.User()
+
+	// Look up database config
+	dbConfig, ok := s.config.Databases[databaseName]
+	if !ok {
+		return pgwire.UserSecretData{}, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidCatalogName,
+			fmt.Sprintf("database \"%s\" does not exist", databaseName), nil)
+	}
+
+	database := s.databases[dbConfig]
+	if database == nil {
+		return pgwire.UserSecretData{}, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidCatalogName,
+			fmt.Sprintf("database \"%s\" not initialized", databaseName), nil)
+	}
+
+	// Find matching user config
+	var userConfig *config.UserConfig
+	for i := range dbConfig.Users {
+		user := &dbConfig.Users[i]
+		resolvedUsername, err := s.secrets.Get(ctx, user.Username)
+		if err != nil {
+			continue
+		}
+		if resolvedUsername == userName {
+			userConfig = user
+			break
+		}
+	}
+	if userConfig == nil {
+		return pgwire.UserSecretData{}, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidAuthorizationSpecification,
+			fmt.Sprintf("user \"%s\" does not exist", userName), nil)
+	}
+
+	// Store config data for later use by handler
+	conn.FrontendConn.SetExtraData(authConnDataKey{}, &authConnData{
+		dbConfig:   dbConfig,
+		userConfig: userConfig,
+		database:   database,
+	})
+
+	// Get credentials
+	username, err := s.secrets.Get(ctx, userConfig.Username)
+	if err != nil {
+		return pgwire.UserSecretData{}, fmt.Errorf("failed to resolve username: %w", err)
+	}
+	password, err := s.secrets.Get(ctx, userConfig.Password)
+	if err != nil {
+		return pgwire.UserSecretData{}, fmt.Errorf("failed to resolve password: %w", err)
+	}
+
+	return pgwire.NewUserSecretData(username, password), nil
+}
+
+// makeAuthHandler creates the appropriate auth handler based on config.
+func (s *Service) makeAuthHandler() pgserver.AuthHandler {
+	authenticator := &pgserver.PasswordAuthenticator{
+		PasswordAuthorizer:  s.passwordAuthorizer,
+		SCRAMIterationCount: s.config.GetSCRAMIterations(),
+	}
+
+	authMethod := s.config.GetAuthMethod()
+	switch authMethod {
+	case config.AuthMethodPlaintext:
+		return authenticator.CleartextPassword
+	case config.AuthMethodMD5:
+		return authenticator.MD5Password
+	case config.AuthMethodSCRAMSHA256, config.AuthMethodSCRAMSHA256Plus:
+		return authenticator.SASL
+	default:
+		// Default to SCRAM-SHA-256
+		return authenticator.SASL
+	}
+}
+
+// startupHandler implements pgserver.StartupHandler.
+// It assigns PID, secret key, and startup parameters.
+func (s *Service) startupHandler(ctx context.Context, conn *pgserver.AuthorizedConn) (*pgserver.ClientConn, error) {
+	// Get config data saved by authorizer
+	authData, ok := conn.FrontendConn.GetExtraData(authConnDataKey{}).(*authConnData)
+	if !ok || authData == nil {
+		return nil, fmt.Errorf("missing auth data")
+	}
+
+	// Allocate PID and generate secret key
+	pid := pgwire.ProcessID(s.allocPID())
+	var secretKeyBytes [4]byte
+	if _, err := rand.Read(secretKeyBytes[:]); err != nil {
+		return nil, fmt.Errorf("failed to generate secret key: %w", err)
+	}
+	secretKey := pgwire.SecretKey(uint32(secretKeyBytes[0])<<24 | uint32(secretKeyBytes[1])<<16 |
+		uint32(secretKeyBytes[2])<<8 | uint32(secretKeyBytes[3]))
+
+	// Build startup parameters
+	params := make(pgwire.ParameterStatuses)
+	// Start with default server parameters
+	params["server_version"] = "17.0"
+	params["server_encoding"] = "UTF8"
+	params["client_encoding"] = "UTF8"
+	params["DateStyle"] = "ISO, MDY"
+	params["TimeZone"] = "UTC"
+	params["integer_datetimes"] = "on"
+	params["standard_conforming_strings"] = "on"
+	params["is_superuser"] = "off"
+	params["session_authorization"] = conn.User
+
+	// Add parameters from backend config
+	for key, value := range authData.dbConfig.Backend.DefaultStartupParameters.All() {
+		params[key] = value
+	}
+
+	// Copy client-provided parameters that the server should echo back
+	clientParams := pgwire.ParameterStatuses(conn.StartupMessage.Parameters)
+	if clientEncoding := clientParams["client_encoding"]; clientEncoding != "" {
+		params["client_encoding"] = clientEncoding
+	}
+	if app := clientParams["application_name"]; app != "" {
+		params["application_name"] = app
+	}
+
+	return &pgserver.ClientConn{
+		FrontendConn:      conn.FrontendConn,
+		User:              conn.User,
+		Database:          conn.Database,
+		ProcessID:         pid,
+		SecretKey:         secretKey,
+		StartupParameters: params,
+		ExtraData:         authData,
+	}, nil
+}
+
+// connHandler implements pgserver.ConnHandler.
+// It creates a Session from ClientConn and runs the proxy loop.
+func (s *Service) connHandler(ctx context.Context, conn *pgserver.ClientConn) error {
+	// Get config data
+	authData, ok := conn.ExtraData.(*authConnData)
+	if !ok || authData == nil {
+		return fmt.Errorf("missing auth data")
+	}
+
+	// Create session context
+	sessionCtx, cancel := context.WithCancel(ctx)
+
+	// Convert StartupParameters to map[string]string for Session
+	startupParams := make(map[string]string, len(conn.StartupParameters))
+	for k, v := range conn.StartupParameters {
+		startupParams[k] = v
+	}
+
+	// Create the session, skipping startup/auth since pgserver handled those.
+	// Note: We set conn to nil because pgserver manages the connection lifecycle.
+	// Setting conn would cause a double-close error (session.Close() and pgserver both try to close).
+	session := &Session{
+		ctx:               sessionCtx,
+		cancel:            cancel,
+		service:           s,
+		conn:              nil, // pgserver manages connection lifecycle
+		logger:            s.logger.With("client", conn.Conn.RemoteAddr().String(), "user", conn.User, "database", conn.Database, "pid", conn.ProcessID),
+		tlsConfig:         s.tlsConfig,
+		secrets:           s.secrets,
+		config:            s.config,
+		tracingEnabled:    s.tracingEnabled,
+		metrics:           s.metrics,
+		startupParameters: startupParams,
+		databaseName:      conn.Database,
+		userName:          conn.User,
+		dbConfig:          authData.dbConfig,
+		userConfig:        authData.userConfig,
+		database:          authData.database,
+	}
+
+	// Initialize protocol state with values from ClientConn
+	session.state = pgwire.NewProtocolState()
+	session.state.PID = uint32(conn.ProcessID)
+	session.state.SecretCancelKey = uint32(conn.SecretKey)
+	session.state.TxStatus = pgwire.TxIdle
+	for k, v := range conn.StartupParameters {
+		session.state.ParameterStatuses[k] = v
+	}
+
+	// Create frontend wrapper for the connection
+	session.frontend = NewFrontendFromClientConn(session.ctx, conn)
+	session.enableTracing()
+
+	// Register session
+	s.registerSession(session)
+	s.activeConns.Add(1)
+	s.registerForCancel(session)
+
+	defer func() {
+		s.unregisterForCancel(session)
+		s.activeConns.Add(-1)
+		s.unregisterSession(session)
+		session.Close()
+	}()
+
+	// Set up observability
+	session.startSessionSpan()
+	session.setupFlowRecognizers()
+	if session.metrics != nil {
+		session.metrics.RecordClientConnection(session.databaseName, session.userName)
+		defer session.metrics.RecordClientDisconnect(session.databaseName, session.userName)
+	}
+
+	// Send startup messages (ParameterStatus, BackendKeyData, ReadyForQuery)
+	// pgserver doesn't send these automatically yet, so we do it here.
+	for key, value := range conn.StartupParameters {
+		session.frontend.Send(&pgproto3.ParameterStatus{
+			Name:  key,
+			Value: value,
+		})
+	}
+	session.frontend.Send(&pgproto3.BackendKeyData{
+		ProcessID: uint32(conn.ProcessID),
+		SecretKey: uint32(conn.SecretKey),
+	})
+	session.frontend.Send(&pgproto3.ReadyForQuery{TxStatus: byte(session.state.TxStatus)})
+	if err := session.frontend.Flush(); err != nil {
+		return fmt.Errorf("failed to send startup messages: %w", err)
+	}
+
+	// Start the ring buffer for reading from client
+	session.frontend.StartRingBuffer(authData.dbConfig.GetMessageBufferBytes())
+
+	// Configure metrics tracking for frontend (bytes sent to client)
+	session.frontend.SetMetrics(session.metrics, session.databaseName)
+
+	// Run the main proxy loop
+	return session.runMainLoop()
+}
+
+// cancelHandler implements pgserver.CancelHandler.
+func (s *Service) cancelHandler(ctx context.Context, conn *pgserver.CancelConn) error {
+	req := conn.CancelMessage
+	return s.handleCancelRequest(&pgproto3.CancelRequest{
+		ProcessID: req.ProcessID,
+		SecretKey: req.SecretKey,
+	})
+}
+
+// connContext implements connection limiting via pgserver.ConnContext.
+func (s *Service) connContext(ctx context.Context, conn net.Conn) (context.Context, error) {
+	maxConns := s.config.GetMaxClientConnections()
+	currentConns := s.activeConns.Load()
+	if currentConns >= maxConns {
+		return nil, fmt.Errorf("too many connections (current: %d, max: %d)", currentConns, maxConns)
+	}
+	return ctx, nil
 }

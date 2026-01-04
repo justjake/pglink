@@ -70,6 +70,9 @@ type Backend interface {
 	// Release releases the backend connection back to some underlying pool.
 	// It is expected that calling backend methods after Release may panic.
 	Release()
+	// OutstandingRequests returns the queue of outstanding requests sent to the backend.
+	// This is used to attach response handlers to requests.
+	OutstandingRequests() *OutstandingRequestQueue
 }
 
 // SessionConfig configures a [Session].

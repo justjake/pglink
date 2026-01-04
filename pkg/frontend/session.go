@@ -168,6 +168,11 @@ func (s *Session) Close() {
 	}
 }
 
+// DEPRECATED: Run is dead code now that pgserver.Server handles connections.
+// The new code path uses connHandler -> runMainLoop().
+// This method and related startup/auth code (handleSSLRequest, handleStartup, authenticate)
+// should be removed once the pgserver migration is fully validated.
+//
 // Run handles the full lifecycle of a client session.
 // It processes the PostgreSQL protocol, authenticates the client,
 // establishes a backend connection, and proxies messages.
@@ -367,6 +372,101 @@ func (s *Session) Run() {
 			if err := s.runWithBackend(msg); err != nil {
 				s.sendError(err)
 				return
+			}
+
+			// We have returned from having a backend to being idle.
+			// Wait for next client message that needs a backend.
+		}
+	}
+}
+
+// runMainLoop runs the main proxy loop after startup is complete.
+// This is called by Service.connHandler when using pgserver.Server.
+func (s *Session) runMainLoop() error {
+	// Connect ring buffer debug logging to session logger, but only if debug
+	// level is enabled. This avoids allocating variadic args in the hot path
+	// when debug logging is disabled (the common case in production/benchmarks).
+	if s.logger.Enabled(s.ctx, slog.LevelDebug) {
+		s.frontend.RingBuffer().SetDebugLog(func(msg string, args ...any) {
+			s.logger.Debug(msg, args...)
+		})
+	}
+
+	// Idle client state.
+	// When true, transition to backend connected state to handle the query.
+	// When false, close the client connection.
+	idleClientState := pgwire.ClientMessageHandlers[bool]{
+		SimpleQuery: func(msg pgwire.ClientSimpleQuery) (bool, error) {
+			return true, nil
+		},
+		ExtendedQuery: func(msg pgwire.ClientExtendedQuery) (bool, error) {
+			return true, nil
+		},
+
+		TerminateConn: func(msg pgwire.ClientTerminateConn) (bool, error) {
+			return false, errTerminateConn
+		},
+
+		// These messages don't make any sense in the idle state.
+		Cancel: func(msg pgwire.ClientCancel) (bool, error) {
+			return false, pgwire.NewProtocolViolation(fmt.Errorf("cancel request received on normal connection"), msg)
+		},
+		Copy: func(msg pgwire.ClientCopy) (bool, error) {
+			return false, pgwire.NewProtocolViolation(fmt.Errorf("idle client not in copy mode"), msg)
+		},
+		Startup: func(msg pgwire.ClientStartup) (bool, error) {
+			return false, pgwire.NewProtocolViolation(fmt.Errorf("startup completed already"), msg)
+		},
+	}
+
+	frontendCursor := s.frontend.Cursor()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		case <-frontendCursor.Done():
+			err := s.frontend.Cursor().Err()
+			if errors.Is(err, io.EOF) {
+				s.logger.Info("client terminated connection")
+				return nil
+			}
+			return err
+		case <-frontendCursor.Ready():
+			// Time to loop.
+		}
+
+		got, err := s.frontend.Cursor().TryNextBatch()
+		if err != nil {
+			return pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.ConnectionException, "error receiving client message", err)
+		} else if !got {
+			s.logger.Warn("frontend cursor ready but no messages available")
+			continue
+		}
+
+		for frontendCursor.NextMsg() {
+			msg, err := frontendCursor.AsClient()
+			if err != nil {
+				return pgwire.NewProtocolViolation(err, msg)
+			}
+
+			s.state.Update(msg)
+
+			transitionToBackend, err := idleClientState.Handle(msg)
+			if errors.Is(err, errTerminateConn) {
+				s.logger.Info("client terminated connection")
+				return nil
+			} else if err != nil {
+				return pgwire.NewProtocolViolation(err, msg)
+			} else if !transitionToBackend {
+				continue
+			}
+
+			// Rewind so that runWithBackend starts at the "current" message
+			// when it calls cursor.NextMsg()
+			frontendCursor.PrevMsg()
+			// Enter the backend-acquired state loop.
+			if err := s.runWithBackend(msg); err != nil {
+				return err
 			}
 
 			// We have returned from having a backend to being idle.
@@ -1445,6 +1545,7 @@ func (s *Session) findUserConfig(dbConfig *config.DatabaseConfig) (*config.UserC
 }
 
 // authenticate performs client authentication.
+// TODO: This is a temporary stub until full pgserver migration is complete.
 func (s *Session) authenticate() error {
 	// Get credentials for verification
 	username, err := s.secrets.Get(s.ctx, s.userConfig.Username)
@@ -1456,19 +1557,47 @@ func (s *Session) authenticate() error {
 		return fmt.Errorf("failed to get password: %w", err)
 	}
 
-	creds := NewUserSecretData(username, password)
+	creds := pgwire.NewUserSecretData(username, password)
 
-	// Create and run auth session
-	authSession, err := NewAuthSession(s.frontend, creds, s.config.GetAuthMethod(), s.tlsState, s.config.GetSCRAMIterations())
+	// For now, just do plaintext auth as a stub
+	// Full auth will be handled by pgserver after migration
+	authMethod := s.config.GetAuthMethod()
+	switch authMethod {
+	case config.AuthMethodPlaintext:
+		return s.authenticatePlaintext(creds)
+	default:
+		// Fallback to plaintext for other methods during migration
+		s.logger.Warn("using plaintext auth as fallback during migration", "configuredMethod", authMethod)
+		return s.authenticatePlaintext(creds)
+	}
+}
+
+func (s *Session) authenticatePlaintext(creds pgwire.UserSecretData) error {
+	// Request cleartext password
+	s.frontend.Send(&pgproto3.AuthenticationCleartextPassword{})
+	if err := s.frontend.Flush(); err != nil {
+		return fmt.Errorf("failed to send auth request: %w", err)
+	}
+
+	// Receive password
+	msg, err := s.frontend.Receive()
 	if err != nil {
-		return fmt.Errorf("failed to create auth session: %w", err)
+		return fmt.Errorf("failed to receive password: %w", err)
 	}
 
-	if err := authSession.Run(); err != nil {
-		return err
+	pwMsg, ok := msg.(*pgwire.ClientPasswordMessage)
+	if !ok {
+		return pgwire.NewProtocolViolation(fmt.Errorf("expected password message, got %T", msg), msg)
 	}
 
-	return nil
+	// Verify password
+	if pwMsg.Parse().Password != creds.Password() {
+		return pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", nil)
+	}
+
+	// Send auth OK
+	s.frontend.Send(&pgproto3.AuthenticationOk{})
+	return s.frontend.Flush()
 }
 
 func (s *Session) initSessionProcessState() {

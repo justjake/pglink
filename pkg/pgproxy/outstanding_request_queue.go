@@ -147,6 +147,10 @@ func (r *OutstandingRequest) Handle(ctx context.Context, msg pgwire.ServerMessag
 	}
 }
 
+func (r *OutstandingRequest) SetResponseHandler(handler ResponseHandler) {
+	r.handler = handler
+}
+
 func (r *OutstandingRequest) SetResponseHandlerEffect(state ResponseHandler) pure.Effect {
 	return pure.DoNamed(fmt.Sprintf("%v.SetState(%s)", r, pure.DescribeFunction(state)), func() {
 		r.handler = state

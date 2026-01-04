@@ -225,14 +225,32 @@ func (p *pos) Dispatch(ctx context.Context, action Action) (err error) {
 	if p.baseLogger.Enabled(ctx, slog.LevelDebug) {
 		p.Logger().Debug("dispatch", "action", action)
 	}
-	if unwrapped.responseHandler != nil {
-		panic(fmt.Errorf("dispatch %v: response handler not implemented yet", action))
-	}
 
 	defer func() {
 		if err != nil {
 			p.Logger().Error("dispatch", "action", action, "error", err)
 		} else {
+			// Attach response handler to the last outstanding request if present.
+			// This runs after the message has been queued and tracked by the OutstandingRequestQueue.
+			if unwrapped.responseHandler != nil {
+				if action.To() != RoleServer {
+					err = fmt.Errorf("dispatch %v: response handler only supported for messages to server, got %v", action, action.To())
+					return
+				}
+				backend := p.session.Backend()
+				if backend == nil {
+					err = fmt.Errorf("dispatch %v: response handler requires backend: %w", action, ErrBackendNotAcquired)
+					return
+				}
+				lastReq := backend.OutstandingRequests().LastOutstanding()
+				if lastReq == nil {
+					err = fmt.Errorf("dispatch %v: response handler requires outstanding request, but queue is empty", action)
+					return
+				}
+				lastReq.SetResponseHandler(unwrapped.responseHandler)
+				p.Logger().Debug("attached response handler", "action", action, "request", lastReq)
+			}
+
 			// TODO: possibly remove effect concept entirely.
 			// New code should not use effects.
 			var errs []error

@@ -20,6 +20,25 @@ type FrontendConn struct {
 	Conn         net.Conn
 	Frontend     *pgproto3.Backend
 	connAcquired bool
+	// extraData stores arbitrary data associated with this connection.
+	// Used to pass data between auth and startup handlers.
+	extraData map[any]any
+}
+
+// SetExtraData stores a value associated with the given key.
+func (f *FrontendConn) SetExtraData(key, value any) {
+	if f.extraData == nil {
+		f.extraData = make(map[any]any)
+	}
+	f.extraData[key] = value
+}
+
+// GetExtraData retrieves a value associated with the given key.
+func (f *FrontendConn) GetExtraData(key any) any {
+	if f.extraData == nil {
+		return nil
+	}
+	return f.extraData[key]
 }
 
 // Receive receives a message with context deadline support.

@@ -3,9 +3,11 @@ package backend
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
+	"github.com/justjake/pglink/pkg/pgproxy"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
@@ -29,11 +31,14 @@ import (
 // When adding new functionality, prefer adding methods to PooledBackend that
 // delegate to Session, rather than exposing Session directly.
 type PooledBackend struct {
-	conn     *MultiPoolConn
-	session  *Session
-	released bool
-	cursor   *pgwire.Cursor
+	conn            *MultiPoolConn
+	session         *Session
+	released        bool
+	cursor          *pgwire.Cursor
+	netConnAcquired bool // for pgproxy.Backend interface
 }
+
+var _ pgproxy.Backend = (*PooledBackend)(nil)
 
 func (c *PooledBackend) TrackedParameters() []string {
 	return c.session.TrackedParameters
@@ -213,4 +218,54 @@ func (c *PooledBackend) panicIfReleased() {
 	if c.released {
 		panic(fmt.Errorf("PooledConn: already released: %s", c.String()))
 	}
+}
+
+// ============================================================================
+// pgproxy.Backend interface implementation
+// ============================================================================
+
+// AcquireNetConn implements pgproxy.Conn.
+// Takes exclusive ownership of the underlying net.Conn for use with pgproxy.Session.
+func (c *PooledBackend) AcquireNetConn(ctx context.Context) (net.Conn, error) {
+	c.panicIfReleased()
+	if c.netConnAcquired {
+		return nil, fmt.Errorf("net.Conn already acquired")
+	}
+	c.netConnAcquired = true
+	return c.conn.Value().Conn().PgConn().Conn(), nil
+}
+
+// ReleaseNetConn implements pgproxy.Conn.
+// Releases the underlying net.Conn back to PooledBackend.
+func (c *PooledBackend) ReleaseNetConn() error {
+	c.panicIfReleased()
+	if !c.netConnAcquired {
+		return fmt.Errorf("net.Conn not acquired")
+	}
+	c.netConnAcquired = false
+	return nil
+}
+
+// Terminate implements pgproxy.Conn.
+// Marks the backend connection for destruction due to an error.
+func (c *PooledBackend) Terminate(ctx context.Context, err error) error {
+	c.panicIfReleased()
+	c.MarkForDestroy(err)
+	return nil
+}
+
+// MessageTrackers implements pgproxy.Conn.
+// Returns trackers for messages sent to/from this backend.
+func (c *PooledBackend) MessageTrackers() []pgproxy.MessageTracker {
+	c.panicIfReleased()
+	// Return the OutstandingRequestQueue as a tracker.
+	// Additional trackers (TransactionFlow, CopyFlow, etc.) will be added in Phase 2.
+	return []pgproxy.MessageTracker{&c.session.OutstandingRequests}
+}
+
+// OutstandingRequests implements pgproxy.Backend.
+// Returns the queue of requests sent to this backend awaiting responses.
+func (c *PooledBackend) OutstandingRequests() *pgproxy.OutstandingRequestQueue {
+	c.panicIfReleased()
+	return &c.session.OutstandingRequests
 }

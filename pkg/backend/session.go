@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/config"
+	"github.com/justjake/pglink/pkg/pgproxy"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
@@ -30,6 +31,10 @@ type Session struct {
 
 	// Ring buffer for zero-copy message proxying
 	ringBuffer *pgwire.RingBuffer
+
+	// OutstandingRequests tracks requests sent to this backend that are awaiting responses.
+	// Used by pgproxy.Session for response handler attachment.
+	OutstandingRequests pgproxy.OutstandingRequestQueue
 }
 
 func GetSession(conn *pgconn.PgConn) *Session {

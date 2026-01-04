@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/observability"
+	"github.com/justjake/pglink/pkg/pgserver"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
@@ -31,6 +32,16 @@ func NewFrontend(ctx context.Context, conn net.Conn) *Frontend {
 	return &Frontend{
 		conn:    conn,
 		Backend: pgproto3.NewBackend(conn, conn),
+		ctx:     ctx,
+	}
+}
+
+// NewFrontendFromClientConn creates a Frontend from a pgserver.ClientConn.
+// This reuses the pgproto3.Backend that pgserver already created.
+func NewFrontendFromClientConn(ctx context.Context, conn *pgserver.ClientConn) *Frontend {
+	return &Frontend{
+		conn:    conn.Conn,
+		Backend: conn.Frontend,
 		ctx:     ctx,
 	}
 }
