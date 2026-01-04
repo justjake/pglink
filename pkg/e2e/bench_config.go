@@ -68,6 +68,8 @@ const (
 	TargetTypePglink TargetType = "pglink"
 	// TargetTypePgbouncer connects through pgbouncer (comparison).
 	TargetTypePgbouncer TargetType = "pgbouncer"
+	// TargetTypeMitmProxy connects through mitm-proxy (simple test proxy).
+	TargetTypeMitmProxy TargetType = "mitm-proxy"
 )
 
 // TargetConfig configures a single benchmark target.

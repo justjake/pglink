@@ -193,6 +193,9 @@ func (o *Orchestrator) runTarget(ctx context.Context, target TargetConfig) (*Tar
 		case TargetTypePglink, TargetTypePgbouncer:
 			// Connect through the proxy to alpha_uno database
 			target.ConnString = fmt.Sprintf("postgres://app:app_password@localhost:%d/alpha_uno?sslmode=disable", target.Port)
+		case TargetTypeMitmProxy:
+			// mitm-proxy uses cleartext auth and passes through to backend
+			target.ConnString = fmt.Sprintf("postgres://postgres:postgres@localhost:%d/postgres?sslmode=disable", target.Port)
 		}
 	}
 
@@ -370,6 +373,8 @@ func (o *Orchestrator) startTargetProcess(ctx context.Context, target *TargetCon
 		return o.startPglink(ctx, target)
 	case TargetTypePgbouncer:
 		return o.startPgbouncer(ctx, target)
+	case TargetTypeMitmProxy:
+		return o.startMitmProxy(ctx, target)
 	default:
 		return fmt.Errorf("unknown target type: %s", target.Type)
 	}
@@ -623,6 +628,69 @@ func (o *Orchestrator) startPgbouncer(ctx context.Context, target *TargetConfig)
 	o.Logger.Info("started pgbouncer", "target", target.Name, "pid", cmd.Process.Pid, "port", target.Port)
 
 	// Wait for pgbouncer to be ready
+	time.Sleep(2 * time.Second)
+
+	return nil
+}
+
+// startMitmProxy starts a mitm-proxy process.
+func (o *Orchestrator) startMitmProxy(ctx context.Context, target *TargetConfig) error {
+	binaryPath := target.BinaryPath
+	if binaryPath == "" {
+		binaryPath = filepath.Join(o.currentWorktree, "out", "mitm-proxy")
+	}
+
+	// Ensure binary exists
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		return fmt.Errorf("mitm-proxy binary not found at %s", binaryPath)
+	}
+
+	// Build args - mitm-proxy connects to the backend postgres
+	// Use keyword format without credentials - mitm-proxy gets credentials from client
+	args := []string{
+		"-backend", "host=localhost port=15432 sslmode=disable",
+		"-addr", fmt.Sprintf(":%d", target.Port),
+	}
+
+	args = append(args, target.ExtraArgs...)
+
+	// Create output files
+	outputs, err := OpenProcessOutputs(o.outputDir, "mitm-proxy", target.Name, 1, "")
+	if err != nil {
+		return fmt.Errorf("failed to create output files: %w", err)
+	}
+	o.processOutputs[target.Name] = outputs
+
+	cmd := exec.CommandContext(ctx, binaryPath, args...)
+	if outputs.Stdout != nil {
+		cmd.Stdout = io.MultiWriter(outputs.Stdout, os.Stderr)
+	} else {
+		cmd.Stdout = os.Stderr
+	}
+	if outputs.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(outputs.Stderr, os.Stderr)
+	} else {
+		cmd.Stderr = os.Stderr
+	}
+
+	// Set up environment
+	env := os.Environ()
+	if target.GOMAXPROCS > 0 {
+		env = append(env, fmt.Sprintf("GOMAXPROCS=%d", target.GOMAXPROCS))
+	}
+	env = append(env, target.ExtraEnv...)
+	cmd.Env = env
+
+	if err := cmd.Start(); err != nil {
+		_ = outputs.Close()
+		delete(o.processOutputs, target.Name)
+		return fmt.Errorf("failed to start mitm-proxy: %w", err)
+	}
+
+	o.processes[target.Name] = cmd
+	o.Logger.Info("started mitm-proxy", "target", target.Name, "pid", cmd.Process.Pid, "port", target.Port)
+
+	// Wait for mitm-proxy to be ready
 	time.Sleep(2 * time.Second)
 
 	return nil

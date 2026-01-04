@@ -260,6 +260,7 @@ func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
 	if err != nil {
 		return fmt.Errorf("flush %s: %w", dest, err)
 	}
+	writeQueue.Clear()
 	return nil
 }
 

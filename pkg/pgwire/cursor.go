@@ -262,8 +262,23 @@ func (r *RingRange) Extend(other *RingRange) *RingRange {
 	if other.ring != r.ring {
 		panic(fmt.Sprintf("cannot extend %s with %s: different rings", r, other))
 	}
-	r.SetStart(min(r.startIdx, other.startIdx))
-	r.SetEnd(max(r.endIdx, other.endIdx))
+
+	newStart := min(r.startIdx, other.startIdx)
+	newEnd := max(r.endIdx, other.endIdx)
+
+	// If r has self-referential capacity (capacity == r), updating r's indices
+	// also updates its capacity bounds, so direct assignment is safe.
+	// This is the case for RingRanges created by ToRange() or stored in WriteQueue.
+	if r.capacity == r {
+		r.startIdx = newStart
+		r.endIdx = newEnd
+		return r
+	}
+
+	// For shared/external capacity (e.g., cursor iteration), use SetStart/SetEnd
+	// which validate that we stay within the capacity bounds.
+	r.SetStart(newStart)
+	r.SetEnd(newEnd)
 	return r
 }
 
@@ -363,12 +378,16 @@ type RingMsg struct {
 }
 
 func (r *RingMsg) ToRange() *RingRange {
-	return &RingRange{
+	rng := &RingRange{
 		startIdx: r.msgIdx,
 		endIdx:   r.msgIdx + 1,
-		capacity: r.in.capacity,
 		ring:     r.in.ring,
 	}
+	// Self-referential capacity: this range represents exactly one message
+	// and its bounds are its own bounds. This prevents bugs where a stored
+	// RingRange's capacity points to a cursor's mutable RingRange.
+	rng.capacity = rng
+	return rng
 }
 
 // AppendTo implements [RawMessageSource].

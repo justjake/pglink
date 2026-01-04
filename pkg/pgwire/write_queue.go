@@ -73,10 +73,16 @@ func (q *WriteQueue) WriteRingRange(r *RingRange) error {
 	item := q.getRingSlot()
 	if item.Empty() {
 		*item = *r
+		// Ensure self-referential capacity so the stored range doesn't
+		// hold a pointer to a mutable cursor RingRange.
+		item.capacity = item
 	} else if item.End() == r.Start() && item.ring == r.ring {
+		// Extend uses safe direct assignment for self-referential capacity.
 		item.Extend(r)
 	} else {
-		q.pushItem().suffix = *r
+		newItem := q.pushItem()
+		newItem.suffix = *r
+		newItem.suffix.capacity = &newItem.suffix // Self-referential
 	}
 	// TODO: error unless item is valid
 	return nil

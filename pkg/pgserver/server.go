@@ -45,6 +45,8 @@ type UnauthorizedConn struct {
 	// - The connection is not TLS
 	// - Multiple certificates are configured without GetCertificate
 	ServerTLSCertificate *x509.Certificate
+	// Can be used to store arbitrary data about the connection for the caller's use.
+	ExtraData any
 }
 
 type AuthorizedConn struct {
@@ -52,6 +54,8 @@ type AuthorizedConn struct {
 	User           string
 	Database       string
 	StartupMessage *pgproto3.StartupMessage
+	// Can be used to store arbitrary data about the connection for the caller's use.
+	ExtraData any
 }
 
 type CancelConn struct {

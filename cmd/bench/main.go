@@ -59,6 +59,8 @@ func main() {
 	// Target flags
 	includeDirect := flag.Bool("direct", true, "include direct postgres benchmark")
 	includePgbouncer := flag.Bool("pgbouncer", true, "include pgbouncer benchmark")
+	includePglink := flag.Bool("pglink", true, "include pglink benchmark")
+	includeMitmProxy := flag.Bool("mitm-proxy", false, "include mitm-proxy benchmark")
 
 	// Debug flags
 	debug := flag.Bool("debug", false, "enable debug logging for spawned pglink processes")
@@ -126,33 +128,35 @@ func main() {
 		})
 	}
 
-	// Add pglink A variant
-	aTargetName := "pglink"
-	if *aLabel != "" {
-		aTargetName = fmt.Sprintf("pglink-%s", *aLabel)
+	// Add pglink A variant (if enabled)
+	if *includePglink {
+		aTargetName := "pglink"
+		if *aLabel != "" {
+			aTargetName = fmt.Sprintf("pglink-%s", *aLabel)
+		}
+		aTarget := e2e.TargetConfig{
+			Name:       aTargetName,
+			Type:       e2e.TargetTypePglink,
+			Port:       16432,
+			GOMAXPROCS: *aGOMAXPROCS,
+		}
+		if *aWorktree != "" {
+			aTarget.BinaryPath = "" // Will be built by orchestrator
+		}
+		if *aArgs != "" {
+			aTarget.ExtraArgs = strings.Split(*aArgs, " ")
+		}
+		if *aEnv != "" {
+			aTarget.ExtraEnv = strings.Split(*aEnv, ",")
+		}
+		if *debug {
+			aTarget.ExtraArgs = append(aTarget.ExtraArgs, "-log-level", "debug")
+		}
+		cfg.Targets = append(cfg.Targets, aTarget)
 	}
-	aTarget := e2e.TargetConfig{
-		Name:       aTargetName,
-		Type:       e2e.TargetTypePglink,
-		Port:       16432,
-		GOMAXPROCS: *aGOMAXPROCS,
-	}
-	if *aWorktree != "" {
-		aTarget.BinaryPath = "" // Will be built by orchestrator
-	}
-	if *aArgs != "" {
-		aTarget.ExtraArgs = strings.Split(*aArgs, " ")
-	}
-	if *aEnv != "" {
-		aTarget.ExtraEnv = strings.Split(*aEnv, ",")
-	}
-	if *debug {
-		aTarget.ExtraArgs = append(aTarget.ExtraArgs, "-log-level", "debug")
-	}
-	cfg.Targets = append(cfg.Targets, aTarget)
 
-	// Add pglink B variant if specified
-	if *bLabel != "" {
+	// Add pglink B variant if specified (requires pglink to be enabled)
+	if *bLabel != "" && *includePglink {
 		bTarget := e2e.TargetConfig{
 			Name:       fmt.Sprintf("pglink-%s", *bLabel),
 			Type:       e2e.TargetTypePglink,
@@ -178,8 +182,8 @@ func main() {
 			A: e2e.TargetVariant{
 				Label:      *aLabel,
 				Worktree:   *aWorktree,
-				ExtraArgs:  aTarget.ExtraArgs,
-				ExtraEnv:   aTarget.ExtraEnv,
+				ExtraArgs:  strings.Split(*aArgs, " "),
+				ExtraEnv:   strings.Split(*aEnv, ","),
 				GOMAXPROCS: *aGOMAXPROCS,
 			},
 			B: e2e.TargetVariant{
@@ -198,6 +202,15 @@ func main() {
 			Name: "pgbouncer",
 			Type: e2e.TargetTypePgbouncer,
 			Port: 16433, // Use 16433 to avoid conflicts with docker's 6432
+		})
+	}
+
+	// Add mitm-proxy target if requested
+	if *includeMitmProxy {
+		cfg.Targets = append(cfg.Targets, e2e.TargetConfig{
+			Name: "mitm-proxy",
+			Type: e2e.TargetTypeMitmProxy,
+			Port: 16434,
 		})
 	}
 
