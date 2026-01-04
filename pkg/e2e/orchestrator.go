@@ -826,48 +826,72 @@ func (o *Orchestrator) initOutputDir() error {
 }
 
 // buildAllBinaries builds all required binaries into the output directory.
+// Each target with a unique worktree gets its own binary.
 func (o *Orchestrator) buildAllBinaries(ctx context.Context) error {
-	// Determine which binaries we need to build
-	needPglink := false
-	needMitmProxy := false
-
-	for _, target := range o.Config.Targets {
-		switch target.Type {
-		case TargetTypePglink:
-			needPglink = true
-		case TargetTypeMitmProxy:
-			needMitmProxy = true
-		}
-	}
-
 	binDir := filepath.Join(o.outputDir, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		return fmt.Errorf("failed to create bin dir: %w", err)
 	}
 
-	if needPglink {
-		if err := o.buildBinary(ctx, "./cmd/pglink", filepath.Join(binDir, "pglink")); err != nil {
-			return fmt.Errorf("failed to build pglink: %w", err)
-		}
-	}
+	// Track which worktree+type combinations we've already built
+	// key: "worktree:type" -> output binary path
+	builtBinaries := make(map[string]string)
 
-	if needMitmProxy {
-		if err := o.buildBinary(ctx, "./cmd/mitm-proxy", filepath.Join(binDir, "mitm-proxy")); err != nil {
-			return fmt.Errorf("failed to build mitm-proxy: %w", err)
+	for i := range o.Config.Targets {
+		target := &o.Config.Targets[i]
+
+		var pkg string
+		switch target.Type {
+		case TargetTypePglink:
+			pkg = "./cmd/pglink"
+		case TargetTypeMitmProxy:
+			pkg = "./cmd/mitm-proxy"
+		default:
+			continue // No binary needed for direct/pgbouncer
+		}
+
+		// Determine worktree to build from
+		worktree := target.Worktree
+		if worktree == "" {
+			worktree = o.currentWorktree
+		}
+
+		// Check if we already built this worktree+type combo
+		key := worktree + ":" + string(target.Type)
+		if existingPath, ok := builtBinaries[key]; ok {
+			target.BinaryPath = existingPath
+			continue
+		}
+
+		// Determine output path - use target name to differentiate
+		outputPath := filepath.Join(binDir, target.Name)
+		if err := o.buildBinaryFromWorktree(ctx, worktree, pkg, outputPath); err != nil {
+			return fmt.Errorf("failed to build %s from %s: %w", target.Name, worktree, err)
+		}
+
+		target.BinaryPath = outputPath
+		builtBinaries[key] = outputPath
+
+		// Capture git metadata for this target
+		git, err := GetGitMetadata(worktree)
+		if err != nil {
+			o.Logger.Warn("failed to get git metadata", "target", target.Name, "worktree", worktree, "error", err)
+		} else {
+			target.Git = git
 		}
 	}
 
 	return nil
 }
 
-// buildBinary builds a Go binary using bin/go.
-func (o *Orchestrator) buildBinary(ctx context.Context, pkg, outputPath string) error {
-	o.Logger.Info("building binary", "pkg", pkg, "output", outputPath)
+// buildBinaryFromWorktree builds a Go binary from a specific worktree.
+func (o *Orchestrator) buildBinaryFromWorktree(ctx context.Context, worktree, pkg, outputPath string) error {
+	o.Logger.Info("building binary", "pkg", pkg, "output", outputPath, "worktree", worktree)
 
-	// Use bin/go to build with correct environment
-	goBin := filepath.Join(o.currentWorktree, "bin", "go")
+	// Use bin/go from the source worktree to build with correct environment
+	goBin := filepath.Join(worktree, "bin", "go")
 	cmd := exec.CommandContext(ctx, goBin, "build", "-o", outputPath, pkg)
-	cmd.Dir = o.currentWorktree
+	cmd.Dir = worktree
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 

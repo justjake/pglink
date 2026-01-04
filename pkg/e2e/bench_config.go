@@ -83,6 +83,7 @@ type TargetConfig struct {
 
 	// Process configuration (for pglink/pgbouncer targets)
 	BinaryPath         string   // Path to binary (default: ./out/pglink)
+	Worktree           string   // Path to worktree to build from (empty = current directory)
 	Port               int      // Listen port
 	MetricsPort        int      // Prometheus metrics port
 	ExtraArgs          []string // Extra CLI arguments

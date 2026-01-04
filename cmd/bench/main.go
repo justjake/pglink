@@ -119,6 +119,38 @@ func main() {
 		cfg.Cases = strings.Split(*cases, ",")
 	}
 
+	// Helper to add common debug/stats args to a target
+	addDebugArgs := func(target *e2e.TargetConfig) {
+		if *debug {
+			target.ExtraArgs = append(target.ExtraArgs, "-log-level", "debug")
+		}
+		if *stats {
+			target.ExtraArgs = append(target.ExtraArgs, "-stats")
+		}
+	}
+
+	// Helper to parse args/env strings
+	parseArgs := func(s string) []string {
+		if s == "" {
+			return nil
+		}
+		return strings.Split(s, " ")
+	}
+	parseEnv := func(s string) []string {
+		if s == "" {
+			return nil
+		}
+		return strings.Split(s, ",")
+	}
+
+	// Port allocator - auto-increment to avoid conflicts
+	nextPort := 16432
+	allocPort := func() int {
+		p := nextPort
+		nextPort++
+		return p
+	}
+
 	// Build targets
 	cfg.Targets = []e2e.TargetConfig{}
 
@@ -133,70 +165,65 @@ func main() {
 
 	// Add pglink A variant (if enabled)
 	if *includePglink {
-		aTargetName := "pglink"
+		name := "pglink"
 		if *aLabel != "" {
-			aTargetName = fmt.Sprintf("pglink-%s", *aLabel)
+			name = *aLabel
 		}
-		aTarget := e2e.TargetConfig{
-			Name:       aTargetName,
+		target := e2e.TargetConfig{
+			Name:       name,
 			Type:       e2e.TargetTypePglink,
-			Port:       16432,
+			Port:       allocPort(),
+			Worktree:   *aWorktree,
 			GOMAXPROCS: *aGOMAXPROCS,
+			ExtraArgs:  parseArgs(*aArgs),
+			ExtraEnv:   parseEnv(*aEnv),
 		}
-		if *aWorktree != "" {
-			aTarget.BinaryPath = "" // Will be built by orchestrator
-		}
-		if *aArgs != "" {
-			aTarget.ExtraArgs = strings.Split(*aArgs, " ")
-		}
-		if *aEnv != "" {
-			aTarget.ExtraEnv = strings.Split(*aEnv, ",")
-		}
-		if *debug {
-			aTarget.ExtraArgs = append(aTarget.ExtraArgs, "-log-level", "debug")
-		}
-		cfg.Targets = append(cfg.Targets, aTarget)
+		addDebugArgs(&target)
+		cfg.Targets = append(cfg.Targets, target)
 	}
 
 	// Add pglink B variant if specified (requires pglink to be enabled)
 	if *bLabel != "" && *includePglink {
-		bTarget := e2e.TargetConfig{
-			Name:       fmt.Sprintf("pglink-%s", *bLabel),
+		target := e2e.TargetConfig{
+			Name:       *bLabel,
 			Type:       e2e.TargetTypePglink,
-			Port:       16433,
+			Port:       allocPort(),
+			Worktree:   *bWorktree,
 			GOMAXPROCS: *bGOMAXPROCS,
+			ExtraArgs:  parseArgs(*bArgs),
+			ExtraEnv:   parseEnv(*bEnv),
 		}
-		if *bWorktree != "" {
-			bTarget.BinaryPath = "" // Will be built by orchestrator
-		}
-		if *bArgs != "" {
-			bTarget.ExtraArgs = strings.Split(*bArgs, " ")
-		}
-		if *bEnv != "" {
-			bTarget.ExtraEnv = strings.Split(*bEnv, ",")
-		}
-		if *debug {
-			bTarget.ExtraArgs = append(bTarget.ExtraArgs, "-log-level", "debug")
-		}
-		cfg.Targets = append(cfg.Targets, bTarget)
+		addDebugArgs(&target)
+		cfg.Targets = append(cfg.Targets, target)
 
-		// Set up A/B test config
+		// Set up A/B test config for reporting
 		cfg.ABTest = &e2e.ABTestConfig{
 			A: e2e.TargetVariant{
 				Label:      *aLabel,
 				Worktree:   *aWorktree,
-				ExtraArgs:  strings.Split(*aArgs, " "),
-				ExtraEnv:   strings.Split(*aEnv, ","),
+				ExtraArgs:  parseArgs(*aArgs),
+				ExtraEnv:   parseEnv(*aEnv),
 				GOMAXPROCS: *aGOMAXPROCS,
 			},
 			B: e2e.TargetVariant{
 				Label:      *bLabel,
 				Worktree:   *bWorktree,
-				ExtraArgs:  bTarget.ExtraArgs,
-				ExtraEnv:   bTarget.ExtraEnv,
+				ExtraArgs:  parseArgs(*bArgs),
+				ExtraEnv:   parseEnv(*bEnv),
 				GOMAXPROCS: *bGOMAXPROCS,
 			},
 		}
+	}
+
+	// Add mitm-proxy target if requested (before pgbouncer since it's a pglink variant)
+	if *includeMitmProxy {
+		target := e2e.TargetConfig{
+			Name: "mitm-proxy",
+			Type: e2e.TargetTypeMitmProxy,
+			Port: allocPort(),
+		}
+		addDebugArgs(&target)
+		cfg.Targets = append(cfg.Targets, target)
 	}
 
 	// Add pgbouncer target if requested
@@ -204,58 +231,32 @@ func main() {
 		cfg.Targets = append(cfg.Targets, e2e.TargetConfig{
 			Name: "pgbouncer",
 			Type: e2e.TargetTypePgbouncer,
-			Port: 16433, // Use 16433 to avoid conflicts with docker's 6432
+			Port: allocPort(),
 		})
-	}
-
-	// Add mitm-proxy target if requested
-	if *includeMitmProxy {
-		mitmTarget := e2e.TargetConfig{
-			Name: "mitm-proxy",
-			Type: e2e.TargetTypeMitmProxy,
-			Port: 16434,
-		}
-		if *debug {
-			mitmTarget.ExtraArgs = append(mitmTarget.ExtraArgs, "-log-level", "debug")
-		}
-		if *stats {
-			mitmTarget.ExtraArgs = append(mitmTarget.ExtraArgs, "-stats")
-		}
-		cfg.Targets = append(cfg.Targets, mitmTarget)
 	}
 
 	// Add mitm-proxy-split target if requested (2-goroutine I/O mode)
 	if *mitmSplit {
-		mitmSplitTarget := e2e.TargetConfig{
+		target := e2e.TargetConfig{
 			Name:      "mitm-proxy-split",
 			Type:      e2e.TargetTypeMitmProxy,
-			Port:      16435,
+			Port:      allocPort(),
 			ExtraArgs: []string{"-split"},
 		}
-		if *debug {
-			mitmSplitTarget.ExtraArgs = append(mitmSplitTarget.ExtraArgs, "-log-level", "debug")
-		}
-		if *stats {
-			mitmSplitTarget.ExtraArgs = append(mitmSplitTarget.ExtraArgs, "-stats")
-		}
-		cfg.Targets = append(cfg.Targets, mitmSplitTarget)
+		addDebugArgs(&target)
+		cfg.Targets = append(cfg.Targets, target)
 	}
 
 	// Add mitm-proxy with different GOMAXPROCS values if requested
 	if *mitmSingleThread {
-		for i, procs := range []int{1, 2, 4} {
+		for _, procs := range []int{1, 2, 4} {
 			target := e2e.TargetConfig{
-				Name:      fmt.Sprintf("mitm-%dcpu", procs),
-				Type:      e2e.TargetTypeMitmProxy,
-				Port:      16436 + i,
-				ExtraArgs: []string{"-gomaxprocs", fmt.Sprintf("%d", procs)},
+				Name:       fmt.Sprintf("mitm-%dcpu", procs),
+				Type:       e2e.TargetTypeMitmProxy,
+				Port:       allocPort(),
+				GOMAXPROCS: procs,
 			}
-			if *debug {
-				target.ExtraArgs = append(target.ExtraArgs, "-log-level", "debug")
-			}
-			if *stats {
-				target.ExtraArgs = append(target.ExtraArgs, "-stats")
-			}
+			addDebugArgs(&target)
 			cfg.Targets = append(cfg.Targets, target)
 		}
 	}
