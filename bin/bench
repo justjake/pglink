@@ -3,9 +3,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Build pglink
-./bin/build
-
 # Build benchmark tool
 ./bin/go build -o out/bench ./cmd/bench
 

@@ -64,6 +64,7 @@ func main() {
 
 	// Debug flags
 	debug := flag.Bool("debug", false, "enable debug logging for spawned pglink processes")
+	stats := flag.Bool("stats", false, "enable pgwire stats collection (cheap, logged on shutdown)")
 
 	// Profiling flags
 	pprof := flag.Bool("pprof", false, "collect CPU and memory profiles from pglink targets")
@@ -207,11 +208,18 @@ func main() {
 
 	// Add mitm-proxy target if requested
 	if *includeMitmProxy {
-		cfg.Targets = append(cfg.Targets, e2e.TargetConfig{
+		mitmTarget := e2e.TargetConfig{
 			Name: "mitm-proxy",
 			Type: e2e.TargetTypeMitmProxy,
 			Port: 16434,
-		})
+		}
+		if *debug {
+			mitmTarget.ExtraArgs = append(mitmTarget.ExtraArgs, "-log-level", "debug")
+		}
+		if *stats {
+			mitmTarget.ExtraArgs = append(mitmTarget.ExtraArgs, "-stats")
+		}
+		cfg.Targets = append(cfg.Targets, mitmTarget)
 	}
 
 	// Create orchestrator

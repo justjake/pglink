@@ -849,6 +849,7 @@ func (r *RingBuffer) writeStreamingMessage(msgIdx int64, dst io.Writer) (int64, 
 
 	n, err := io.Copy(dst, r.streamingMessageReader(msgIdx))
 	r.completeStreaming(err)
+	RecordStreamingRead(n)
 	return n, err
 }
 

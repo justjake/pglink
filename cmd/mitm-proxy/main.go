@@ -30,6 +30,7 @@ func main() {
 	listenAddr := flag.String("addr", ":15432", "listen address")
 	logLevel := flag.String("log-level", "info", "log level: debug, info, warn, error")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g., :6060)")
+	enableStats := flag.Bool("stats", false, "enable pgwire stats collection (logged on shutdown)")
 	flag.Parse()
 
 	if *backendURI == "" {
@@ -59,6 +60,11 @@ func main() {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel}))
 	slog.SetDefault(logger)
+
+	// Enable stats collection when debug logging or -stats flag is enabled
+	if slogLevel == slog.LevelDebug || *enableStats {
+		pgwire.Stats.Enabled = true
+	}
 
 	// Start pprof server if enabled
 	if *pprofAddr != "" {
@@ -92,6 +98,12 @@ func main() {
 	go func() {
 		sig := <-sigChan
 		logger.Info("received shutdown signal", "signal", sig)
+
+		// Log stats if enabled (at INFO level so it's visible without debug)
+		if pgwire.Stats.Enabled {
+			logger.Info("pgwire stats", "stats", pgwire.StatsSnapshot())
+		}
+
 		cancel()
 	}()
 

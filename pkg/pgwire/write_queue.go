@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 
 	"github.com/gammazero/deque"
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -89,6 +90,69 @@ func (q *WriteQueue) WriteRingRange(r *RingRange) error {
 }
 
 func (q *WriteQueue) WriteTo(w io.Writer) (int64, error) {
+	// Try to use net.Buffers for writev optimization if w is a net.Conn
+	if conn, ok := w.(net.Conn); ok {
+		return q.writeToConn(conn)
+	}
+
+	// Fallback to individual writes for non-net.Conn writers
+	return q.writeToWriter(w)
+}
+
+// writeToConn uses net.Buffers (writev syscall) to write all data in a single syscall.
+func (q *WriteQueue) writeToConn(conn net.Conn) (int64, error) {
+	// Pre-allocate buffer slice - typically we have 1-2 items with 1-2 slices each
+	bufs := make(net.Buffers, 0, q.deque.Len()*3)
+
+	// Track stats
+	var prefixBytes, ringBytes int64
+	var ringBufs int
+	var wrapArounds int
+
+	// Collect all slices
+	hasStreaming := false
+	for item := range q.deque.Iter() {
+		if item.prefix.Len() > 0 {
+			prefixBytes += int64(item.prefix.Len())
+			bufs = append(bufs, item.prefix.Bytes())
+		}
+
+		if !item.suffix.Empty() {
+			beforeLen := len(bufs)
+			var ok bool
+			bufs, ok = item.suffix.AppendSlices(bufs)
+			if !ok {
+				// Has streaming message - fall back to slow path
+				hasStreaming = true
+				break
+			}
+			// Track ring buffer contribution
+			addedBufs := len(bufs) - beforeLen
+			ringBufs += addedBufs
+			if addedBufs == 2 {
+				wrapArounds++ // 2 slices means wrap-around
+			}
+			for i := beforeLen; i < len(bufs); i++ {
+				ringBytes += int64(len(bufs[i]))
+			}
+		}
+	}
+
+	// If we have streaming messages, fall back to slow path
+	if hasStreaming {
+		RecordStreamingWrite()
+		return q.writeToWriter(conn)
+	}
+
+	// Record statistics
+	RecordWritev(len(bufs), prefixBytes, ringBytes, ringBufs, wrapArounds > 0)
+
+	// Write all buffers in one syscall using writev
+	return bufs.WriteTo(conn)
+}
+
+// writeToWriter is the fallback that writes each item individually.
+func (q *WriteQueue) writeToWriter(w io.Writer) (int64, error) {
 	total := int64(0)
 	for item := range q.deque.Iter() {
 		n, err := w.Write(item.prefix.Bytes())
@@ -98,7 +162,7 @@ func (q *WriteQueue) WriteTo(w io.Writer) (int64, error) {
 		}
 
 		r := item.suffix.NewReader()
-		// In many cases, r will implement WriterTo, avoinding a buffer allocation entirely.
+		// In many cases, r will implement WriterTo, avoiding a buffer allocation entirely.
 		// It remains to be seen if we're better off w/ a buffer allocation here.
 		n64, err := io.Copy(w, r)
 		total += n64

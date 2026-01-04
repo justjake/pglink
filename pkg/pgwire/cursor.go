@@ -126,9 +126,24 @@ func (c *Cursor) TryNextBatch() (bool, error) {
 	// Check for new messages first - always deliver messages before errors
 	newEnd := c.ring.PublishedMsgCount()
 	if newEnd > c.endIdx {
+		oldEnd := c.endIdx
 		c.startIdx = c.endIdx
 		c.endIdx = newEnd
 		c.msgIdx = c.startIdx - 1 // NextMsg will increment
+
+		// Record batch stats if enabled
+		if Stats.Enabled {
+			msgCount := newEnd - oldEnd
+			// Calculate byte count from message offsets
+			var byteCount int64
+			if msgCount > 0 {
+				startOffset := c.ring.MessageOffset(oldEnd)
+				endOffset := c.ring.MessageEnd(newEnd - 1)
+				byteCount = endOffset - startOffset
+			}
+			RecordBatch(msgCount, byteCount)
+		}
+
 		return true, nil
 	}
 
@@ -307,6 +322,38 @@ func (r *RingRange) String() string {
 		return fmt.Sprintf("RingRange{[%d,%d) empty %s}", r.startIdx, r.endIdx, r.ring)
 	}
 	return fmt.Sprintf("RingRange{[%d,%d) %d bytes %s}", r.startIdx, r.endIdx, r.Bytes(), r.ring)
+}
+
+// AppendSlices appends the byte slices for this range to the provided buffer.
+// Returns the updated buffer and true if all data is buffered (not streaming).
+// If the last message is streaming, returns (buf, false) and the streaming part
+// must be handled separately.
+//
+// This method is optimized for use with net.Buffers and writev.
+func (r *RingRange) AppendSlices(buf [][]byte) ([][]byte, bool) {
+	if r.Empty() {
+		return buf, true
+	}
+
+	lastIdx := r.endIdx - 1
+
+	// Check if last message is streaming - cannot use writev for streaming
+	if r.ring.isStreaming(lastIdx) {
+		return buf, false
+	}
+
+	// All buffered - get the slices
+	start := r.ring.MessageOffset(r.startIdx)
+	end := r.ring.MessageEnd(lastIdx)
+	first, second := r.ring.rangeSlices(start, end)
+
+	if len(first) > 0 {
+		buf = append(buf, first)
+	}
+	if len(second) > 0 {
+		buf = append(buf, second)
+	}
+	return buf, true
 }
 
 // NewReader returns an io.Reader that reads the raw wire bytes of all messages
