@@ -343,6 +343,171 @@ func (r *RingBuffer) StartNetConnReader(ctx context.Context, src net.Conn) {
 	}()
 }
 
+// SetConn sets the connection for poll-mode reading without starting a reader goroutine.
+// Use TryRead() to perform non-blocking reads from the main goroutine.
+func (r *RingBuffer) SetConn(conn net.Conn) {
+	if r.conn != nil {
+		panic("RingBuffer.SetConn called when connection already set")
+	}
+	r.conn = conn
+}
+
+// TryRead performs a non-blocking read from the connection using short deadlines.
+// Returns (true, nil) if messages were parsed and are available.
+// Returns (false, nil) if no data available (EAGAIN/timeout).
+// Returns (false, err) on real errors (EOF, connection closed, etc).
+//
+// This method is for poll-mode operation where the main goroutine does reads
+// directly instead of using a separate reader goroutine.
+//
+// TryRead is NOT safe for concurrent use - only call from a single goroutine.
+func (r *RingBuffer) TryRead() (hasMessages bool, err error) {
+	if r.conn == nil {
+		return false, fmt.Errorf("TryRead: no connection set")
+	}
+
+	// Check for existing unpublished messages first
+	if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
+		r.publish()
+		return true, nil
+	}
+
+	// Calculate available space
+	r.refreshCachedPositions()
+	used := r.rawEnd - r.cachedConsumedBytes
+	available := int64(len(r.data)) - used - r.HeadroomBytes
+
+	if available <= 0 {
+		// No space - caller should process existing messages first
+		return false, nil
+	}
+
+	// Get contiguous region (handle wraparound)
+	writeOff := r.rawEnd & r.dataMask
+	contiguous := int64(len(r.data)) - writeOff
+	if contiguous > available {
+		contiguous = available
+	}
+
+	// Set very short deadline for quasi-non-blocking read
+	// Using time.Now() would timeout immediately before any data is read.
+	// A small timeout allows reading available data while still being responsive.
+	if err := r.conn.SetReadDeadline(time.Now().Add(100 * time.Microsecond)); err != nil {
+		return false, fmt.Errorf("TryRead: SetReadDeadline: %w", err)
+	}
+
+	// Read from network
+	n, readErr := r.conn.Read(r.data[writeOff : writeOff+contiguous])
+
+	// Clear deadline
+	r.conn.SetReadDeadline(time.Time{}) //nolint:errcheck
+
+	if n > 0 {
+		r.rawEnd += int64(n)
+
+		// Parse all complete messages from the new data
+		msgsUntilSpaceRefresh := spaceCheckMsgs
+		r.parseCompleteMessages(&msgsUntilSpaceRefresh)
+
+		// Publish if we have new complete messages
+		if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
+			r.publish()
+			return true, nil
+		}
+	}
+
+	// Check for real errors vs timeout
+	if readErr != nil {
+		// Check if it's a timeout (EAGAIN equivalent)
+		if netErr, ok := readErr.(net.Error); ok && netErr.Timeout() {
+			return false, nil // No data available, not an error
+		}
+		// Real error
+		if errors.Is(readErr, io.EOF) {
+			r.setError(io.EOF)
+			return false, io.EOF
+		}
+		r.setError(readErr)
+		return false, readErr
+	}
+
+	return false, nil
+}
+
+// ReadNow reads any available data from the connection without waiting.
+// Call this only when you know data is available (e.g., after unix.Poll indicates readiness).
+// Returns (true, nil) if messages were parsed and are available.
+// Returns (false, nil) if no data was read (would block).
+// Returns (false, err) on real errors.
+//
+// This is more efficient than TryRead because it doesn't set/clear deadlines.
+func (r *RingBuffer) ReadNow() (hasMessages bool, err error) {
+	if r.conn == nil {
+		return false, fmt.Errorf("ReadNow: no connection set")
+	}
+
+	// Check for existing unpublished messages first
+	if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
+		r.publish()
+		return true, nil
+	}
+
+	// Calculate available space
+	r.refreshCachedPositions()
+	used := r.rawEnd - r.cachedConsumedBytes
+	available := int64(len(r.data)) - used - r.HeadroomBytes
+
+	if available <= 0 {
+		// No space - caller should process existing messages first
+		return false, nil
+	}
+
+	// Get contiguous region (handle wraparound)
+	writeOff := r.rawEnd & r.dataMask
+	contiguous := int64(len(r.data)) - writeOff
+	if contiguous > available {
+		contiguous = available
+	}
+
+	// Read from network - the caller should have ensured data is available
+	n, readErr := r.conn.Read(r.data[writeOff : writeOff+contiguous])
+
+	if n > 0 {
+		r.rawEnd += int64(n)
+
+		// Parse all complete messages from the new data
+		msgsUntilSpaceRefresh := spaceCheckMsgs
+		r.parseCompleteMessages(&msgsUntilSpaceRefresh)
+
+		// Publish if we have new complete messages
+		if r.localMsgCnt > atomic.LoadInt64(&r.publishedMsgs) {
+			r.publish()
+			return true, nil
+		}
+	}
+
+	// Check for errors
+	if readErr != nil {
+		// Check if it would block (shouldn't happen if caller used poll correctly)
+		if netErr, ok := readErr.(net.Error); ok && netErr.Timeout() {
+			return false, nil
+		}
+		if errors.Is(readErr, io.EOF) {
+			r.setError(io.EOF)
+			return false, io.EOF
+		}
+		r.setError(readErr)
+		return false, readErr
+	}
+
+	return false, nil
+}
+
+// Conn returns the connection associated with this ring buffer.
+func (r *RingBuffer) Conn() net.Conn {
+	return r.conn
+}
+
 func (r *RingBuffer) StopNetConnReader() error {
 	if r.conn == nil {
 		return nil
@@ -703,6 +868,10 @@ func (r *RingBuffer) waitForSpace(ctx context.Context) error {
 }
 
 func (r *RingBuffer) setError(err error) {
+	// Fast path: if error already set, avoid heap allocation from &err
+	if r.err.Load() != nil {
+		return
+	}
 	if r.err.CompareAndSwap(nil, &err) {
 		r.setState(RingBufferStateDone)
 		close(r.done)

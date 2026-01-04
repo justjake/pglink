@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 
-	"github.com/gammazero/deque"
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -15,15 +14,66 @@ type queueItem struct {
 	suffix RingRange
 }
 
+// WriteQueue collects messages to be written in a single writev syscall.
+// Uses inline structs to avoid allocation.
 type WriteQueue struct {
-	deque deque.Deque[*queueItem]
+	items    [1]queueItem // Inline storage for common case (1 item)
+	overflow []queueItem  // Overflow for rare cases with multiple items
+	len      int          // Number of items in use
+	// Inline storage for writev buffers - avoids allocation in common case.
+	// Typical case: 1 item with prefix + suffix (2 slices), or just prefix (1 slice).
+	// We need up to 3 slices per item (prefix + 2 for wrap-around ring buffer).
+	writeBufsBacking [6][]byte   // Backing array for common case (2 items * 3 slices)
+	writeBufs        net.Buffers // Stored inline to avoid escape when calling WriteTo
+}
+
+func (q *WriteQueue) Len() int {
+	return q.len
+}
+
+func (q *WriteQueue) back() *queueItem {
+	if q.len == 0 {
+		return nil
+	}
+	if q.len == 1 {
+		return &q.items[0]
+	}
+	return &q.overflow[q.len-2] // overflow[0] is items[1]
+}
+
+func (q *WriteQueue) front() *queueItem {
+	if q.len == 0 {
+		return nil
+	}
+	return &q.items[0]
+}
+
+func (q *WriteQueue) at(i int) *queueItem {
+	if i == 0 {
+		return &q.items[0]
+	}
+	return &q.overflow[i-1]
+}
+
+func (q *WriteQueue) pushItem() *queueItem {
+	q.len++
+	if q.len == 1 {
+		return &q.items[0]
+	}
+	// Need overflow
+	idx := q.len - 2 // overflow index
+	if idx >= len(q.overflow) {
+		q.overflow = append(q.overflow, queueItem{})
+	}
+	return &q.overflow[idx]
 }
 
 func (q *WriteQueue) IsEmpty() bool {
-	if q.deque.Len() == 0 {
+	if q.len == 0 {
 		return true
 	}
-	return q.deque.Back().prefix.Len() == 0 && q.deque.Back().suffix.Len() == 0
+	back := q.back()
+	return back.prefix.Len() == 0 && back.suffix.Len() == 0
 }
 
 func (q *WriteQueue) AvailableBuffer() []byte {
@@ -67,7 +117,21 @@ func (q *WriteQueue) WriteRawMsg(msg RawMessageSource) error {
 }
 
 func (q *WriteQueue) WriteRingMsg(r *RingMsg) error {
-	return q.WriteRingRange(r.ToRange())
+	item := q.getRingSlot()
+	if item.Empty() {
+		// Fill directly into the slot, avoiding allocation
+		r.ToRangeInto(item)
+		return nil
+	}
+	// Check if we can extend the existing range
+	if item.End() == r.MsgIdx() && item.ring == r.Ring() {
+		item.endIdx = r.MsgIdx() + 1
+		return nil
+	}
+	// Need a new slot
+	newItem := q.pushItem()
+	r.ToRangeInto(&newItem.suffix)
+	return nil
 }
 
 func (q *WriteQueue) WriteRingRange(r *RingRange) error {
@@ -101,8 +165,15 @@ func (q *WriteQueue) WriteTo(w io.Writer) (int64, error) {
 
 // writeToConn uses net.Buffers (writev syscall) to write all data in a single syscall.
 func (q *WriteQueue) writeToConn(conn net.Conn) (int64, error) {
-	// Pre-allocate buffer slice - typically we have 1-2 items with 1-2 slices each
-	bufs := make(net.Buffers, 0, q.deque.Len()*3)
+	// Use inline backing array if it fits, otherwise allocate.
+	// This avoids allocation in the common case (1-2 items).
+	// We store writeBufs inline in WriteQueue to avoid escape when calling WriteTo.
+	needCap := q.len * 3
+	if needCap <= len(q.writeBufsBacking) {
+		q.writeBufs = q.writeBufsBacking[:0]
+	} else {
+		q.writeBufs = make(net.Buffers, 0, needCap)
+	}
 
 	// Track stats
 	var prefixBytes, ringBytes int64
@@ -111,29 +182,30 @@ func (q *WriteQueue) writeToConn(conn net.Conn) (int64, error) {
 
 	// Collect all slices
 	hasStreaming := false
-	for item := range q.deque.Iter() {
+	for i := range q.len {
+		item := q.at(i)
 		if item.prefix.Len() > 0 {
 			prefixBytes += int64(item.prefix.Len())
-			bufs = append(bufs, item.prefix.Bytes())
+			q.writeBufs = append(q.writeBufs, item.prefix.Bytes())
 		}
 
 		if !item.suffix.Empty() {
-			beforeLen := len(bufs)
+			beforeLen := len(q.writeBufs)
 			var ok bool
-			bufs, ok = item.suffix.AppendSlices(bufs)
+			q.writeBufs, ok = item.suffix.AppendSlices(q.writeBufs)
 			if !ok {
 				// Has streaming message - fall back to slow path
 				hasStreaming = true
 				break
 			}
 			// Track ring buffer contribution
-			addedBufs := len(bufs) - beforeLen
+			addedBufs := len(q.writeBufs) - beforeLen
 			ringBufs += addedBufs
 			if addedBufs == 2 {
 				wrapArounds++ // 2 slices means wrap-around
 			}
-			for i := beforeLen; i < len(bufs); i++ {
-				ringBytes += int64(len(bufs[i]))
+			for j := beforeLen; j < len(q.writeBufs); j++ {
+				ringBytes += int64(len(q.writeBufs[j]))
 			}
 		}
 	}
@@ -145,16 +217,17 @@ func (q *WriteQueue) writeToConn(conn net.Conn) (int64, error) {
 	}
 
 	// Record statistics
-	RecordWritev(len(bufs), prefixBytes, ringBytes, ringBufs, wrapArounds > 0)
+	RecordWritev(len(q.writeBufs), prefixBytes, ringBytes, ringBufs, wrapArounds > 0)
 
 	// Write all buffers in one syscall using writev
-	return bufs.WriteTo(conn)
+	return q.writeBufs.WriteTo(conn)
 }
 
 // writeToWriter is the fallback that writes each item individually.
 func (q *WriteQueue) writeToWriter(w io.Writer) (int64, error) {
 	total := int64(0)
-	for item := range q.deque.Iter() {
+	for i := range q.len {
+		item := q.at(i)
 		n, err := w.Write(item.prefix.Bytes())
 		total += int64(n)
 		if err != nil {
@@ -174,39 +247,35 @@ func (q *WriteQueue) writeToWriter(w io.Writer) (int64, error) {
 }
 
 func (q *WriteQueue) Clear() {
-	if q.deque.Len() == 0 {
+	if q.len == 0 {
 		return
 	}
 
-	if q.deque.Len() > 1 {
-		retain := q.deque.Front()
-		q.deque.Clear()
-		q.deque.PushBack(retain)
+	// Reset first item for reuse
+	q.items[0].prefix.Reset()
+	q.items[0].suffix = RingRange{}
+
+	// Reset overflow items (keep slice capacity)
+	for i := range q.overflow[:q.len-1] {
+		q.overflow[i].prefix.Reset()
+		q.overflow[i].suffix = RingRange{}
 	}
 
-	item := q.deque.Front()
-	item.prefix.Reset()
-	item.suffix = RingRange{}
-}
-
-func (q *WriteQueue) pushItem() *queueItem {
-	item := &queueItem{}
-	q.deque.PushBack(item)
-	return item
+	q.len = 0
 }
 
 func (q *WriteQueue) getByteSlot() *bytes.Buffer {
-	if q.deque.Len() == 0 || q.deque.Back().suffix.Len() != 0 {
+	if q.len == 0 || q.back().suffix.Len() != 0 {
 		return &q.pushItem().prefix
 	}
 
-	return &q.deque.Back().prefix
+	return &q.back().prefix
 }
 
 func (q *WriteQueue) getRingSlot() *RingRange {
-	if q.deque.Len() == 0 {
+	if q.len == 0 {
 		return &q.pushItem().suffix
 	}
 
-	return &q.deque.Back().suffix
+	return &q.back().suffix
 }

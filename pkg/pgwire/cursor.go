@@ -425,16 +425,20 @@ type RingMsg struct {
 }
 
 func (r *RingMsg) ToRange() *RingRange {
-	rng := &RingRange{
-		startIdx: r.msgIdx,
-		endIdx:   r.msgIdx + 1,
-		ring:     r.in.ring,
-	}
+	rng := &RingRange{}
+	r.ToRangeInto(rng)
+	return rng
+}
+
+// ToRangeInto fills dst with this message's range, avoiding allocation.
+func (r *RingMsg) ToRangeInto(dst *RingRange) {
+	dst.startIdx = r.msgIdx
+	dst.endIdx = r.msgIdx + 1
+	dst.ring = r.in.ring
 	// Self-referential capacity: this range represents exactly one message
 	// and its bounds are its own bounds. This prevents bugs where a stored
 	// RingRange's capacity points to a cursor's mutable RingRange.
-	rng.capacity = rng
-	return rng
+	dst.capacity = dst
 }
 
 // AppendTo implements [RawMessageSource].
@@ -474,6 +478,10 @@ func (r *RingMsg) WriteTo(w io.Writer) (int, error) {
 
 func (r *RingMsg) MsgIdx() int64 {
 	return r.msgIdx
+}
+
+func (r *RingMsg) Ring() *RingBuffer {
+	return r.in.ring
 }
 
 func (r *RingMsg) Range() *RingRange {
