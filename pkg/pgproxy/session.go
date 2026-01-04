@@ -18,35 +18,101 @@ import (
 var ErrSessionClosed = errors.New("session closed")
 var ErrBackendNotAcquired = errors.New("backend not acquired")
 
-// ErrClientTerminated indicates the client connection was terminated cleanly.
-// This is not an error condition - it means the session ended normally.
-var ErrClientTerminated = errors.New("client terminated")
+// ErrTornClientConnection indicates the client connection was closed with
+// incomplete data in the ring buffer - a partial message was being received.
+// This typically means the client crashed or the network connection was severed.
+var ErrTornClientConnection = errors.New("torn client connection: incomplete message in buffer")
 
-// ErrBackendTerminated indicates the backend connection was terminated.
-var ErrBackendTerminated = errors.New("backend terminated")
+// ErrTornBackendConnection indicates the backend connection was closed with
+// incomplete data in the ring buffer.
+var ErrTornBackendConnection = errors.New("torn backend connection: incomplete message in buffer")
 
-// IsCleanTermination returns true if err indicates a clean session termination
-// rather than an unexpected error. Clean terminations include:
-// - ErrClientTerminated (client sent Terminate message)
-// - ErrBackendTerminated (backend was terminated)
-// - io.EOF (client closed connection)
-// - Errors containing both ErrClientTerminated and ErrBackendTerminated
+// IsCleanTermination returns true if err indicates a clean session termination.
+// The Session iterator now handles EOF classification internally, so this mainly
+// checks for torn connection errors.
 func IsCleanTermination(err error) bool {
 	if err == nil {
 		return true
 	}
-	if errors.Is(err, ErrClientTerminated) {
-		return true
-	}
-	if errors.Is(err, ErrBackendTerminated) {
-		// Backend termination without client termination might be an error
-		// depending on context, but for now treat it as clean
-		return true
+	if errors.Is(err, ErrTornClientConnection) || errors.Is(err, ErrTornBackendConnection) {
+		return false
 	}
 	if errors.Is(err, io.EOF) {
-		return true
+		return true // Legacy compatibility
 	}
 	return false
+}
+
+// classifyIOError classifies an IO error from the given side (RoleClient or RoleServer).
+// For EOF errors, it checks ring buffer state to determine if termination was clean or torn.
+// Returns nil for clean terminations, or ErrTornClientConnection/ErrTornBackendConnection.
+// Non-EOF errors are returned unchanged.
+func (s *Session) classifyIOError(from ProxyRole, err error) error {
+	if !errors.Is(err, io.EOF) {
+		return err // Not EOF - return as-is
+	}
+
+	// Get state for this side
+	var ring *pgwire.RingBuffer
+	var terminatedByProxy bool
+	var terminateReceived bool
+	var tornErr error
+	var sideName string
+
+	if from == RoleClient {
+		ring = s.clientRingBuffer
+		terminatedByProxy = s.clientTerminatedByProxy
+		terminateReceived = s.clientTerminateReceived
+		tornErr = ErrTornClientConnection
+		sideName = "client"
+	} else {
+		ring = s.backendRingBuffer
+		terminatedByProxy = s.backendTerminatedByProxy
+		terminateReceived = false // Backend doesn't send Terminate
+		tornErr = ErrTornBackendConnection
+		sideName = "backend"
+	}
+
+	if ring == nil {
+		return nil
+	}
+
+	stats := ring.Stats()
+	isTorn := stats.TotalBytes > stats.PublishedBytes
+	unparsedBytes := stats.TotalBytes - stats.PublishedBytes
+	logger := s.Logger().With("side", sideName, "unparsed_bytes", unparsedBytes)
+
+	if isTorn {
+		if terminatedByProxy {
+			if from == RoleClient {
+				// Client torn + proxy closed → WARN
+				logger.Warn("torn connection (proxy-initiated close)")
+			} else {
+				// Backend torn + proxy closed → ERROR (possible proxy bug)
+				logger.Error("torn connection (proxy-initiated close, possible bug)")
+			}
+		} else {
+			// Unknown why torn → ERROR
+			logger.Error("torn connection")
+		}
+		return tornErr
+	}
+
+	// Clean message boundary
+	if terminatedByProxy {
+		return nil // Proxy initiated, clean - no log
+	}
+	if terminateReceived {
+		return nil // Client sent Terminate - cleanest case
+	}
+
+	// Closed without Terminate at message boundary - unusual
+	if from == RoleClient {
+		logger.Warn("connection closed without Terminate message")
+	} else {
+		logger.Warn("connection closed unexpectedly")
+	}
+	return nil
 }
 
 var noHealthCheckChan = make(chan time.Time)
@@ -188,6 +254,11 @@ type Session struct {
 	// Split mode state (IOModeSplit only)
 	mu    sync.Mutex  // Protects all session state in split mode
 	split *splitState // Non-nil while Run() is active in split mode
+
+	// Termination tracking state
+	clientTerminateReceived  bool // Client sent MsgClientTerminate
+	clientTerminatedByProxy  bool // Proxy called TerminateClient()
+	backendTerminatedByProxy bool // Proxy called TerminateBackend()
 }
 
 // splitState holds state for split-mode (IOModeSplit) execution.
@@ -495,6 +566,9 @@ func (s *Session) QueueSendPos(ctx context.Context, pos Pos) error {
 // TerminateClient sends terminationMessage to the client, flushes pending writes, and terminates the client connection.
 // We may still have pending client messages in the ring buffer.
 func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwire.Err) error {
+	// Mark as proxy-initiated before any termination logic
+	s.clientTerminatedByProxy = true
+
 	logger := s.Logger().WithGroup("terminate").With("endpoint", RoleClient, "message", terminationMessage)
 	if closedErr := s.alreadyClosedError("terminate client"); closedErr != nil {
 		logger.Warn("cannot terminate client: session already closed", "err", closedErr)
@@ -514,12 +588,15 @@ func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwir
 		return fmt.Errorf("failed to terminate client: %w: %w", termErr, terminationMessage)
 	}
 	logger.Info("terminated")
-	return ErrClientTerminated
+	return nil
 }
 
 // TerminateBackend flushes pending writes to the backend and terminates the backend connection.
 // The backend is released after termination.
 func (s *Session) TerminateBackend(ctx context.Context, cause error) error {
+	// Mark as proxy-initiated before any termination logic
+	s.backendTerminatedByProxy = true
+
 	logger := s.Logger().WithGroup("terminate").With("endpoint", RoleServer, "cause", cause)
 	if closedErr := s.alreadyClosedError("terminate backend"); closedErr != nil {
 		logger.Warn("cannot terminate backend: session already closed", "err", closedErr)
@@ -545,7 +622,7 @@ func (s *Session) TerminateBackend(ctx context.Context, cause error) error {
 	}
 
 	logger.Info("terminated")
-	return ErrBackendTerminated
+	return nil
 }
 
 func (s *Session) TerminateBoth(ctx context.Context, terminationMessage *pgwire.Err) error {
@@ -839,11 +916,15 @@ func (s *Session) splitSideLoop(ctx context.Context, from ProxyRole, handler fun
 
 		// Blocking read WITHOUT lock - this is where I/O overlaps
 		if err := cursor.BlockingNextBatch(); err != nil {
-			// Handle graceful shutdown - EOF means connection closed
-			if errors.Is(err, io.EOF) {
-				return io.EOF
+			// Classify the error (handles EOF classification)
+			classified := s.classifyIOError(from, err)
+			if classified == nil {
+				return nil // Clean termination
 			}
-			// Pass error to handler under lock
+			if errors.Is(err, io.EOF) {
+				return classified // Torn connection error
+			}
+			// Non-EOF error - pass to handler under lock
 			return s.processBatchUnderLock(ctx, from, handler, err)
 		}
 
@@ -951,7 +1032,7 @@ func (s *Session) yieldBatches(yield func(ProxyRole, error) bool) {
 		gotBackend := false
 		gotFrontend, errF := s.clientCursor.TryNextBatch()
 		if errF != nil {
-			yield(RoleClient, errF)
+			yield(RoleClient, s.classifyIOError(RoleClient, errF))
 			return
 		}
 
@@ -959,7 +1040,7 @@ func (s *Session) yieldBatches(yield func(ProxyRole, error) bool) {
 			var err error
 			gotBackend, err = s.backendCursor.TryNextBatch()
 			if err != nil {
-				yield(RoleServer, err)
+				yield(RoleServer, s.classifyIOError(RoleServer, err))
 				return
 			}
 		}
@@ -985,10 +1066,10 @@ func (s *Session) yieldBatches(yield func(ProxyRole, error) bool) {
 			case <-s.clientCursor.Ready():
 			case <-s.backendReadyChan():
 			case <-s.clientCursor.Done():
-				yield(RoleClient, s.clientCursor.Err())
+				yield(RoleClient, s.classifyIOError(RoleClient, s.clientCursor.Err()))
 				return
 			case <-s.backendDoneChan():
-				yield(RoleServer, s.backendCursor.Err())
+				yield(RoleServer, s.classifyIOError(RoleServer, s.backendCursor.Err()))
 				return
 			case <-s.healthCheckChan():
 				// Continue to run health check.
@@ -1109,6 +1190,12 @@ func (s *Session) beforeReadPos(pos *pos) error {
 		return err
 	}
 	pos.ctx = ctx
+
+	// Track client Terminate message for clean termination detection
+	if pos.FromClient() && pos.MessageType() == pgwire.MsgClientTerminate {
+		s.clientTerminateReceived = true
+	}
+
 	return nil
 }
 
