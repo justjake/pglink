@@ -226,9 +226,9 @@ func (p *pos) Dispatch(ctx context.Context, action Action) (err error) {
 	}
 
 	defer func() {
-		if err != nil {
+		if err != nil && !IsCleanTermination(err) {
 			p.Logger().Error("dispatch", "action", action, "error", err)
-		} else {
+		} else if err == nil {
 			// Attach response handler to the last outstanding request if present.
 			// This runs after the message has been queued and tracked by the OutstandingRequestQueue.
 			if unwrapped.responseHandler != nil {

@@ -17,6 +17,38 @@ import (
 
 var ErrSessionClosed = errors.New("session closed")
 var ErrBackendNotAcquired = errors.New("backend not acquired")
+
+// ErrClientTerminated indicates the client connection was terminated cleanly.
+// This is not an error condition - it means the session ended normally.
+var ErrClientTerminated = errors.New("client terminated")
+
+// ErrBackendTerminated indicates the backend connection was terminated.
+var ErrBackendTerminated = errors.New("backend terminated")
+
+// IsCleanTermination returns true if err indicates a clean session termination
+// rather than an unexpected error. Clean terminations include:
+// - ErrClientTerminated (client sent Terminate message)
+// - ErrBackendTerminated (backend was terminated)
+// - io.EOF (client closed connection)
+// - Errors containing both ErrClientTerminated and ErrBackendTerminated
+func IsCleanTermination(err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, ErrClientTerminated) {
+		return true
+	}
+	if errors.Is(err, ErrBackendTerminated) {
+		// Backend termination without client termination might be an error
+		// depending on context, but for now treat it as clean
+		return true
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	return false
+}
+
 var noHealthCheckChan = make(chan time.Time)
 
 // IOMode determines how the session handles I/O between client and backend.
@@ -482,7 +514,7 @@ func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwir
 		return fmt.Errorf("failed to terminate client: %w: %w", termErr, terminationMessage)
 	}
 	logger.Info("terminated")
-	return nil
+	return ErrClientTerminated
 }
 
 // TerminateBackend flushes pending writes to the backend and terminates the backend connection.
@@ -513,7 +545,7 @@ func (s *Session) TerminateBackend(ctx context.Context, cause error) error {
 	}
 
 	logger.Info("terminated")
-	return nil
+	return ErrBackendTerminated
 }
 
 func (s *Session) TerminateBoth(ctx context.Context, terminationMessage *pgwire.Err) error {

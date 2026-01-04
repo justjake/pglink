@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,23 @@ var (
 	ErrCloseFailed    = errors.New("close failed")
 	ErrServerClosed   = errors.New("pgserver closed")
 )
+
+// isAlreadyClosedError returns true if the error indicates the connection
+// was already closed. This is expected when the handler closes the connection
+// before the server's cleanup code runs.
+func isAlreadyClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	// Check for the specific error message from net package
+	if strings.Contains(err.Error(), "use of closed network connection") {
+		return true
+	}
+	return false
+}
 
 type UnauthorizedConn struct {
 	// Conn is the underlying connection.
@@ -484,7 +502,7 @@ func (c *conn) serve(ctx context.Context) {
 			c.logger.Error("panic serving connection", "error", err, "stack", string(buf))
 		}
 		closeErr := c.raw.Close()
-		if closeErr != nil {
+		if closeErr != nil && !isAlreadyClosedError(closeErr) {
 			c.logger.Error("error closing connection", "error", closeErr)
 		}
 		c.setState(connStateClosed)

@@ -278,7 +278,7 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (ret
 	}()
 
 	// Proxy using Run() which dispatches based on IOMode
-	return session.Run(ctx, func(pos pgproxy.Pos, err error) error {
+	runErr := session.Run(ctx, func(pos pgproxy.Pos, err error) error {
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				return io.EOF // Signal normal termination to Run()
@@ -314,6 +314,12 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (ret
 
 		return nil
 	})
+
+	// Don't return EOF as an error - it signals normal client termination
+	if pgproxy.IsCleanTermination(runErr) {
+		return nil
+	}
+	return runErr
 }
 
 // parseBackendURI parses and validates the backend URI.

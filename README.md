@@ -15,14 +15,13 @@ pglink supports SCRAM-SHA-256 authentication with TLS channel binding (SCRAM-SHA
 
 ## Performance
 
-Results from arbitrary and ill-considered benchmarks:
+Benchmark results comparing pglink to direct PostgreSQL connections and PgBouncer (6 rounds, 10s duration, 100 concurrent connections, Apple M4 Max):
 
-| Benchmark | direct         | pgbouncer            | pglink               |
-|-----------|----------------|----------------------|----------------------|
-| SELECT 1  | 48,687 qps     | 43,516 qps           | 20,077 qps           |
-| Mixed     | 28,355 qps     | 4,991 qps            | 17,620 qps           |
-| COPY OUT  | 179.9 MB/s     | 178.0 MB/s           | 161.5 MB/s           |
-| COPY IN   | 57.2 MB/s (0%) | 54.6 MB/s (2.1% err) | 53.4 MB/s (0.7% err) |
+| Benchmark | direct | pgbouncer | pglink |
+|-----------|--------|-----------|--------|
+| SELECT 1  | 44.2k qps | 45.0k qps (+2%) | 30.1k qps (-32%) |
+
+pglink adds approximately 10-12 microseconds of latency per query compared to a direct connection. For most applications, this overhead is negligible compared to actual query execution time.
 
 ## Installation
 

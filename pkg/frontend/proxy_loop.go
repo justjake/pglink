@@ -202,6 +202,11 @@ func (ps *proxyState) runLoop(ctx context.Context) error {
 		}
 
 		if err := pos.Dispatch(bgCtx, action); err != nil {
+			// Clean terminations (client sent Terminate, or connection closed)
+			// are not errors - they're normal session endings.
+			if pgproxy.IsCleanTermination(err) {
+				return nil
+			}
 			return err
 		}
 	}
@@ -209,9 +214,10 @@ func (ps *proxyState) runLoop(ctx context.Context) error {
 }
 
 // handleStreamError converts stream errors to appropriate responses.
+// Returns nil for clean terminations (EOF, client terminated, etc.)
 func (ps *proxyState) handleStreamError(err error) error {
-	if errors.Is(err, context.Canceled) {
-		return err
+	if pgproxy.IsCleanTermination(err) {
+		return nil
 	}
 	return err
 }
