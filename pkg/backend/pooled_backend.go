@@ -48,7 +48,7 @@ func (c *PooledBackend) TrackedParameters() []string {
 // This includes statements that are pending creation (Parse in-flight but ParseComplete not yet received).
 func (c *PooledBackend) HasStatement(name string) bool {
 	c.panicIfReleased()
-	return c.session.State.Statements.Alive[name] || c.session.State.Statements.PendingCreate[name]
+	return c.session.Statements.HasStatement(name)
 }
 
 func (c *PooledBackend) String() string {
@@ -140,25 +140,32 @@ func (c *PooledBackend) ParameterStatusChanges(keys []string, since pgwire.Param
 	return c.session.ParameterStatusChanges(keys, since)
 }
 
-// UpdateState should be called for each server message received from the backend.
-// TODO: handle this internally in Session somehow for cursor batches.
+// UpdateState should be called for each message sent to/from the backend.
+// This updates all message trackers (statements, parameters, etc).
 func (c *PooledBackend) UpdateState(msg pgwire.Message) {
 	c.panicIfReleased()
-	c.session.State.Update(msg)
+	// Update all trackers (errors are ignored as they don't affect proxy operation)
+	_, _ = c.session.Statements.TrackMessage(context.Background(), msg)
+	_, _ = c.session.ParameterStatuses.TrackMessage(context.Background(), msg)
+
+	// Update TxStatus from ReadyForQuery messages
+	if rfq, ok := msg.(*pgwire.ServerReadyForQuery); ok {
+		c.session.TxStatus = rfq.TxStatus()
+	}
 }
 
 // OutstandingRequestCount returns the number of pending requests sent to the backend.
 // This is the BACKEND state (requests we sent), not CLIENT state (requests client sent us).
 func (c *PooledBackend) OutstandingRequestCount() int {
 	c.panicIfReleased()
-	return c.session.State.OutstandingRequestCount()
+	return c.session.OutstandingRequests.Len()
 }
 
 // ParameterStatuses returns the backend's current parameter statuses.
 // This is the BACKEND state (what postgres told us), not CLIENT state (what we told client).
 func (c *PooledBackend) ParameterStatuses() pgwire.ParameterStatuses {
 	c.panicIfReleased()
-	return c.session.State.ParameterStatuses
+	return c.session.ParameterStatuses.ParameterStatuses
 }
 
 // SyncParameterStatusesFromPgConn updates the backend session's parameter statuses
@@ -183,12 +190,12 @@ func (c *PooledBackend) Release() {
 	// subsequent queries on this connection would fail with
 	// "current transaction is aborted".
 	//
-	// Note: We check session.State.TxStatus (pglink's tracked state) rather than
+	// Note: We check session.TxStatus (pglink's tracked state) rather than
 	// conn.TxStatus() (pgx's tracked state) because pglink bypasses pgx for
 	// zero-copy message proxying, so pgx doesn't know the actual transaction state.
-	if c.session.State.TxStatus != pgwire.TxIdle {
+	if c.session.TxStatus != pgwire.TxIdle {
 		c.session.logger.Warn("releasing backend in non-idle transaction state, marking for destruction",
-			"txStatus", c.session.State.TxStatus)
+			"txStatus", c.session.TxStatus)
 		c.conn.MarkForDestroy()
 	}
 
@@ -261,9 +268,11 @@ func (c *PooledBackend) Terminate(ctx context.Context, err error) error {
 // Returns trackers for messages sent to/from this backend.
 func (c *PooledBackend) MessageTrackers() []pgproxy.MessageTracker {
 	c.panicIfReleased()
-	// Return the OutstandingRequestQueue as a tracker.
-	// Additional trackers (TransactionFlow, CopyFlow, etc.) will be added in Phase 2.
-	return []pgproxy.MessageTracker{&c.session.OutstandingRequests}
+	return []pgproxy.MessageTracker{
+		&c.session.OutstandingRequests,
+		c.session.Statements,
+		c.session.ParameterStatuses,
+	}
 }
 
 // OutstandingRequests implements pgproxy.Backend.

@@ -3,7 +3,7 @@ package backend
 import (
 	"testing"
 
-	"github.com/justjake/pglink/pkg/pgwire"
+	"github.com/justjake/pglink/pkg/pgproxy"
 )
 
 // TestHasStatement_ChecksPendingCreate verifies that HasStatement returns true
@@ -14,9 +14,9 @@ import (
 // Without this fix, HasStatement returned false and triggered unnecessary
 // statement re-creation that failed because the statement wasn't in cache yet.
 func TestHasStatement_ChecksPendingCreate(t *testing.T) {
-	// Create a minimal session with state tracking
+	// Create a minimal session with statement tracking
 	session := &Session{
-		State: pgwire.NewProtocolState(),
+		Statements: pgproxy.NewStatementTracker(),
 	}
 	backend := &PooledBackend{
 		session: session,
@@ -32,7 +32,7 @@ func TestHasStatement_ChecksPendingCreate(t *testing.T) {
 
 	// Simulate Parse being sent (but ParseComplete not yet received)
 	// This puts the statement in PendingCreate
-	session.State.Statements.PendingCreate["stmt1"] = true
+	session.Statements.PendingCreate["stmt1"] = true
 
 	// HasStatement should now return true because the statement is pending
 	if !backend.HasStatement("stmt1") {
@@ -40,14 +40,14 @@ func TestHasStatement_ChecksPendingCreate(t *testing.T) {
 	}
 
 	// Test with unnamed statement (empty string) - this is what pgbench uses
-	session.State.Statements.PendingCreate[""] = true
+	session.Statements.PendingCreate[""] = true
 	if !backend.HasStatement("") {
 		t.Error("HasStatement should return true for unnamed statement in PendingCreate")
 	}
 
 	// After ParseComplete, statement moves from PendingCreate to Alive
-	delete(session.State.Statements.PendingCreate, "stmt1")
-	session.State.Statements.Alive["stmt1"] = true
+	delete(session.Statements.PendingCreate, "stmt1")
+	session.Statements.Alive["stmt1"] = true
 
 	// HasStatement should still return true
 	if !backend.HasStatement("stmt1") {
@@ -55,7 +55,7 @@ func TestHasStatement_ChecksPendingCreate(t *testing.T) {
 	}
 
 	// Remove from Alive - should now return false
-	delete(session.State.Statements.Alive, "stmt1")
+	delete(session.Statements.Alive, "stmt1")
 	if backend.HasStatement("stmt1") {
 		t.Error("HasStatement should return false after statement removed from Alive")
 	}
@@ -69,7 +69,7 @@ func TestHasStatement_ChecksPendingCreate(t *testing.T) {
 // HasStatement must return true so we don't try to re-create the statement.
 func TestHasStatement_PipelinedParseBindScenario(t *testing.T) {
 	session := &Session{
-		State: pgwire.NewProtocolState(),
+		Statements: pgproxy.NewStatementTracker(),
 	}
 	backend := &PooledBackend{
 		session: session,
@@ -77,7 +77,7 @@ func TestHasStatement_PipelinedParseBindScenario(t *testing.T) {
 
 	// Step 1: Parse is sent for unnamed statement
 	// This simulates UpdateState being called after Parse handler
-	session.State.Statements.PendingCreate[""] = true
+	session.Statements.PendingCreate[""] = true
 
 	// Step 2: Bind handler runs - it checks HasStatement
 	// Before the fix, this returned false and caused re-creation to fail
@@ -86,8 +86,8 @@ func TestHasStatement_PipelinedParseBindScenario(t *testing.T) {
 	}
 
 	// Step 3: After ParseComplete is received, statement moves to Alive
-	delete(session.State.Statements.PendingCreate, "")
-	session.State.Statements.Alive[""] = true
+	delete(session.Statements.PendingCreate, "")
+	session.Statements.Alive[""] = true
 
 	// HasStatement should still work
 	if !backend.HasStatement("") {

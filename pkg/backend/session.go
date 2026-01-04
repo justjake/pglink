@@ -24,13 +24,17 @@ type Session struct {
 	Conn              *pgconn.PgConn
 	User              config.UserConfig
 	UserName          string
-	State             pgwire.ProtocolState
 	TrackedParameters []string
 
 	logger *slog.Logger
 
 	// Ring buffer for zero-copy message proxying
 	ringBuffer *pgwire.RingBuffer
+
+	// Message trackers for protocol state
+	ParameterStatuses *pgproxy.ParameterStatusTracker
+	Statements        *pgproxy.StatementTracker
+	TxStatus          pgwire.TxStatus
 
 	// OutstandingRequests tracks requests sent to this backend that are awaiting responses.
 	// Used by pgproxy.Session for response handler attachment.
@@ -68,20 +72,26 @@ func GetOrCreateSession(conn *pgconn.PgConn, db *Database, user config.UserConfi
 		}
 	}
 
-	state := pgwire.NewProtocolState()
-	state.PID = conn.PID()
-	state.SecretCancelKey = conn.SecretKey()
-	state.TxStatus = pgwire.TxStatus(conn.TxStatus())
+	// Initialize parameter status tracker with current parameters from pgconn
+	paramTracker := &pgproxy.ParameterStatusTracker{
+		ParameterStatuses: make(pgwire.ParameterStatuses),
+	}
+	for _, key := range tracked {
+		if value := conn.ParameterStatus(key); value != "" {
+			paramTracker.ParameterStatuses[key] = value
+		}
+	}
 
 	session := &Session{
 		DB:                db,
 		Conn:              conn,
 		UserName:          username,
 		User:              user,
-		State:             state,
 		TrackedParameters: tracked,
+		ParameterStatuses: paramTracker,
+		Statements:        pgproxy.NewStatementTracker(),
+		TxStatus:          pgwire.TxStatus(conn.TxStatus()),
 	}
-	session.updateState()
 	session.logger = db.logger.With("session", session.String())
 
 	conn.CustomData()[SessionExtraDataKey] = session
@@ -93,7 +103,7 @@ func (s *Session) String() string {
 }
 
 func (s *Session) ParameterStatusChanges(keys []string, since pgwire.ParameterStatuses) pgwire.ParameterStatusDiff {
-	return since.DiffToTip(keys, s.State.ParameterStatuses)
+	return since.DiffToTip(keys, s.ParameterStatuses.ParameterStatuses)
 }
 
 // Acquire prepares the session for use but does NOT start the ring buffer.
@@ -117,7 +127,7 @@ func (s *Session) Acquire() error {
 	}
 	// Don't sync ParameterStatuses from pgconn - our tracking is authoritative.
 	// Only sync TxStatus which pgconn tracks correctly.
-	s.State.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
+	s.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
 
 	// Prepare ring buffer but don't start it yet
 	if s.ringBuffer == nil {
@@ -172,27 +182,17 @@ func (s *Session) Flush() error {
 	return s.Conn.Frontend().Flush()
 }
 
-func (s *Session) updateParameterStatuses(keys []string) pgwire.ParameterStatuses {
-	parameterStatuses := s.State.ParameterStatuses
-	for _, key := range keys {
-		value := s.Conn.ParameterStatus(key)
-		if value == "" {
-			delete(s.State.ParameterStatuses, key)
-		} else {
-			parameterStatuses[key] = value
-		}
-	}
-	return parameterStatuses
-}
-
-// SyncParameterStatusesFromPgConn updates Session.State.ParameterStatuses from
+// SyncParameterStatusesFromPgConn updates the parameter status tracker from
 // pgconn's internal parameter tracking. Call this after using pgconn.Exec()
 // directly (e.g., for internal queries like varcache) to keep state in sync.
 func (s *Session) SyncParameterStatusesFromPgConn() {
-	s.updateParameterStatuses(s.TrackedParameters)
-}
-
-func (s *Session) updateState() {
-	s.updateParameterStatuses(s.TrackedParameters)
-	s.State.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
+	for _, key := range s.TrackedParameters {
+		value := s.Conn.ParameterStatus(key)
+		if value == "" {
+			delete(s.ParameterStatuses.ParameterStatuses, key)
+		} else {
+			s.ParameterStatuses.ParameterStatuses[key] = value
+		}
+	}
+	s.TxStatus = pgwire.TxStatus(s.Conn.TxStatus())
 }
