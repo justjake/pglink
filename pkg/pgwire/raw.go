@@ -49,6 +49,7 @@ type RawMessageSource interface {
 // SliceMsg implements RawMessageSource.
 type SliceMsg struct {
 	Slice []byte
+	Owned bool
 }
 
 func SliceFromBody(t MsgType, body []byte) SliceMsg {
@@ -56,7 +57,7 @@ func SliceFromBody(t MsgType, body []byte) SliceMsg {
 	sp := encoder.Start(t)
 	encoder.WriteBytes(body)
 	_ = encoder.End(sp) // End never fails for in-memory buffer
-	return SliceMsg{encoder.Buffer}
+	return SliceMsg{encoder.Buffer, true}
 }
 
 // IsZero returns true if this RawBody has no data.
@@ -74,10 +75,11 @@ func (r SliceMsg) Len() int {
 	return len(r.Slice)
 }
 
-// Retain implements RawMessageSource. Since RawBody already owns its bytes,
-// it returns itself.
 func (r SliceMsg) Retain() RawMessageSource {
-	return r
+	if r.Owned {
+		return r
+	}
+	return SliceMsg{bytes.Clone(r.Slice), true}
 }
 
 func (r SliceMsg) Bytes() []byte {
@@ -206,7 +208,7 @@ func (m *FromServer[T]) Parse() T {
 		return m.parsed
 	}
 	// Lazily extract body bytes from source
-	raw := SliceMsg{m.source.Bytes()}
+	raw := SliceMsg{m.source.Bytes(), false}
 	msg, err := decodeBackendMessage(raw)
 	if err != nil {
 		panic(fmt.Sprintf("FromServer.Parse: %v", err))
@@ -250,7 +252,7 @@ func (m *FromClient[T]) Parse() T {
 		return m.parsed
 	}
 	// Lazily extract body bytes from source
-	raw := SliceMsg{m.source.Bytes()}
+	raw := SliceMsg{m.source.Bytes(), false}
 	msg, err := decodeFrontendMessage(raw)
 	if err != nil {
 		panic(fmt.Sprintf("FromClient.Parse: %v", err))
@@ -297,7 +299,7 @@ func EncodeBackendMessage(msg pgproto3.BackendMessage) SliceMsg {
 	if err != nil {
 		return SliceMsg{}
 	}
-	return SliceMsg{encoded}
+	return SliceMsg{encoded, true}
 }
 
 // EncodeFrontendMessage encodes a pgproto3.FrontendMessage to RawBody.
@@ -306,7 +308,7 @@ func EncodeFrontendMessage(msg pgproto3.FrontendMessage) SliceMsg {
 	if err != nil {
 		return SliceMsg{}
 	}
-	return SliceMsg{encoded}
+	return SliceMsg{encoded, true}
 }
 
 // decodeFrontendMessage decodes raw bytes into a pgproto3.FrontendMessage.

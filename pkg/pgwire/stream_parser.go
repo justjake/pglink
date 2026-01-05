@@ -1,176 +1,10 @@
-package pgproxy
+package pgwire
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
-	"iter"
-	"log/slog"
-	"sync/atomic"
-	"time"
-
-	"github.com/gammazero/deque"
-	"github.com/justjake/pglink/pkg/pgwire"
-	"github.com/panjf2000/gnet/v2"
 )
-
-const gnetTickDuration = 1 * time.Second
-
-var errNotResolved = errors.New("promise not resolved")
-
-// The goal of gnet is to avoid goroutine schedule overhead. this promise construct will probably not help
-// we are using it while standing up gnet, can optimize later.
-type promise[T any] struct {
-	r      atomic.Bool
-	done   chan struct{}
-	err    error
-	result T
-}
-
-func newPromise[T any]() *promise[T] {
-	return &promise[T]{
-		done: make(chan struct{}),
-	}
-}
-
-func (p *promise[t]) Resolved() bool {
-	return p.r.Load()
-}
-
-func (p *promise[T]) Result() (result T, err error) {
-	if !p.Resolved() {
-		err = errNotResolved
-		return
-	}
-	return p.result, p.err
-}
-
-func (p *promise[T]) Wait(ctx context.Context) (result T, err error) {
-	select {
-	case <-p.done:
-		return p.Result()
-	case <-ctx.Done():
-		err = ctx.Err()
-		return
-	}
-}
-
-func (p *promise[T]) Resolve(result T, err error) *promise[T] {
-	if p.r.CompareAndSwap(false, true) {
-		if err != nil {
-			p.err = err
-			close(p.done)
-		} else {
-			p.result = result
-			close(p.done)
-		}
-	}
-	return p
-}
-
-// EventHandler represents the engine events' callbacks for the Run call.
-// Each event has an Action return value that is used manage the state
-// of the connection and engine.
-type gnetEventHandler interface {
-	// OnBoot fires when the engine is ready for accepting connections.
-	// The parameter engine has information and various utilities.
-	OnBoot(eng gnet.Engine) (action gnet.Action)
-
-	// OnShutdown fires when the engine is being shut down, it is called right after
-	// all event-loops and connections are closed.
-	OnShutdown(eng gnet.Engine)
-
-	// OnOpen fires when a new connection has been opened.
-	//
-	// The Conn c has information about the connection such as its local and remote addresses.
-	// The parameter out is the return value which is going to be sent back to the remote.
-	// Sending large amounts of data back to the remote in OnOpen is usually not recommended.
-	OnOpen(c gnet.Conn) (out []byte, action gnet.Action)
-
-	// OnClose fires when a connection has been closed.
-	// The parameter err is the last known connection error.
-	OnClose(c gnet.Conn, err error) (action gnet.Action)
-
-	// OnTraffic fires when a socket receives data from the remote.
-	//
-	// Also check out the comments on Reader and Writer interfaces.
-	OnTraffic(c gnet.Conn) (action gnet.Action)
-
-	// OnTick fires immediately after the engine starts and will fire again
-	// following the duration specified by the delay return value.
-	OnTick() (delay time.Duration, action gnet.Action)
-}
-
-type gnetProxyEngine struct {
-	// gnet.BuiltinEventEngine
-	eng    gnet.Engine
-	client gnet.Client
-	logger *slog.Logger
-	ticks  int
-}
-
-// OnBoot implements [gnet.EventHandler].
-func (g *gnetProxyEngine) OnBoot(eng gnet.Engine) (action gnet.Action) {
-	g.logger.Info("gnet.OnBoot", "eng", eng)
-	g.eng = eng
-	return gnet.None
-}
-
-// OnClose implements [gnet.EventHandler].
-func (g *gnetProxyEngine) OnClose(c gnet.Conn, err error) (action gnet.Action) {
-	g.logger.Info("gnet.OnClose", "c", c, "err", err)
-	return gnet.None
-}
-
-// OnOpen implements [gnet.EventHandler].
-func (g *gnetProxyEngine) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
-	g.logger.Info("gnet.OnOpen", "c", c)
-	return nil, gnet.None
-}
-
-// OnShutdown implements [gnet.EventHandler].
-func (g *gnetProxyEngine) OnShutdown(eng gnet.Engine) {
-	g.logger.Info("gnet.OnShutdown", "eng", eng)
-}
-
-// OnTick fires immediately after the engine starts and will fire again
-// following the duration specified by the delay return value.
-//
-// OnTick implements [gnet.EventHandler].
-func (g *gnetProxyEngine) OnTick() (delay time.Duration, action gnet.Action) {
-	g.ticks++
-	g.logger.Info("gnet.OnTick", "ticks", g.ticks)
-	return gnetTickDuration, gnet.None
-}
-
-// OnTraffic implements [gnet.EventHandler].
-func (g *gnetProxyEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
-	handler, ok := c.Context().(*gnetProxyConn)
-	if !ok {
-		g.logger.Error("gnet.OnTraffic: invalid context: closing conn", "gconn", c, "context", c.Context())
-		return gnet.Close
-	}
-	return handler.OnTraffic(c)
-}
-
-var _ gnet.EventHandler = (*gnetProxyEngine)(nil)
-
-type gnetProxyConn struct {
-	gconn  gnet.Conn
-	ring   *pgwire.RingBuffer
-	logger *slog.Logger
-}
-
-func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
-	if p.gconn != gconn {
-		p.logger.Error("gnetProxyConn.OnTraffic: invalid gconn", "gconn", gconn, "p.gconn", p.gconn)
-		return gnet.Close
-	}
-
-	return gnet.None
-}
 
 // ParseState is the internal state machine state for message parsing.
 type ParseState int
@@ -194,303 +28,14 @@ func (s ParseState) String() string {
 	}
 }
 
-type GnetStream struct {
-	bufmsgs StreamMessages
-	buf     OffsetSlice[byte]
-	parser  StreamParser
-	onBatch func(StreamSlice)
-
-	streamDestination io.Writer
+type StreamBatch struct {
+	Complete StreamSlice
+	Partial  *IncompleteStreamMsg[SliceMsg]
 }
 
-const MaxMessageSize = 1024 * 1024 // 1MB
+type OnBatchCallback func(batch StreamBatch)
 
-func (s *GnetStream) OnTraffic(c gnet.Conn) error {
-	if s.bufmsgs.Len() > 0 {
-		return fmt.Errorf("gnetStream.OnTraffic: buffer messages not empty: %v", s.bufmsgs)
-	}
-
-	if !s.parser.Idle() {
-		return fmt.Errorf("gnetStream.OnTraffic: parser not idle: %v", s.parser)
-	}
-
-	max := c.InboundBuffered()
-	buf, err := c.Next(max)
-	if err != nil {
-		fmt.Errorf("gnetStream.OnTraffic: failed to read next %v bytes: %w", max, err)
-	}
-
-	// Copy the parser to accept partial writes without updating state.
-	parser := s.parser
-	parser.OnMsg = s.bufmsgs.Push
-	written, err := parser.Write(buf)
-	defer func() {
-		_, discardErr := c.Discard(written)
-		if discardErr != nil {
-			panic(fmt.Errorf("discard error: %w", discardErr))
-		}
-	}()
-
-	if err != nil {
-		return fmt.Errorf("parse error: %w", err)
-	}
-
-	if parser.Idle() {
-		s.parser = parser
-	} else if s.bufmsgs.Len() > 0 {
-		// accept whole message prefix
-		written = int(s.bufmsgs.EndOffset() - s.bufmsgs.StartOffset())
-		s.parser.ResetToIdleAt(s.bufmsgs.EndOffset())
-	} else if parser.BytesNeeded() > MaxMessageSize {
-		// too big to buffer, switch to streaming.
-		panic("streaming not implemented")
-	} else {
-		written = 0
-		return nil
-	}
-
-	streamSlice := StreamSlice{
-		StreamMessages: &s.bufmsgs,
-		Slice: OffsetSlice[byte]{
-			Offset: s.bufmsgs.StartOffset(),
-			B:      buf,
-		},
-	}
-
-	var lastHandledIdx int64 = -1
-	defer func() {
-		if lastHandledIdx != -1 {
-			s.bufmsgs.Truncate(lastHandledIdx + 1)
-		}
-	}()
-
-	for msg := range streamSlice.Whole() {
-		// TODO: process msg
-		_ = msg
-		lastHandledIdx = msg.Idx
-	}
-
-	return nil
-}
-
-type OffsetSlice[T any] struct {
-	Offset int64
-	B      []T
-}
-
-func NewOffsetSlice[T any](offset int64, bytes []T) OffsetSlice[T] {
-	return OffsetSlice[T]{
-		Offset: offset,
-		B:      bytes,
-	}
-}
-
-func (s OffsetSlice[T]) Len() int {
-	return len(s.B)
-}
-
-func (s OffsetSlice[T]) StartOffset() int64 {
-	return s.Offset
-}
-
-func (s OffsetSlice[T]) EndOffset() int64 {
-	return s.Offset + int64(len(s.B))
-}
-
-func (s OffsetSlice[T]) String() string {
-	return fmt.Sprintf("StreamSlice{[%d,%d) %d bytes}", s.Offset, s.EndOffset(), len(s.B))
-}
-
-func (s OffsetSlice[T]) Slice(start, end int64) OffsetSlice[T] {
-	return OffsetSlice[T]{
-		Offset: start,
-		B:      s.B[start-s.Offset : end-s.Offset],
-	}
-}
-
-type StreamSliceMsg struct {
-	Idx       int64
-	Offset    int64
-	Remaining int // bytes remaining if message is incomplete (0 if complete)
-	pgwire.SliceMsg
-}
-
-func NewStreamSliceMessage(idx int64, msg OffsetSlice[byte]) StreamSliceMsg {
-	return StreamSliceMsg{
-		Idx:    idx,
-		Offset: msg.Offset,
-		SliceMsg: pgwire.SliceMsg{
-			Slice: msg.B,
-		},
-	}
-}
-
-type StreamSlice struct {
-	*StreamMessages
-	Slice OffsetSlice[byte]
-}
-
-func (s *StreamSlice) Whole() iter.Seq[StreamSliceMsg] {
-	return func(yield func(StreamSliceMsg) bool) {
-		for idx := s.StartMsgIdx(); idx < s.EndMsgIdx(); idx++ {
-			if !yield(s.At(idx)) {
-				return
-			}
-		}
-	}
-}
-
-func (s *StreamSlice) At(idx int64) StreamSliceMsg {
-	startOffset, endOffset := s.MsgRange(idx)
-	dataEndOffset := s.Slice.EndOffset()
-	if endOffset > dataEndOffset {
-		slice := s.Slice.Slice(startOffset, dataEndOffset)
-		msg := NewStreamSliceMessage(idx, slice)
-		msg.Remaining = int(endOffset - dataEndOffset)
-		return msg
-	} else {
-		return NewStreamSliceMessage(idx, s.Slice.Slice(startOffset, endOffset))
-	}
-}
-
-// StreamMessages tracks message metadata in an abstract byte stream.
-// Messages are indexed by a logical message index starting at msgStartIdx.
-// Stores the byte offset where each message starts; the end of message N
-// is the start of message N+1 (or endOffset for the last message).
-type StreamMessages struct {
-	msgStartIdx int64 // logical index of first message in deque
-	endOffset   int64 // byte offset of end of last message (== stream position)
-
-	// offsets[i] is the byte offset where message (msgStartIdx + i) starts.
-	// len(offsets) == number of messages tracked.
-	offsets deque.Deque[int64]
-}
-
-func (p *StreamMessages) Copy() *StreamMessages {
-	result := *p
-	result.offsets = deque.Deque[int64]{}
-	result.offsets.Copy(p.offsets)
-	return &result
-}
-
-// Push adds a new message. The type is currently unused but available for future use.
-func (p *StreamMessages) Push(_ pgwire.MsgType, startOffset, endOffset int64) {
-	p.offsets.PushBack(startOffset)
-	p.endOffset = endOffset
-}
-
-// Shift removes and returns the first message's byte range.
-// Returns ok=false if no messages are available.
-func (p *StreamMessages) Shift() (startOffset, endOffset int64, ok bool) {
-	if p.offsets.Len() == 0 {
-		return 0, 0, false
-	}
-	startOffset = p.offsets.PopFront()
-	p.msgStartIdx++
-	if p.offsets.Len() > 0 {
-		endOffset = p.offsets.Front()
-	} else {
-		endOffset = p.endOffset
-	}
-	return startOffset, endOffset, true
-}
-
-// ShiftN removes the first n messages.
-func (p *StreamMessages) ShiftN(n int) {
-	if n <= 0 {
-		return
-	}
-	if n >= p.offsets.Len() {
-		p.msgStartIdx += int64(p.offsets.Len())
-		p.offsets.Clear()
-		return
-	}
-	for i := 0; i < n; i++ {
-		p.offsets.PopFront()
-	}
-	p.msgStartIdx += int64(n)
-}
-
-// Truncate removes all messages before newStartMsgIdx.
-func (p *StreamMessages) Truncate(newStartMsgIdx int64) {
-	toRemove := int(newStartMsgIdx - p.msgStartIdx)
-	p.ShiftN(toRemove)
-}
-
-// Len returns the number of messages currently tracked.
-func (p *StreamMessages) Len() int {
-	return p.offsets.Len()
-}
-
-// StartMsgIdx returns the logical index of the first message.
-func (p *StreamMessages) StartMsgIdx() int64 {
-	return p.msgStartIdx
-}
-
-// EndMsgIdx returns the logical index one past the last message.
-func (p *StreamMessages) EndMsgIdx() int64 {
-	return p.msgStartIdx + int64(p.offsets.Len())
-}
-
-func (p *StreamMessages) StartOffset() int64 {
-	return p.offsets.Front()
-}
-
-func (p *StreamMessages) EndOffset() int64 {
-	return p.endOffset
-}
-
-// Offset returns the start byte offset of the message at msgIdx.
-// Panics if msgIdx is out of range.
-func (p *StreamMessages) Offset(msgIdx int64) int64 {
-	idx := int(msgIdx - p.msgStartIdx)
-	return p.offsets.At(idx)
-}
-
-// Size returns the byte size of the message at msgIdx.
-// Panics if msgIdx is out of range.
-func (p *StreamMessages) Size(msgIdx int64) int64 {
-	start, end := p.MsgRange(msgIdx)
-	return end - start
-}
-
-// MsgRange returns the byte range [start, end) of the message at msgIdx.
-// Panics if msgIdx is out of range.
-func (p *StreamMessages) MsgRange(msgIdx int64) (startOffset, endOffset int64) {
-	idx := int(msgIdx - p.msgStartIdx)
-	startOffset = p.offsets.At(idx)
-	if idx+1 < p.offsets.Len() {
-		endOffset = p.offsets.At(idx + 1)
-	} else {
-		endOffset = p.endOffset
-	}
-	return
-}
-
-// Range returns the byte range [start, end) spanning messages [startMsg, endMsg).
-// Panics if indices are out of range.
-func (p *StreamMessages) Range(startMsg, endMsg int64) (startOffset, endOffset int64) {
-	startOffset = p.Offset(startMsg)
-	if endMsg >= p.EndMsgIdx() {
-		endOffset = p.endOffset
-	} else {
-		endOffset = p.Offset(endMsg)
-	}
-	return
-}
-
-type IncompleteStreamSliceMsg struct {
-	Remaining int
-	StreamSliceMsg
-}
-
-func (s *IncompleteStreamSliceMsg) MessageLen() int {
-	return s.Remaining + len(s.SliceMsg.Slice)
-}
-
-type OnBatchCallback func(complete StreamSlice, partial IncompleteStreamSliceMsg)
-
-// StreamBatchParser parses a stream of PostgreSQL wire protocol messages.
+// StreamBatchParser parses a stream of PostgreSQL wire protocol messages written to it.
 // It only accepts writes that produce a message batch (i.e. complete messages).
 //
 // See the [Write] method for details.
@@ -573,7 +118,7 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 	remaining := b[written:]
 
 	// if the suffix indicatges a message of size >MaxParseMessageSize, then we must stream it.
-	var incompleteMsg IncompleteStreamSliceMsg
+	var incompleteMsg IncompleteStreamMsg[SliceMsg]
 	if _, startOffset, endOffset, ok := p.Parser.PeekPendingMessage(remaining); ok {
 		len := int(endOffset - startOffset)
 		// It's big.
@@ -589,12 +134,12 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 			}
 
 			// We must emit a batch containing any complete messages within the written bytes.
-			incompleteMsg = IncompleteStreamSliceMsg{
+			incompleteMsg = IncompleteStreamMsg[SliceMsg]{
 				Remaining: int(endOffset - p.Parser.curIdx),
-				StreamSliceMsg: StreamSliceMsg{
-					Idx:      p.complete.EndMsgIdx(),
-					Offset:   startOffset,
-					SliceMsg: pgwire.SliceMsg{Slice: remaining},
+				StreamMsg: StreamMsg[SliceMsg]{
+					Idx:    p.complete.EndMsgIdx(),
+					Offset: startOffset,
+					T:      SliceMsg{Slice: remaining},
 				},
 			}
 		}
@@ -607,13 +152,17 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 		} else if incompleteMsg.Remaining > 0 {
 			// the partial message is the "first" message
 			// it's currently streaming
-			incompleteMsg = IncompleteStreamSliceMsg{}
+			incompleteMsg = IncompleteStreamMsg[SliceMsg]{}
 		}
 	}
 
 	// Emit batch, if any.
-	if p.complete.Len() > 0 || incompleteMsg.Remaining > 0 {
-		p.OnBatch(p.complete, incompleteMsg)
+	if (p.complete.Len() > 0 || incompleteMsg.Remaining > 0) && p.OnBatch != nil {
+		res := StreamBatch{p.complete, nil}
+		if incompleteMsg.Remaining > 0 {
+			res.Partial = &incompleteMsg
+		}
+		p.OnBatch(res)
 	}
 
 	return written, err
@@ -643,7 +192,7 @@ type StreamParser struct {
 	// Called when a complete message is parsed.
 	// msgType is the message type byte.
 	// startIdx and endIdx are byte offsets in the stream.
-	OnMsg func(msgType pgwire.MsgType, startIdx, endIdx int64)
+	OnMsg func(msgType MsgType, startIdx, endIdx int64)
 
 	curIdx      int64   // current position in stream (total bytes processed)
 	msgStart    int64   // start of current message (== curIdx when idle)
@@ -651,7 +200,7 @@ type StreamParser struct {
 	lengthField int64   // parsed value from header[1:5] (includes itself, set when header complete)
 }
 
-func NewStreamParser(onComplete func(pgwire.MsgType, int64, int64)) *StreamParser {
+func NewStreamParser(onComplete func(MsgType, int64, int64)) *StreamParser {
 	return &StreamParser{OnMsg: onComplete}
 }
 
@@ -701,11 +250,11 @@ func (p *StreamParser) State() ParseState {
 
 // PendingMessage returns the message currently being written
 // or 0 if idle or indeterminate.
-func (p *StreamParser) PendingMessage() (msgType pgwire.MsgType, startOffset, endOffset int64, ok bool) {
+func (p *StreamParser) PendingMessage() (msgType MsgType, startOffset, endOffset int64, ok bool) {
 	if p.State() != ParseReadingBody {
 		return 0, 0, 0, false
 	}
-	msgType = pgwire.MsgType(p.header[0])
+	msgType = MsgType(p.header[0])
 	startOffset = p.msgStart
 	endOffset = startOffset + 1 + p.lengthField
 	ok = true
@@ -719,7 +268,7 @@ func (p *StreamParser) Peeker() StreamParser {
 	return result
 }
 
-func (p *StreamParser) PeekPendingMessage(b []byte) (msgType pgwire.MsgType, startOffset, endOffset int64, ok bool) {
+func (p *StreamParser) PeekPendingMessage(b []byte) (msgType MsgType, startOffset, endOffset int64, ok bool) {
 	if len(b) == 0 {
 		return 0, 0, 0, false
 	}
@@ -789,7 +338,7 @@ func (p *StreamParser) Write(b []byte) (int, error) {
 			break // incomplete message, use slow path
 		}
 		// Complete message available
-		msgType := pgwire.MsgType(b[0])
+		msgType := MsgType(b[0])
 		startIdx := p.curIdx
 		p.curIdx += msgSize
 		p.msgStart = p.curIdx // stay idle
@@ -852,7 +401,7 @@ func (p *StreamParser) Write(b []byte) (int, error) {
 
 // finishMessage completes a message and calls the callback.
 func (p *StreamParser) finishMessage() {
-	msgType := pgwire.MsgType(p.header[0])
+	msgType := MsgType(p.header[0])
 	if p.OnMsg != nil {
 		p.OnMsg(msgType, p.msgStart, p.curIdx)
 	}
@@ -867,7 +416,7 @@ type FrontendStreamParser struct {
 }
 
 // NewFrontendStream creates a parser for client->server messages.
-func NewFrontendStream(onComplete func(pgwire.MsgType, int64, int64)) *FrontendStreamParser {
+func NewFrontendStream(onComplete func(MsgType, int64, int64)) *FrontendStreamParser {
 	return &FrontendStreamParser{
 		StreamParser: StreamParser{OnMsg: onComplete},
 		startup:      true,
@@ -961,7 +510,7 @@ func (p *FrontendStreamParser) writeStartup(b []byte) (int, error) {
 // finishStartupMessage completes a startup message.
 func (p *FrontendStreamParser) finishStartupMessage() {
 	if p.OnMsg != nil {
-		p.OnMsg(pgwire.MsgStartup, p.msgStart, p.curIdx)
+		p.OnMsg(MsgStartup, p.msgStart, p.curIdx)
 	}
 	p.msgStart = p.curIdx // reset to idle
 }
@@ -974,7 +523,7 @@ type BackendStreamParser struct {
 }
 
 // NewBackendStream creates a parser for server->client messages.
-func NewBackendStream(onComplete func(pgwire.MsgType, int64, int64)) *BackendStreamParser {
+func NewBackendStream(onComplete func(MsgType, int64, int64)) *BackendStreamParser {
 	return &BackendStreamParser{
 		StreamParser: StreamParser{OnMsg: onComplete},
 		startup:      true,
@@ -1009,7 +558,7 @@ func (p *BackendStreamParser) writeStartup(b []byte) (int, error) {
 			p.curIdx++
 			p.msgStart = p.curIdx // stay idle
 			if p.OnMsg != nil {
-				p.OnMsg(pgwire.MsgType(ch), startIdx, p.curIdx)
+				p.OnMsg(MsgType(ch), startIdx, p.curIdx)
 			}
 			b = b[1:]
 			written++
@@ -1024,4 +573,13 @@ func (p *BackendStreamParser) writeStartup(b []byte) (int, error) {
 	// Continue with normal message parsing
 	n, err := p.StreamParser.Write(b)
 	return written + n, err
+}
+
+type IncompleteStreamMsg[T RawMessageSource] struct {
+	Remaining int
+	StreamMsg[T]
+}
+
+func (s IncompleteStreamMsg[T]) Len() int {
+	return s.Remaining + s.T.Len()
 }

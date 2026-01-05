@@ -289,6 +289,23 @@ func (ss *splitState) runWorker(name string, fn func() error) {
 	}()
 }
 
+type ConnAdapterFactory func(ctx context.Context, conn net.Conn) (ConnAdapter, error)
+
+type ConnAdapter interface {
+	ConnReader
+	ConnWriter
+}
+
+type ConnReader interface {
+}
+
+type ConnWriter interface {
+	io.Writer
+	Writev(ctx context.Context, bufs [][]byte) error
+	Flush(ctx context.Context) error
+	Release()
+}
+
 // NewSession creates a new session.
 // The provided `ctx` is expected to be valid for the lifetime of the session.
 // However, you must always call [Session.Close] if NewSession returns successfully, do not rely on context cancellation.

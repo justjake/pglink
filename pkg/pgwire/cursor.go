@@ -570,7 +570,7 @@ func (r *RingMsg) BodyLen() int {
 }
 
 func (r *RingMsg) Retain() RawMessageSource {
-	return SliceMsg{slices.Clone(r.Bytes())}
+	return SliceMsg{slices.Clone(r.Bytes()), true}
 }
 
 func (r *RingMsg) String() string {
