@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgerrcode"
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
@@ -60,13 +59,13 @@ func (s *Session) classifyIOError(from ProxyRole, err error) error {
 	var sideName string
 
 	if from == RoleClient {
-		ring = s.clientRingBuffer
+		ring = s.clientAdapter.ringBuffer
 		terminatedByProxy = s.clientTerminatedByProxy
 		terminateReceived = s.clientTerminateReceived
 		tornErr = ErrTornClientConnection
 		sideName = "client"
 	} else {
-		ring = s.backendRingBuffer
+		ring = s.backendAdapter.ringBuffer
 		terminatedByProxy = s.backendTerminatedByProxy
 		terminateReceived = false // Backend doesn't send Terminate
 		tornErr = ErrTornBackendConnection
@@ -200,10 +199,6 @@ type SessionConfig struct {
 	// If not set, defaults to slog.Default().
 	Logger *slog.Logger
 
-	// IOMode determines how the session handles I/O.
-	// If not set, defaults to IOModeDefault.
-	IOMode IOMode
-
 	// Optional: sets ring buffer size.
 	pgwire.RingBufferConfig
 }
@@ -218,20 +213,7 @@ type SessionConfig struct {
 // Use [Session.Next] to iterate messages.
 // See [Pos] and [Action] for how to handle messages.
 type Session struct {
-	clientConn       Frontend
-	clientNetConn    net.Conn
-	clientRingBuffer *pgwire.RingBuffer
-	clientCursor     *pgwire.Cursor
-	clientPos        pos
-	crq              pgwire.WriteQueue
-
-	backendConn       Backend
-	backendNetConn    net.Conn
-	backendRingBuffer *pgwire.RingBuffer
-	backendCursor     *pgwire.Cursor
-	backendPos        pos
-	backendTrackers   []MessageTracker
-	bwq               pgwire.WriteQueue
+	*SessionState[*ringBufferAdapter]
 
 	// TODO: otel
 
@@ -246,88 +228,27 @@ type Session struct {
 	ringCtx       context.Context
 	cancelRingCtx func()
 
-	cfg       SessionConfig
-	closed    bool
 	closeOnce sync.Once
-	logger    *slog.Logger
-
-	// Split mode state (IOModeSplit only)
-	mu    sync.Mutex  // Protects all session state in split mode
-	split *splitState // Non-nil while Run() is active in split mode
-
-	// Termination tracking state
-	clientTerminateReceived  bool // Client sent MsgClientTerminate
-	clientTerminatedByProxy  bool // Proxy called TerminateClient()
-	backendTerminatedByProxy bool // Proxy called TerminateBackend()
-}
-
-// splitState holds state for split-mode (IOModeSplit) execution.
-type splitState struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	handler func(Pos, error) error
-	wg      sync.WaitGroup
-	errCh   chan error // Buffered with capacity for all workers
-}
-
-// runWorker runs fn in a goroutine with panic recovery and WaitGroup tracking.
-// All split-mode goroutines use this to ensure consistent error/panic handling.
-func (ss *splitState) runWorker(name string, fn func() error) {
-	ss.wg.Add(1)
-	go func() {
-		defer ss.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				ss.errCh <- fmt.Errorf("%s panic: %v", name, r)
-				ss.cancel()
-			}
-		}()
-		if err := fn(); err != nil {
-			ss.errCh <- err
-			ss.cancel()
-		}
-	}()
-}
-
-type ConnAdapterFactory func(ctx context.Context, conn net.Conn) (ConnAdapter, error)
-
-type ConnAdapter interface {
-	ConnReader
-	ConnWriter
-}
-
-type ConnReader interface {
-}
-
-type ConnWriter interface {
-	io.Writer
-	Writev(ctx context.Context, bufs [][]byte) error
-	Flush(ctx context.Context) error
-	Release()
 }
 
 // NewSession creates a new session.
 // The provided `ctx` is expected to be valid for the lifetime of the session.
 // However, you must always call [Session.Close] if NewSession returns successfully, do not rely on context cancellation.
 func NewSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
-	session := &Session{cfg: cfg}
-	if cfg.Frontend == nil {
-		return nil, fmt.Errorf("Frontend is required")
+	session := &Session{
+		SessionState: &SessionState[*ringBufferAdapter]{
+			cfg:        cfg,
+			clientConn: cfg.Frontend,
+		},
 	}
-	if cfg.AcquireBackend == nil {
-		return nil, fmt.Errorf("AcquireBackend is required")
-	}
-
-	clientNetConn, err := cfg.Frontend.AcquireNetConn(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to acquire client net conn: %w", err)
-	}
-
 	session.ringCtx, session.cancelRingCtx = context.WithCancel(ctx)
-	session.clientConn = cfg.Frontend
-	session.clientNetConn = clientNetConn
-	session.clientRingBuffer = session.newRingBuffer(clientNetConn)
-	session.clientCursor = pgwire.NewClientCursor(session.clientRingBuffer)
+	state, err := NewSessionState[*ringBufferAdapter](ctx, cfg, func(ctx context.Context, role ProxyRole, conn Conn) (*ringBufferAdapter, error) {
+		return newRingBufferAdapter(ctx, session, role, conn, session.Logger(), &cfg.RingBufferConfig)
+	})
+	if err != nil {
+		return nil, err
+	}
+	session.SessionState = state
 
 	return session, nil
 }
@@ -340,20 +261,6 @@ func (s *Session) Close(ctx context.Context) error {
 
 	// TODO: is it a good idea to only error once?
 	s.closeOnce.Do(func() {
-		defer func() {
-			s.closed = true
-		}()
-
-		// If split mode is active, cancel it and wait for goroutines
-		if s.split != nil {
-			s.split.cancel()
-			s.clientRingBuffer.CancelRead()
-			if s.backendRingBuffer != nil {
-				s.backendRingBuffer.CancelRead()
-			}
-			s.split.wg.Wait()
-		}
-
 		if s.cancelWaitCtx != nil {
 			s.cancelWaitCtx()
 			s.cancelWaitCtx = nil
@@ -365,381 +272,28 @@ func (s *Session) Close(ctx context.Context) error {
 
 		s.cancelRingCtx()
 
-		var errs []error
-		if err := s.ReleaseBackend(ctx); err != nil {
-			errs = append(errs, err)
-		}
-
-		if err := s.releaseClient(ctx); err != nil {
-			errs = append(errs, err)
-			return
-		}
-
-		res = errors.Join(errs...)
+		res = s.SessionState.Close(ctx)
 	})
 
 	return res
 }
 
-// FlushDest flushes pending writes to the given destination.
-func (s *Session) FlushDest(ctx context.Context, dest ProxyRole) error {
-	if closedErr := s.alreadyClosedError("flush"); closedErr != nil {
-		return closedErr
-	}
-	return s.flush(ctx, dest)
-}
-
-// Flush flushes pending writes to the client and backend.
-func (s *Session) Flush(ctx context.Context) error {
-	if closedErr := s.alreadyClosedError("flush"); closedErr != nil {
-		return closedErr
-	}
-
-	if err := s.flush(ctx, RoleServer); err != nil {
-		return err
-	}
-
-	if err := s.flush(ctx, RoleClient); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// FlushBackend flushes pending writes to the backend.
-func (s *Session) FlushBackend(ctx context.Context) error {
-	return s.FlushDest(ctx, RoleServer)
-}
-
-// FlushClient flushes pending writes to the client.
-func (s *Session) FlushClient(ctx context.Context) error {
-	return s.FlushDest(ctx, RoleClient)
-}
-
-func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
-	writeQueue := s.writeQueue(dest)
-	if writeQueue.IsEmpty() {
-		return nil
-	}
-
-	if dest == RoleServer {
-		if _, err := s.AcquireBackend(ctx); err != nil {
-			return fmt.Errorf("flush %s: %w", dest, err)
-		}
-	}
-
-	netConn := s.netConn(dest)
-	if netConn == nil {
-		return fmt.Errorf("flush %s: %w", dest, ErrBackendNotAcquired)
-	}
-
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := netConn.SetWriteDeadline(deadline); err != nil {
-			return fmt.Errorf("flush %s: failed to set write deadline: %w", dest, err)
-		}
-		defer netConn.SetWriteDeadline(time.Time{})
-	}
-
-	_, err := writeQueue.WriteTo(netConn)
-	if err != nil {
-		return fmt.Errorf("flush %s: %w", dest, err)
-	}
-	writeQueue.Clear()
-	return nil
-}
-
-// Backend returns the currently acquired backend, or nil if no backend is acquired.
-func (s *Session) Backend() Backend {
-	if closedErr := s.alreadyClosedError("use backend"); closedErr != nil {
-		panic(closedErr)
-	}
-	return s.backendConn
-}
-
-// AcquireBackend acquires a backend from the configured [SessionConfig.AcquireBackend] function.
-// The provided `ctx` is passed to [SessionConfig.AcquireBackend] and is
-// expected to specify the deadline for acquiring the backend.
-//
-// If a backend is already acquired, it is returned immediately.
-func (s *Session) AcquireBackend(ctx context.Context) (Backend, error) {
-	if closedErr := s.alreadyClosedError("acquire backend"); closedErr != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBackendNotAcquired, closedErr)
-	}
-	if s.backendConn != nil {
-		return s.backendConn, nil
-	}
-
-	backend, err := s.cfg.AcquireBackend(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBackendNotAcquired, err)
-	}
-
-	netConn, err := backend.AcquireNetConn(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBackendNotAcquired, err)
-	}
-	var trackers []MessageTracker
-	if s.cfg.MakeBackendTrackers != nil {
-		trackers, err = s.cfg.MakeBackendTrackers(ctx, backend)
-		if err != nil {
-			return nil, fmt.Errorf("%w: MakeBackendTrackers: %w", ErrBackendNotAcquired, err)
-		}
-	}
-
-	s.backendConn = backend
-	s.backendNetConn = netConn
-	s.backendRingBuffer = s.newRingBuffer(netConn)
-	s.backendCursor = pgwire.NewServerCursor(s.backendRingBuffer)
-	s.backendTrackers = trackers
-	s.logger = nil // refresh
-
-	// Start backend I/O based on mode:
-	// - Split mode: start server goroutine to process backend messages
-	// - Default mode: start background reader goroutine
-	if s.split != nil {
-		s.split.runWorker("server", func() error {
-			return s.splitSideLoop(s.split.ctx, RoleServer, s.split.handler)
-		})
-	} else {
-		// Default mode: start background reader (idempotent)
-		s.backendRingBuffer.StartNetConnReader(s.ringCtx, s.backendNetConn)
-	}
-
-	return backend, nil
-}
-
-func (s *Session) ReleaseBackend(ctx context.Context) error {
-	if s.backendConn == nil {
-		return nil
-	}
-
-	if err := s.Flush(ctx); err != nil {
-		return fmt.Errorf("failed to release backend: flush: %w", err)
-	}
-
-	if err := releaseRingBuffer(&s.backendRingBuffer); err != nil {
-		return fmt.Errorf("failed to release backend: %w", err)
-	}
-
-	if err := releaseNetConn(&s.backendNetConn, s.backendConn); err != nil {
-		return fmt.Errorf("failed to release backend: %w", err)
-	}
-
-	s.backendConn.Release()
-	s.backendConn = nil
-	s.backendTrackers = nil
-	s.logger = nil // refresh
-
-	return nil
-}
-
-// QueueSendBytes queues writing bytes to dest.
-func (s *Session) QueueSendBytes(dest ProxyRole, bytes []byte) error {
-	// TODO: track write
-	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
-		return closedErr
-	}
-	_, err := s.writeQueue(dest).Write(bytes)
-	return err
-}
-
-// QueueSend queues a message to be sent to its destination.
-// Messages from the backend are queued to the client.
-// Messages from the client are queued to the backend. During flush, backend will be acquired if needed.
-func (s *Session) QueueSend(ctx context.Context, msg pgwire.Message) error {
-	// TODO: track write
-	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
-		return closedErr
-	}
-	if dest(msg) == RoleServer {
-		if _, err := s.AcquireBackend(ctx); err != nil {
-			return fmt.Errorf("queue send: %w", err)
-		}
-	}
-	if _, err := s.trackMessage(ctx, dest(msg), msg); err != nil {
-		return err
-	}
-	return s.writeQueue(dest(msg)).WriteMsg(msg)
-}
-
-func (s *Session) QueueSendPos(ctx context.Context, pos Pos) error {
-	// TODO: track write
-	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
-		return closedErr
-	}
-	unwrapped := pos.unwrap()
-	to := unwrapped.From().To()
-	if to == RoleServer {
-		if _, err := s.AcquireBackend(ctx); err != nil {
-			return fmt.Errorf("queue pos: %w", err)
-		}
-	}
-	if _, err := s.trackPos(ctx, to, unwrapped); err != nil {
-		return err
-	}
-	return s.writeQueue(to).WriteRingMsg(unwrapped.RingMsg)
-}
-
-// TerminateClient sends terminationMessage to the client, flushes pending writes, and terminates the client connection.
-// We may still have pending client messages in the ring buffer.
-func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwire.Err) error {
-	// Mark as proxy-initiated before any termination logic
-	s.clientTerminatedByProxy = true
-
-	logger := s.Logger().WithGroup("terminate").With("endpoint", RoleClient, "message", terminationMessage)
-	if closedErr := s.alreadyClosedError("terminate client"); closedErr != nil {
-		logger.Warn("cannot terminate client: session already closed", "err", closedErr)
-		return closedErr
-	}
-
-	if err := s.QueueSend(ctx, terminationMessage.ToMessage()); err != nil {
-		logger.Warn("ignored error sending termination message", "err", err)
-	}
-
-	if flushErr := s.flush(ctx, RoleClient); flushErr != nil {
-		logger.Warn("ignored flush error, may not have received all messages", "err", flushErr)
-	}
-
-	if termErr := s.clientConn.Terminate(ctx, terminationMessage); termErr != nil {
-		logger.Error("failed to terminate", "err", termErr)
-		return fmt.Errorf("failed to terminate client: %w: %w", termErr, terminationMessage)
-	}
-	logger.Info("terminated")
-	return nil
-}
-
-// TerminateBackend flushes pending writes to the backend and terminates the backend connection.
-// The backend is released after termination.
-func (s *Session) TerminateBackend(ctx context.Context, cause error) error {
-	// Mark as proxy-initiated before any termination logic
-	s.backendTerminatedByProxy = true
-
-	logger := s.Logger().WithGroup("terminate").With("endpoint", RoleServer, "cause", cause)
-	if closedErr := s.alreadyClosedError("terminate backend"); closedErr != nil {
-		logger.Warn("cannot terminate backend: session already closed", "err", closedErr)
-		return closedErr
-	}
-	if s.backendConn == nil {
-		return fmt.Errorf("failed to terminate backend: %w: %w", ErrBackendNotAcquired, cause)
-	}
-
-	if flushErr := s.flush(ctx, RoleServer); flushErr != nil {
-		s.bwq.Clear() // Do not retry during ReleaseBackend.
-		logger.Warn("ignored flush error, may not have received all messages", "err", flushErr)
-	}
-
-	if termErr := s.backendConn.Terminate(ctx, cause); termErr != nil {
-		logger.Error("failed to terminate", "err", termErr)
-		return fmt.Errorf("failed to terminate backend: %w: %w", termErr, cause)
-	}
-
-	if releaseErr := s.ReleaseBackend(ctx); releaseErr != nil {
-		logger.Error("failed to release backend", "err", releaseErr)
-		return fmt.Errorf("failed to release backend: %w: %w", releaseErr, cause)
-	}
-
-	logger.Info("terminated")
-	return nil
-}
-
-func (s *Session) TerminateBoth(ctx context.Context, terminationMessage *pgwire.Err) error {
-	clientErr := s.TerminateClient(ctx, terminationMessage)
-	backendErr := s.TerminateBackend(ctx, terminationMessage)
-	return errors.Join(clientErr, backendErr)
-}
-
-func (s *Session) TerminateBothUnexpectedError(ctx context.Context, cause error) error {
-	var pgErr *pgwire.Err
-	if !errors.As(cause, &pgErr) {
-		pgErr = pgwire.NewErr(pgwire.ErrorPanic, pgerrcode.InternalError, "unexpected error", cause)
-	}
-	return s.TerminateBoth(ctx, pgErr)
-}
-
-func (s *Session) releaseClient(ctx context.Context) error {
-	if err := s.Flush(ctx); err != nil {
-		return fmt.Errorf("failed to release client: flush: %w", err)
-	}
-
-	if err := releaseRingBuffer(&s.clientRingBuffer); err != nil {
-		return fmt.Errorf("failed to release client: %w", err)
-	}
-
-	if err := releaseNetConn(&s.clientNetConn, s.clientConn); err != nil {
-		return fmt.Errorf("failed to release client: %w", err)
-	}
-
-	return nil
-}
-
 func (s *Session) getCursor(from ProxyRole) *pgwire.Cursor {
 	if from == RoleServer {
-		return s.backendCursor
+		return s.backendAdapter.cursor
 	} else {
-		return s.clientCursor
+		return s.clientAdapter.cursor
 	}
 }
 
 func (s *Session) resetClientPos() *pos {
-	s.clientPos.reset(s, s.clientCursor, RoleClient)
-	return &s.clientPos
+	s.clientAdapter.pos.reset(s, s.clientAdapter.cursor, RoleClient)
+	return &s.clientAdapter.pos
 }
 
 func (s *Session) resetBackendPos() *pos {
-	s.backendPos.reset(s, s.backendCursor, RoleServer)
-	return &s.backendPos
-}
-
-func (s *Session) alreadyClosedError(operation string) error {
-	if s.closed {
-		return fmt.Errorf("cannot %s: %w", operation, ErrSessionClosed)
-	}
-	return nil
-}
-
-func (s *Session) Logger() *slog.Logger {
-	if s.logger != nil {
-		return s.logger
-	}
-
-	var logger *slog.Logger
-	if s.cfg.Logger != nil {
-		logger = s.cfg.Logger
-	} else {
-		logger = slog.Default()
-	}
-
-	logger = logger.With("client", s.clientConn.String())
-	if s.backendConn != nil {
-		logger = logger.With("backend", s.backendConn.String())
-	}
-	s.logger = logger
-
-	return logger
-}
-
-// newRingBuffer creates a ring buffer without starting the background reader.
-// The reader is started lazily:
-// - Default mode: started in runDefault() or Stream() via StartNetConnReader()
-// - Split mode: not started; uses BlockingNextBatch() via ReadOnce() directly
-func (s *Session) newRingBuffer(netConn net.Conn) *pgwire.RingBuffer {
-	ring := pgwire.NewRingBuffer(s.cfg.RingBufferConfig)
-	logger := s.Logger()
-	if logger.Enabled(context.Background(), slog.LevelDebug) {
-		ring.SetDebugLog(func(msg string, args ...any) {
-			logger.Debug(msg, args...)
-		})
-	}
-	// Set connection but don't start reader - done lazily by Run() or Stream()
-	ring.SetConn(netConn)
-	return ring
-}
-
-func (s *Session) healthCheckPeriod() time.Duration {
-	if s.cfg.HealthCheckPeriod == 0 {
-		return time.Second
-	}
-	return s.cfg.HealthCheckPeriod
+	s.backendAdapter.pos.reset(s, s.backendAdapter.cursor, RoleServer)
+	return &s.backendAdapter.pos
 }
 
 func (s *Session) healthCheckChan() <-chan time.Time {
@@ -747,7 +301,7 @@ func (s *Session) healthCheckChan() <-chan time.Time {
 		return noHealthCheckChan
 	}
 	if s.healthCheckTicker == nil {
-		s.healthCheckTicker = time.NewTicker(s.healthCheckPeriod())
+		s.healthCheckTicker = time.NewTicker(s.HealthCheckPeriod())
 	}
 	return s.healthCheckTicker.C
 }
@@ -790,9 +344,6 @@ func (s *Session) Stream(ctx context.Context) iter.Seq2[Pos, error] {
 
 		s.SetWaitCtx(ctx)
 
-		// Start background reader for default mode (idempotent - safe if already started)
-		s.clientRingBuffer.StartNetConnReader(s.ringCtx, s.clientNetConn)
-
 		s.isStreaming = true
 		defer func() {
 			s.isStreaming = false
@@ -831,7 +382,7 @@ func (s *Session) Next(ctx context.Context) (Pos, error) {
 	return pos, err
 }
 
-// Run executes the session using the configured IOMode.
+// Run executes the session.
 // The handler is called for each message position and any errors.
 // Run returns when the session ends (EOF, error, or handler returns error).
 //
@@ -841,158 +392,12 @@ func (s *Session) Run(ctx context.Context, handler func(Pos, error) error) error
 		panic("already streaming")
 	}
 
-	switch s.cfg.IOMode {
-	case IOModeSplit:
-		return s.runSplit(ctx, handler)
-	default:
-		return s.runDefault(ctx, handler)
-	}
-}
-
-// runDefault runs the session using the default orchestrated model.
-// It wraps Stream() with the handler callback.
-func (s *Session) runDefault(ctx context.Context, handler func(Pos, error) error) error {
-	// Start background readers for default mode
-	s.clientRingBuffer.StartNetConnReader(s.ringCtx, s.clientNetConn)
-
 	for pos, err := range s.Stream(ctx) {
 		if err := handler(pos, err); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// runSplit runs the session using the 2-goroutine split model.
-// Each side (client, server) has its own goroutine doing blocking reads.
-func (s *Session) runSplit(ctx context.Context, handler func(Pos, error) error) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// Set up wait context for flush operations
-	s.SetWaitCtx(ctx)
-
-	s.split = &splitState{
-		ctx:     ctx,
-		cancel:  cancel,
-		handler: handler,
-		errCh:   make(chan error, 3), // Capacity for client + server + healthcheck
-	}
-	defer func() { s.split = nil }()
-
-	// Health check goroutine (if configured)
-	if s.cfg.HealthCheck != nil {
-		s.split.runWorker("healthcheck", s.runHealthCheck)
-	}
-
-	// Client goroutine
-	s.split.runWorker("client", func() error {
-		return s.splitSideLoop(ctx, RoleClient, handler)
-	})
-
-	// Server goroutine is started by AcquireBackend() when needed
-
-	// Wait for first error OR completion (normal termination sends io.EOF)
-	err := <-s.split.errCh
-
-	// Unblock any blocking reads
-	s.clientRingBuffer.CancelRead()
-	if s.backendRingBuffer != nil {
-		s.backendRingBuffer.CancelRead()
-	}
-
-	// Wait for all goroutines to finish
-	s.split.wg.Wait()
-
-	// io.EOF is normal termination
-	if err == io.EOF {
-		return nil
-	}
-	return err
-}
-
-// splitSideLoop processes one side using blocking reads. Called from its own goroutine.
-func (s *Session) splitSideLoop(ctx context.Context, from ProxyRole, handler func(Pos, error) error) error {
-	cursor := s.getCursor(from)
-	if cursor == nil {
-		// No cursor yet (e.g., backend not acquired) - wait for it
-		// For client, cursor is always available. For server, we wait until acquired.
-		if from == RoleClient {
-			return fmt.Errorf("client cursor is nil")
-		}
-		// Server goroutine: wait until backend is acquired and cursor exists
-		// This shouldn't happen since we start server goroutine in AcquireBackend
-		return nil
-	}
-
-	for {
-		// Check context before blocking read
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		// Blocking read WITHOUT lock - this is where I/O overlaps
-		if err := cursor.BlockingNextBatch(); err != nil {
-			// Classify the error (handles EOF classification)
-			classified := s.classifyIOError(from, err)
-			if classified == nil {
-				return nil // Clean termination
-			}
-			if errors.Is(err, io.EOF) {
-				return classified // Torn connection error
-			}
-			// Non-EOF error - pass to handler under lock
-			return s.processBatchUnderLock(ctx, from, handler, err)
-		}
-
-		// Process batch under lock using existing iterCursor()
-		if err := s.processBatchUnderLock(ctx, from, handler, nil); err != nil {
-			return err
-		}
-	}
-}
-
-// processBatchUnderLock holds lock for entire batch processing including Flush.
-// Separated to ensure defer Unlock() runs even on panic.
-// If batchErr is non-nil, it's passed to handler as an error.
-func (s *Session) processBatchUnderLock(ctx context.Context, from ProxyRole, handler func(Pos, error) error, batchErr error) error {
-	var flushErr error
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Handle batch-level error (e.g., connection error)
-	if batchErr != nil {
-		return handler(nil, batchErr)
-	}
-
-	for pos, iterErr := range s.iterCursor(from, &flushErr) {
-		if err := handler(pos, iterErr); err != nil {
-			return err
-		}
-	}
-	// iterCursor's defer (Flush) already ran here, still under lock
-
-	return flushErr
-}
-
-// runHealthCheck runs periodic health checks under the session lock.
-// Returns error to work with runWorker helper.
-func (s *Session) runHealthCheck() error {
-	ticker := time.NewTicker(s.healthCheckPeriod())
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.split.ctx.Done():
-			return nil // Normal shutdown
-		case <-ticker.C:
-			s.mu.Lock()
-			err := s.cfg.HealthCheck(s.split.ctx)
-			s.mu.Unlock()
-			if err != nil {
-				return err
-			}
-		}
-	}
 }
 
 func (s *Session) yieldMsgs(yield func(*pos, error) bool) {
@@ -1036,7 +441,7 @@ func (s *Session) yieldBatches(yield func(ProxyRole, error) bool) {
 		}
 
 		if s.cfg.HealthCheck != nil {
-			if time.Since(lastHealthCheckTime) >= s.healthCheckPeriod() {
+			if time.Since(lastHealthCheckTime) >= s.HealthCheckPeriod() {
 				lastHealthCheckTime = time.Now()
 				if err := s.cfg.HealthCheck(s.waitCtx()); err != nil {
 					yield(RoleProxy, err)
@@ -1047,15 +452,15 @@ func (s *Session) yieldBatches(yield func(ProxyRole, error) bool) {
 
 		gotFrontend := false
 		gotBackend := false
-		gotFrontend, errF := s.clientCursor.TryNextBatch()
+		gotFrontend, errF := s.clientAdapter.cursor.TryNextBatch()
 		if errF != nil {
 			yield(RoleClient, s.classifyIOError(RoleClient, errF))
 			return
 		}
 
-		if s.backendCursor != nil {
+		if s.backendAdapter != nil {
 			var err error
-			gotBackend, err = s.backendCursor.TryNextBatch()
+			gotBackend, err = s.backendAdapter.cursor.TryNextBatch()
 			if err != nil {
 				yield(RoleServer, s.classifyIOError(RoleServer, err))
 				return
@@ -1080,13 +485,13 @@ func (s *Session) yieldBatches(yield func(ProxyRole, error) bool) {
 		if !gotFrontend && !gotBackend {
 			select {
 			case <-s.waitCtx().Done():
-			case <-s.clientCursor.Ready():
+			case <-s.clientAdapter.cursor.Ready():
 			case <-s.backendReadyChan():
-			case <-s.clientCursor.Done():
-				yield(RoleClient, s.classifyIOError(RoleClient, s.clientCursor.Err()))
+			case <-s.clientAdapter.cursor.Done():
+				yield(RoleClient, s.classifyIOError(RoleClient, s.clientAdapter.cursor.Err()))
 				return
 			case <-s.backendDoneChan():
-				yield(RoleServer, s.classifyIOError(RoleServer, s.backendCursor.Err()))
+				yield(RoleServer, s.classifyIOError(RoleServer, s.backendAdapter.cursor.Err()))
 				return
 			case <-s.healthCheckChan():
 				// Continue to run health check.
@@ -1151,94 +556,6 @@ func (s *Session) yieldSinglePos(yield func(*pos, error) bool, pos *pos, err err
 	return loop
 }
 
-func (s *Session) Trackers(role ProxyRole) iter.Seq[MessageTracker] {
-	return func(yield func(MessageTracker) bool) {
-		var configTrackers []MessageTracker
-		if role == RoleClient {
-			configTrackers = s.cfg.FrontendTrackers
-		} else {
-			configTrackers = s.backendTrackers
-		}
-		for _, tracker := range configTrackers {
-			if !yield(tracker) {
-				return
-			}
-		}
-
-		if conn := s.conn(role); conn != nil {
-			for _, tracker := range conn.MessageTrackers() {
-				if !yield(tracker) {
-					return
-				}
-			}
-		}
-	}
-}
-
-func (s *Session) trackPos(rootCtx context.Context, role ProxyRole, pos *pos) (context.Context, error) {
-	msg, err := pos.AsMessage()
-	if err != nil {
-		return rootCtx, fmt.Errorf("track %s: %v: %w", role, pos, err)
-	}
-
-	return s.trackMessage(rootCtx, role, msg)
-}
-
-func (s *Session) trackMessage(rootCtx context.Context, role ProxyRole, msg pgwire.Message) (context.Context, error) {
-	var errs []error
-	ctx := rootCtx
-	for tracker := range s.Trackers(role) {
-		nextCtx, err := tracker.TrackMessage(ctx, msg)
-		if err != nil {
-			errs = append(errs, err)
-		} else if nextCtx != nil {
-			ctx = nextCtx
-		}
-	}
-	if len(errs) > 0 {
-		return rootCtx, fmt.Errorf("track %v: %T: %w", role, msg, errors.Join(errs...))
-	}
-	return ctx, nil
-}
-
-func (s *Session) beforeReadPos(pos *pos) error {
-	ctx, err := s.trackPos(pos.Ctx(), pos.From(), pos)
-	if err != nil {
-		return err
-	}
-	pos.ctx = ctx
-
-	// Track client Terminate message for clean termination detection
-	if pos.FromClient() && pos.MessageType() == pgwire.MsgClientTerminate {
-		s.clientTerminateReceived = true
-	}
-
-	return nil
-}
-
-func (s *Session) afterReadPos(pos *pos, loopContinues bool) error {
-	if loopContinues {
-		return pos.notHandledError()
-	}
-	return nil
-}
-
-func (s *Session) writeQueue(dest ProxyRole) *pgwire.WriteQueue {
-	if dest == RoleServer {
-		return &s.bwq
-	} else {
-		return &s.crq
-	}
-}
-
-func (s *Session) netConn(dest ProxyRole) net.Conn {
-	if dest == RoleServer {
-		return s.backendNetConn
-	} else {
-		return s.clientNetConn
-	}
-}
-
 func (s *Session) conn(dest ProxyRole) Conn {
 	if dest == RoleServer {
 		return s.backendConn
@@ -1248,44 +565,17 @@ func (s *Session) conn(dest ProxyRole) Conn {
 }
 
 func (s *Session) backendReadyChan() <-chan struct{} {
-	if s.backendCursor == nil {
+	if s.backendAdapter == nil {
 		return nil
 	}
-	return s.backendCursor.Ready()
+	return s.backendAdapter.cursor.Ready()
 }
 
 func (s *Session) backendDoneChan() <-chan struct{} {
-	if s.backendCursor == nil {
+	if s.backendAdapter == nil {
 		return nil
 	}
-	return s.backendCursor.Done()
-}
-
-func releaseRingBuffer(ringBuffer **pgwire.RingBuffer) error {
-	if ringBuffer == nil {
-		return nil
-	}
-
-	if err := (*ringBuffer).StopNetConnReader(); err != nil {
-		return fmt.Errorf("failed to stop ring buffer reader: %w", err)
-	}
-	(*ringBuffer).Close()
-	*ringBuffer = nil
-
-	return nil
-}
-
-func releaseNetConn(netConn *net.Conn, releaser interface{ ReleaseNetConn() error }) error {
-	if netConn == nil {
-		return nil
-	}
-
-	if err := releaser.ReleaseNetConn(); err != nil {
-		return fmt.Errorf("failed to release net conn: %w", err)
-	}
-	*netConn = nil
-
-	return nil
+	return s.backendAdapter.cursor.Done()
 }
 
 func dest(msg pgwire.Message) ProxyRole {
@@ -1295,3 +585,73 @@ func dest(msg pgwire.Message) ProxyRole {
 		return RoleClient
 	}
 }
+
+type ringBufferAdapter struct {
+	conn       Conn
+	netConn    net.Conn
+	ringBuffer *pgwire.RingBuffer
+	cursor     *pgwire.Cursor
+	pos        pos
+}
+
+func newRingBufferAdapter(
+	ctx context.Context,
+	session *Session,
+	role ProxyRole,
+	conn Conn,
+	logger *slog.Logger,
+	ringBufferConfig *pgwire.RingBufferConfig,
+) (*ringBufferAdapter, error) {
+	netConn, err := conn.AcquireNetConn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire net conn: %w", err)
+	}
+
+	ring := pgwire.NewRingBuffer(*ringBufferConfig)
+	if logger.Enabled(context.Background(), slog.LevelDebug) {
+		ring.SetDebugLog(func(msg string, args ...any) {
+			logger.Debug(msg, args...)
+		})
+	}
+	// Set connection but don't start reader - done lazily by Run() or Stream()
+	ring.SetConn(netConn)
+	ring.StartNetConnReader(ctx, netConn)
+
+	var cursor *pgwire.Cursor
+	if role == RoleServer {
+		cursor = pgwire.NewServerCursor(ring)
+	} else {
+		cursor = pgwire.NewClientCursor(ring)
+	}
+
+	adapter := &ringBufferAdapter{conn: conn, netConn: netConn, ringBuffer: ring, cursor: cursor}
+	adapter.pos.reset(session, cursor, role)
+	return adapter, nil
+}
+
+// WriteDeadlineSetter implements [connAdapter].
+func (r *ringBufferAdapter) WriteDeadlineSetter() WriteDeadlineSetter {
+	return r.netConn
+}
+
+// WriteFlusher implements [connAdapter].
+func (r *ringBufferAdapter) WriteFlusher() WriteFlusher {
+	return nil
+}
+
+// Close implements [connAdapter].
+func (r *ringBufferAdapter) Close(ctx context.Context) error {
+	if err := r.ringBuffer.StopNetConnReader(); err != nil {
+		return fmt.Errorf("failed to stop ring buffer reader: %w", err)
+	}
+
+	r.ringBuffer.Close()
+
+	if err := r.conn.ReleaseNetConn(); err != nil {
+		return fmt.Errorf("failed to release net conn: %w", err)
+	}
+
+	return nil
+}
+
+var _ ConnAdapter = (*ringBufferAdapter)(nil)
