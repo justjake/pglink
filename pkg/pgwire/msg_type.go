@@ -150,6 +150,8 @@ var MsgIsStartup = MsgLookup[bool]{
 }
 
 // MsgName returns a human-readable name for the message type.
+// For message types shared between client and server with different meanings,
+// this shows both names separated by "/".
 var MsgName = MsgLookup[string]{
 	// Startup messages (synthetic types)
 	0x00: "StartupMessage",
@@ -184,6 +186,63 @@ var MsgName = MsgLookup[string]{
 	'n': "NoData",
 	'N': "NoticeResponse",
 	'R': "Authentication",
+	's': "PortalSuspended",
+	't': "ParameterDescription",
+	'T': "RowDescription",
+	'V': "FunctionCallResponse",
+	'W': "CopyBothResponse",
+	'Z': "ReadyForQuery",
+}
+
+// ClientMsgName returns a human-readable name for client (frontend) message types.
+// For message types that have different meanings between client and server,
+// this returns the client-specific name.
+var ClientMsgName = MsgLookup[string]{
+	// Startup messages (synthetic types)
+	0x00: "StartupMessage",
+	0x01: "SSLRequest",
+	0x02: "CancelRequest",
+	0x03: "GSSENCRequest",
+
+	// Client messages (with client-specific names for shared types)
+	'B': "Bind",
+	'C': "Close",      // Server: CommandComplete
+	'c': "CopyDone",   // Same for both
+	'd': "CopyData",   // Same for both
+	'D': "Describe",   // Server: DataRow
+	'E': "Execute",    // Server: ErrorResponse
+	'f': "CopyFail",
+	'F': "FunctionCall",
+	'H': "Flush",      // Server: CopyOutResponse
+	'P': "Parse",
+	'p': "PasswordMessage",
+	'Q': "Query",
+	'S': "Sync",       // Server: ParameterStatus
+	'X': "Terminate",
+}
+
+// ServerMsgName returns a human-readable name for server (backend) message types.
+// For message types that have different meanings between client and server,
+// this returns the server-specific name.
+var ServerMsgName = MsgLookup[string]{
+	// Server messages (with server-specific names for shared types)
+	'1': "ParseComplete",
+	'2': "BindComplete",
+	'3': "CloseComplete",
+	'A': "NotificationResponse",
+	'C': "CommandComplete", // Client: Close
+	'c': "CopyDone",        // Same for both
+	'd': "CopyData",        // Same for both
+	'D': "DataRow",         // Client: Describe
+	'E': "ErrorResponse",   // Client: Execute
+	'G': "CopyInResponse",
+	'H': "CopyOutResponse", // Client: Flush
+	'I': "EmptyQueryResponse",
+	'K': "BackendKeyData",
+	'n': "NoData",
+	'N': "NoticeResponse",
+	'R': "Authentication",
+	'S': "ParameterStatus", // Client: Sync
 	's': "PortalSuspended",
 	't': "ParameterDescription",
 	'T': "RowDescription",

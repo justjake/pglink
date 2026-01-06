@@ -9,6 +9,12 @@ import (
 	"github.com/gammazero/deque"
 )
 
+type StreamPos[T any] struct {
+	T      T
+	Seq    int64
+	Offset int64
+}
+
 type OffsetSlice[T any] struct {
 	Offset int64
 	B      []T

@@ -45,6 +45,9 @@ type gnetProxyEngine struct {
 func (g *gnetProxyEngine) Start() error {
 	g.startOnce.Do(func() {
 		logger := slog.Default().WithGroup("gnet")
+		// The fastest we've tested is 2 loops.
+		// This gives 4 loops on my 16 core MacBook Pro.
+		// We continue to test w/ >2 to improve scalability.
 		numLoops := runtime.NumCPU() / 4
 		numLoops = min(numLoops, 1)
 		logger.Info("starting gnet engine", "numLoops", numLoops)
