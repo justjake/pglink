@@ -907,8 +907,11 @@ func (o *Orchestrator) buildBinaryFromWorktree(ctx context.Context, worktree, pk
 	o.Logger.Info("building binary", "pkg", pkg, "output", outputPath, "worktree", worktree)
 
 	// Use bin/go from the source worktree to build with correct environment
+	// Build with gnet optimization tags for better performance:
+	// - poll_opt: direct epoll/kqueue syscalls, no fd->conn hash map lookup
+	// - gc_opt: matrix data structure for connections, reduces GC latency 36-46%
 	goBin := filepath.Join(worktree, "bin", "go")
-	cmd := exec.CommandContext(ctx, goBin, "build", "-o", outputPath, pkg)
+	cmd := exec.CommandContext(ctx, goBin, "build", "-tags=poll_opt,gc_opt", "-o", outputPath, pkg)
 	cmd.Dir = worktree
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

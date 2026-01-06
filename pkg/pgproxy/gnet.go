@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,7 +45,17 @@ type gnetProxyEngine struct {
 func (g *gnetProxyEngine) Start() error {
 	g.startOnce.Do(func() {
 		logger := slog.Default().WithGroup("gnet")
-		client, err := gnet.NewClient(g, gnet.WithReadBufferCap(gnetBufferMaxSize), gnet.WithTicker(true), gnet.WithMulticore(true), gnet.WithLogger(&gnetLogger{logger}))
+		numLoops := runtime.NumCPU() / 4
+		numLoops = min(numLoops, 1)
+		logger.Info("starting gnet engine", "numLoops", numLoops)
+		client, err := gnet.NewClient(g,
+			gnet.WithReadBufferCap(gnetBufferMaxSize),
+			gnet.WithTicker(true),
+			gnet.WithNumEventLoop(numLoops),
+			gnet.WithLockOSThread(true),
+			gnet.WithLogger(&gnetLogger{logger}),
+			gnet.WithReadBufferCap(gnetBufferMaxSize),
+		)
 		if err != nil {
 			g.startErr = err
 			return
@@ -178,8 +189,9 @@ func (g *gnetProxyRuntime) Run(ctx context.Context) error {
 			return fmt.Errorf("client not started")
 		}
 
-		g.running.Store(true)
 		g.runCtx = ctx
+		g.running.Store(true)
+
 		if err := g.client.gconn.Wake(nil); err != nil {
 			return fmt.Errorf("failed to wake client: %w", err)
 		}
