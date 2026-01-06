@@ -117,8 +117,8 @@ func (q *WriteQueue) WriteRingMsg(r *RingMsg) error {
 		return nil
 	}
 	// Check if we can extend the existing range
-	if item.End() == r.MsgIdx() && item.ring == r.Ring() {
-		item.endIdx = r.MsgIdx() + 1
+	if item.End() == r.MsgSeq() && item.ring == r.Ring() {
+		item.endIdx = r.MsgSeq() + 1
 		return nil
 	}
 	// Need a new slot

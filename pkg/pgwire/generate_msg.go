@@ -453,7 +453,7 @@ func generateCode(methods []methodInfo, clientMsgs, serverMsgs, bidirectional []
 	buf.WriteString("package pgwire\n\n")
 
 	// Imports
-	buf.WriteString("import \"io\"\n\n")
+	buf.WriteString("import (\n\t\"fmt\"\n\t\"io\"\n)\n\n")
 
 	// Generate client message types
 	for _, entry := range clientMsgs {
@@ -561,7 +561,8 @@ func generateTypedMsg(buf *bytes.Buffer, entry msgEntry, methods []methodInfo, s
 	// Type definition
 	fmt.Fprintf(buf, "type %s Msg\n\n", typeName)
 
-	// 0. Own methods (ExpectedType, CopyTyped, Validate last since multi-line)
+	// 0. Own methods (String, ExpectedType, CopyTyped, Validate last since multi-line)
+	fmt.Fprintf(buf, "func (m %s) String() string { return fmt.Sprintf(\"%s(%%v)\", Msg(m)) }\n", typeName, typeName)
 	fmt.Fprintf(buf, "func (m %s) ExpectedType() MsgType { return %s }\n", typeName, constName)
 	fmt.Fprintf(buf, "func (m %s) CopyTyped() %s { return %s(m.Msg().Copy()) }\n", typeName, typeName, typeName)
 	fmt.Fprintf(buf, "func (m %s) Validate() error {\n", typeName)
@@ -655,6 +656,7 @@ func generateUnknownMsg(buf *bytes.Buffer, methods []methodInfo) {
 	buf.WriteString("type UnknownMsg Msg\n\n")
 
 	// 0. Own methods
+	buf.WriteString("func (m UnknownMsg) String() string { return fmt.Sprintf(\"UnknownMsg(%v)\", Msg(m)) }\n")
 	buf.WriteString("func (m UnknownMsg) ExpectedType() MsgType { return 0 }\n")
 	buf.WriteString("func (m UnknownMsg) CopyTyped() UnknownMsg { return UnknownMsg(m.Msg().Copy()) }\n")
 	buf.WriteString("func (m UnknownMsg) Validate() error {\n")

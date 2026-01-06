@@ -49,6 +49,14 @@ func (m Msg) RequiredLen() (int, bool) {
 	return MsgRequiredLen(m.Data)
 }
 
+func (m Msg) Destination() Sender {
+	return m.Sender.Destination()
+}
+
+func (m Msg) Typed() TypedMsg {
+	return Typed(m)
+}
+
 func (m Msg) Validate() error {
 	if len(m.Data) == 0 {
 		return ErrMsgNoData

@@ -9,10 +9,16 @@ import (
 	"github.com/gammazero/deque"
 )
 
-type StreamPos[T any] struct {
-	T      T
-	Seq    int64
+// StreamPos describes a position in a stream of messages.
+type StreamPos struct {
+	// Seq is the logical index of the message in the stream.
+	Seq int64
+	// Offset is the byte offset of the message in the stream.
 	Offset int64
+}
+
+func (s StreamPos) String() string {
+	return fmt.Sprintf("#%d@%d", s.Seq, s.Offset)
 }
 
 type OffsetSlice[T any] struct {
@@ -50,21 +56,22 @@ func (s OffsetSlice[T]) Slice(start, end int64) OffsetSlice[T] {
 	}
 }
 
-type MsgIdx interface {
-	MsgIdx() int64
+type MsgSeq interface {
+	MsgSeq() int64
 }
 
 type MsgOffset interface {
 	MsgOffset() int64
 }
 
+// TODO: replace with {StreamPos, Msg}
 type StreamMsg[T RawMessageSource] struct {
 	Idx    int64
 	Offset int64
 	T      T
 }
 
-var _ MsgIdx = (*StreamMsg[RawMessageSource])(nil)
+var _ MsgSeq = (*StreamMsg[RawMessageSource])(nil)
 var _ MsgOffset = (*StreamMsg[RawMessageSource])(nil)
 
 // MsgOffset implements [MsgOffset].
@@ -72,8 +79,8 @@ func (s *StreamMsg[T]) MsgOffset() int64 {
 	return s.Offset
 }
 
-// MsgIdx implements [MsgIdx].
-func (s *StreamMsg[T]) MsgIdx() int64 {
+// MsgIdx implements [MsgSeq].
+func (s *StreamMsg[T]) MsgSeq() int64 {
 	return s.Idx
 }
 
@@ -165,7 +172,7 @@ func (s *StreamSlice) String() string {
 
 func (s *StreamSlice) All() iter.Seq[StreamSliceMsg] {
 	return func(yield func(StreamSliceMsg) bool) {
-		for idx := s.StartMsgIdx(); idx < s.EndMsgIdx(); idx++ {
+		for idx := s.StartMsgSeq(); idx < s.EndMsgSeq(); idx++ {
 			if !yield(s.At(idx)) {
 				return
 			}
@@ -195,7 +202,7 @@ func (p *MessageOffsets) String() string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "StreamMessages[%d]{", p.Len())
 	first := true
-	for idx := p.StartMsgIdx(); idx < p.EndMsgIdx(); idx++ {
+	for idx := p.StartMsgSeq(); idx < p.EndMsgSeq(); idx++ {
 		if !first {
 			builder.WriteString(" ")
 		}
@@ -263,12 +270,12 @@ func (p *MessageOffsets) Len() int {
 }
 
 // StartMsgIdx returns the logical index of the first message.
-func (p *MessageOffsets) StartMsgIdx() int64 {
+func (p *MessageOffsets) StartMsgSeq() int64 {
 	return p.msgStartIdx
 }
 
 // EndMsgIdx returns the logical index one past the last message.
-func (p *MessageOffsets) EndMsgIdx() int64 {
+func (p *MessageOffsets) EndMsgSeq() int64 {
 	return p.msgStartIdx + int64(p.offsets.Len())
 }
 
@@ -311,7 +318,7 @@ func (p *MessageOffsets) MsgRange(msgIdx int64) (startOffset, endOffset int64) {
 // Panics if indices are out of range.
 func (p *MessageOffsets) Range(startMsg, endMsg int64) (startOffset, endOffset int64) {
 	startOffset = p.Offset(startMsg)
-	if endMsg >= p.EndMsgIdx() {
+	if endMsg >= p.EndMsgSeq() {
 		endOffset = p.endOffset
 	} else {
 		endOffset = p.Offset(endMsg)

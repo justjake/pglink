@@ -3,12 +3,16 @@
 
 package pgwire
 
-import "io"
+import (
+	"fmt"
+	"io"
+)
 
 // Bind is a client request message.
 // Responses: [BindComplete], [Execute].
 type Bind Msg
 
+func (m Bind) String() string        { return fmt.Sprintf("Bind(%v)", Msg(m)) }
 func (m Bind) ExpectedType() MsgType { return MsgClientBind }
 func (m Bind) CopyTyped() Bind       { return Bind(m.Msg().Copy()) }
 func (m Bind) Validate() error {
@@ -47,6 +51,7 @@ var _ ClientMsg = Bind{}
 // Startup messages only appear before the first [ReadyForQuery] response.
 type CancelRequest Msg
 
+func (m CancelRequest) String() string           { return fmt.Sprintf("CancelRequest(%v)", Msg(m)) }
 func (m CancelRequest) ExpectedType() MsgType    { return MsgCancelRequest }
 func (m CancelRequest) CopyTyped() CancelRequest { return CancelRequest(m.Msg().Copy()) }
 func (m CancelRequest) Validate() error {
@@ -85,6 +90,7 @@ var _ ClientMsg = CancelRequest{}
 // Responses: [CloseComplete], [Execute].
 type Close Msg
 
+func (m Close) String() string        { return fmt.Sprintf("Close(%v)", Msg(m)) }
 func (m Close) ExpectedType() MsgType { return MsgClientClose }
 func (m Close) CopyTyped() Close      { return Close(m.Msg().Copy()) }
 func (m Close) Validate() error {
@@ -122,6 +128,7 @@ var _ ClientMsg = Close{}
 // CopyFail is a client message.
 type CopyFail Msg
 
+func (m CopyFail) String() string        { return fmt.Sprintf("CopyFail(%v)", Msg(m)) }
 func (m CopyFail) ExpectedType() MsgType { return MsgClientCopyFail }
 func (m CopyFail) CopyTyped() CopyFail   { return CopyFail(m.Msg().Copy()) }
 func (m CopyFail) Validate() error {
@@ -160,6 +167,7 @@ var _ ClientMsg = CopyFail{}
 // Responses: [RowDescription], [NoData], [Execute], [ParameterDescription].
 type Describe Msg
 
+func (m Describe) String() string        { return fmt.Sprintf("Describe(%v)", Msg(m)) }
 func (m Describe) ExpectedType() MsgType { return MsgClientDescribe }
 func (m Describe) CopyTyped() Describe   { return Describe(m.Msg().Copy()) }
 func (m Describe) Validate() error {
@@ -198,6 +206,7 @@ var _ ClientMsg = Describe{}
 // Responses: [Close], [EmptyQueryResponse], [Execute], [PortalSuspended], [CopyInResponse], [Flush], [CopyBothResponse].
 type Execute Msg
 
+func (m Execute) String() string        { return fmt.Sprintf("Execute(%v)", Msg(m)) }
 func (m Execute) ExpectedType() MsgType { return MsgClientExecute }
 func (m Execute) CopyTyped() Execute    { return Execute(m.Msg().Copy()) }
 func (m Execute) Validate() error {
@@ -235,6 +244,7 @@ var _ ClientMsg = Execute{}
 // Flush is a client message.
 type Flush Msg
 
+func (m Flush) String() string        { return fmt.Sprintf("Flush(%v)", Msg(m)) }
 func (m Flush) ExpectedType() MsgType { return MsgClientFlush }
 func (m Flush) CopyTyped() Flush      { return Flush(m.Msg().Copy()) }
 func (m Flush) Validate() error {
@@ -273,6 +283,7 @@ var _ ClientMsg = Flush{}
 // Responses: [ReadyForQuery], [FunctionCallResponse], [Execute], [NoticeResponse], [CopyInResponse], [Flush], [CopyBothResponse].
 type FunctionCall Msg
 
+func (m FunctionCall) String() string          { return fmt.Sprintf("FunctionCall(%v)", Msg(m)) }
 func (m FunctionCall) ExpectedType() MsgType   { return MsgClientFunc }
 func (m FunctionCall) CopyTyped() FunctionCall { return FunctionCall(m.Msg().Copy()) }
 func (m FunctionCall) Validate() error {
@@ -311,6 +322,7 @@ var _ ClientMsg = FunctionCall{}
 // Startup messages only appear before the first [ReadyForQuery] response.
 type GSSENCRequest Msg
 
+func (m GSSENCRequest) String() string           { return fmt.Sprintf("GSSENCRequest(%v)", Msg(m)) }
 func (m GSSENCRequest) ExpectedType() MsgType    { return MsgGSSENCRequest }
 func (m GSSENCRequest) CopyTyped() GSSENCRequest { return GSSENCRequest(m.Msg().Copy()) }
 func (m GSSENCRequest) Validate() error {
@@ -349,6 +361,7 @@ var _ ClientMsg = GSSENCRequest{}
 // Responses: [ParseComplete], [Execute].
 type Parse Msg
 
+func (m Parse) String() string        { return fmt.Sprintf("Parse(%v)", Msg(m)) }
 func (m Parse) ExpectedType() MsgType { return MsgClientParse }
 func (m Parse) CopyTyped() Parse      { return Parse(m.Msg().Copy()) }
 func (m Parse) Validate() error {
@@ -387,6 +400,7 @@ var _ ClientMsg = Parse{}
 // Startup messages only appear before the first [ReadyForQuery] response.
 type PasswordMessage Msg
 
+func (m PasswordMessage) String() string             { return fmt.Sprintf("PasswordMessage(%v)", Msg(m)) }
 func (m PasswordMessage) ExpectedType() MsgType      { return MsgClientPassword }
 func (m PasswordMessage) CopyTyped() PasswordMessage { return PasswordMessage(m.Msg().Copy()) }
 func (m PasswordMessage) Validate() error {
@@ -425,6 +439,7 @@ var _ ClientMsg = PasswordMessage{}
 // Responses: [ReadyForQuery], [Close], [CopyInResponse], [Flush], [CopyBothResponse], [RowDescription], [Describe], [EmptyQueryResponse], [Execute], [NoticeResponse].
 type Query Msg
 
+func (m Query) String() string        { return fmt.Sprintf("Query(%v)", Msg(m)) }
 func (m Query) ExpectedType() MsgType { return MsgClientQuery }
 func (m Query) CopyTyped() Query      { return Query(m.Msg().Copy()) }
 func (m Query) Validate() error {
@@ -463,6 +478,7 @@ var _ ClientMsg = Query{}
 // Startup messages only appear before the first [ReadyForQuery] response.
 type SSLRequest Msg
 
+func (m SSLRequest) String() string        { return fmt.Sprintf("SSLRequest(%v)", Msg(m)) }
 func (m SSLRequest) ExpectedType() MsgType { return MsgSSLRequest }
 func (m SSLRequest) CopyTyped() SSLRequest { return SSLRequest(m.Msg().Copy()) }
 func (m SSLRequest) Validate() error {
@@ -501,6 +517,7 @@ var _ ClientMsg = SSLRequest{}
 // Startup messages only appear before the first [ReadyForQuery] response.
 type StartupMessage Msg
 
+func (m StartupMessage) String() string            { return fmt.Sprintf("StartupMessage(%v)", Msg(m)) }
 func (m StartupMessage) ExpectedType() MsgType     { return MsgStartup }
 func (m StartupMessage) CopyTyped() StartupMessage { return StartupMessage(m.Msg().Copy()) }
 func (m StartupMessage) Validate() error {
@@ -539,6 +556,7 @@ var _ ClientMsg = StartupMessage{}
 // Responses: [ReadyForQuery].
 type Sync Msg
 
+func (m Sync) String() string        { return fmt.Sprintf("Sync(%v)", Msg(m)) }
 func (m Sync) ExpectedType() MsgType { return MsgClientSync }
 func (m Sync) CopyTyped() Sync       { return Sync(m.Msg().Copy()) }
 func (m Sync) Validate() error {
@@ -576,6 +594,7 @@ var _ ClientMsg = Sync{}
 // Terminate is a client message.
 type Terminate Msg
 
+func (m Terminate) String() string        { return fmt.Sprintf("Terminate(%v)", Msg(m)) }
 func (m Terminate) ExpectedType() MsgType { return MsgClientTerminate }
 func (m Terminate) CopyTyped() Terminate  { return Terminate(m.Msg().Copy()) }
 func (m Terminate) Validate() error {
@@ -614,6 +633,7 @@ var _ ClientMsg = Terminate{}
 // Startup messages only appear before the first [ReadyForQuery] response.
 type Authentication Msg
 
+func (m Authentication) String() string            { return fmt.Sprintf("Authentication(%v)", Msg(m)) }
 func (m Authentication) ExpectedType() MsgType     { return MsgServerAuth }
 func (m Authentication) CopyTyped() Authentication { return Authentication(m.Msg().Copy()) }
 func (m Authentication) Validate() error {
@@ -652,6 +672,7 @@ var _ ServerMsg = Authentication{}
 // Startup messages only appear before the first [ReadyForQuery] response.
 type BackendKeyData Msg
 
+func (m BackendKeyData) String() string            { return fmt.Sprintf("BackendKeyData(%v)", Msg(m)) }
 func (m BackendKeyData) ExpectedType() MsgType     { return MsgServerBackendKeyData }
 func (m BackendKeyData) CopyTyped() BackendKeyData { return BackendKeyData(m.Msg().Copy()) }
 func (m BackendKeyData) Validate() error {
@@ -690,6 +711,7 @@ var _ ServerMsg = BackendKeyData{}
 // Response to [Bind].
 type BindComplete Msg
 
+func (m BindComplete) String() string          { return fmt.Sprintf("BindComplete(%v)", Msg(m)) }
 func (m BindComplete) ExpectedType() MsgType   { return MsgServerBindComplete }
 func (m BindComplete) CopyTyped() BindComplete { return BindComplete(m.Msg().Copy()) }
 func (m BindComplete) Validate() error {
@@ -728,6 +750,7 @@ var _ ServerMsg = BindComplete{}
 // Response to [Close].
 type CloseComplete Msg
 
+func (m CloseComplete) String() string           { return fmt.Sprintf("CloseComplete(%v)", Msg(m)) }
 func (m CloseComplete) ExpectedType() MsgType    { return MsgServerCloseComplete }
 func (m CloseComplete) CopyTyped() CloseComplete { return CloseComplete(m.Msg().Copy()) }
 func (m CloseComplete) Validate() error {
@@ -766,6 +789,7 @@ var _ ServerMsg = CloseComplete{}
 // Response to [Execute], [Query].
 type CommandComplete Msg
 
+func (m CommandComplete) String() string             { return fmt.Sprintf("CommandComplete(%v)", Msg(m)) }
 func (m CommandComplete) ExpectedType() MsgType      { return MsgServerCommandComplete }
 func (m CommandComplete) CopyTyped() CommandComplete { return CommandComplete(m.Msg().Copy()) }
 func (m CommandComplete) Validate() error {
@@ -804,6 +828,7 @@ var _ ServerMsg = CommandComplete{}
 // Response to [Execute], [FunctionCall], [Query].
 type CopyBothResponse Msg
 
+func (m CopyBothResponse) String() string              { return fmt.Sprintf("CopyBothResponse(%v)", Msg(m)) }
 func (m CopyBothResponse) ExpectedType() MsgType       { return MsgServerCopyBothResponse }
 func (m CopyBothResponse) CopyTyped() CopyBothResponse { return CopyBothResponse(m.Msg().Copy()) }
 func (m CopyBothResponse) Validate() error {
@@ -842,6 +867,7 @@ var _ ServerMsg = CopyBothResponse{}
 // Response to [Execute], [FunctionCall], [Query].
 type CopyInResponse Msg
 
+func (m CopyInResponse) String() string            { return fmt.Sprintf("CopyInResponse(%v)", Msg(m)) }
 func (m CopyInResponse) ExpectedType() MsgType     { return MsgServerCopyInResponse }
 func (m CopyInResponse) CopyTyped() CopyInResponse { return CopyInResponse(m.Msg().Copy()) }
 func (m CopyInResponse) Validate() error {
@@ -880,6 +906,7 @@ var _ ServerMsg = CopyInResponse{}
 // Response to [Execute], [FunctionCall], [Query].
 type CopyOutResponse Msg
 
+func (m CopyOutResponse) String() string             { return fmt.Sprintf("CopyOutResponse(%v)", Msg(m)) }
 func (m CopyOutResponse) ExpectedType() MsgType      { return MsgServerCopyOutResponse }
 func (m CopyOutResponse) CopyTyped() CopyOutResponse { return CopyOutResponse(m.Msg().Copy()) }
 func (m CopyOutResponse) Validate() error {
@@ -918,6 +945,7 @@ var _ ServerMsg = CopyOutResponse{}
 // Response to [Query].
 type DataRow Msg
 
+func (m DataRow) String() string        { return fmt.Sprintf("DataRow(%v)", Msg(m)) }
 func (m DataRow) ExpectedType() MsgType { return MsgServerDataRow }
 func (m DataRow) CopyTyped() DataRow    { return DataRow(m.Msg().Copy()) }
 func (m DataRow) Validate() error {
@@ -956,6 +984,7 @@ var _ ServerMsg = DataRow{}
 // Response to [Execute], [Query].
 type EmptyQueryResponse Msg
 
+func (m EmptyQueryResponse) String() string                { return fmt.Sprintf("EmptyQueryResponse(%v)", Msg(m)) }
 func (m EmptyQueryResponse) ExpectedType() MsgType         { return MsgServerEmptyQueryResponse }
 func (m EmptyQueryResponse) CopyTyped() EmptyQueryResponse { return EmptyQueryResponse(m.Msg().Copy()) }
 func (m EmptyQueryResponse) Validate() error {
@@ -994,6 +1023,7 @@ var _ ServerMsg = EmptyQueryResponse{}
 // Response to [Bind], [Close], [Describe], [Execute], [Parse], [FunctionCall], [Query].
 type ErrorResponse Msg
 
+func (m ErrorResponse) String() string           { return fmt.Sprintf("ErrorResponse(%v)", Msg(m)) }
 func (m ErrorResponse) ExpectedType() MsgType    { return MsgServerErrorResponse }
 func (m ErrorResponse) CopyTyped() ErrorResponse { return ErrorResponse(m.Msg().Copy()) }
 func (m ErrorResponse) Validate() error {
@@ -1032,6 +1062,7 @@ var _ ServerMsg = ErrorResponse{}
 // Response to [FunctionCall].
 type FunctionCallResponse Msg
 
+func (m FunctionCallResponse) String() string        { return fmt.Sprintf("FunctionCallResponse(%v)", Msg(m)) }
 func (m FunctionCallResponse) ExpectedType() MsgType { return MsgServerFuncCallResponse }
 func (m FunctionCallResponse) CopyTyped() FunctionCallResponse {
 	return FunctionCallResponse(m.Msg().Copy())
@@ -1072,6 +1103,7 @@ var _ ServerMsg = FunctionCallResponse{}
 // Response to [Describe].
 type NoData Msg
 
+func (m NoData) String() string        { return fmt.Sprintf("NoData(%v)", Msg(m)) }
 func (m NoData) ExpectedType() MsgType { return MsgServerNoData }
 func (m NoData) CopyTyped() NoData     { return NoData(m.Msg().Copy()) }
 func (m NoData) Validate() error {
@@ -1110,6 +1142,7 @@ var _ ServerMsg = NoData{}
 // Response to [FunctionCall], [Query].
 type NoticeResponse Msg
 
+func (m NoticeResponse) String() string            { return fmt.Sprintf("NoticeResponse(%v)", Msg(m)) }
 func (m NoticeResponse) ExpectedType() MsgType     { return MsgServerNoticeResponse }
 func (m NoticeResponse) CopyTyped() NoticeResponse { return NoticeResponse(m.Msg().Copy()) }
 func (m NoticeResponse) Validate() error {
@@ -1147,6 +1180,7 @@ var _ ServerMsg = NoticeResponse{}
 // NotificationResponse is a server message.
 type NotificationResponse Msg
 
+func (m NotificationResponse) String() string        { return fmt.Sprintf("NotificationResponse(%v)", Msg(m)) }
 func (m NotificationResponse) ExpectedType() MsgType { return MsgServerNotificationResponse }
 func (m NotificationResponse) CopyTyped() NotificationResponse {
 	return NotificationResponse(m.Msg().Copy())
@@ -1187,6 +1221,7 @@ var _ ServerMsg = NotificationResponse{}
 // Response to [Describe].
 type ParameterDescription Msg
 
+func (m ParameterDescription) String() string        { return fmt.Sprintf("ParameterDescription(%v)", Msg(m)) }
 func (m ParameterDescription) ExpectedType() MsgType { return MsgServerParameterDescription }
 func (m ParameterDescription) CopyTyped() ParameterDescription {
 	return ParameterDescription(m.Msg().Copy())
@@ -1226,6 +1261,7 @@ var _ ServerMsg = ParameterDescription{}
 // ParameterStatus is a server message.
 type ParameterStatus Msg
 
+func (m ParameterStatus) String() string             { return fmt.Sprintf("ParameterStatus(%v)", Msg(m)) }
 func (m ParameterStatus) ExpectedType() MsgType      { return MsgServerParameterStatus }
 func (m ParameterStatus) CopyTyped() ParameterStatus { return ParameterStatus(m.Msg().Copy()) }
 func (m ParameterStatus) Validate() error {
@@ -1264,6 +1300,7 @@ var _ ServerMsg = ParameterStatus{}
 // Response to [Parse].
 type ParseComplete Msg
 
+func (m ParseComplete) String() string           { return fmt.Sprintf("ParseComplete(%v)", Msg(m)) }
 func (m ParseComplete) ExpectedType() MsgType    { return MsgServerParseComplete }
 func (m ParseComplete) CopyTyped() ParseComplete { return ParseComplete(m.Msg().Copy()) }
 func (m ParseComplete) Validate() error {
@@ -1302,6 +1339,7 @@ var _ ServerMsg = ParseComplete{}
 // Response to [Execute].
 type PortalSuspended Msg
 
+func (m PortalSuspended) String() string             { return fmt.Sprintf("PortalSuspended(%v)", Msg(m)) }
 func (m PortalSuspended) ExpectedType() MsgType      { return MsgServerPortalSuspended }
 func (m PortalSuspended) CopyTyped() PortalSuspended { return PortalSuspended(m.Msg().Copy()) }
 func (m PortalSuspended) Validate() error {
@@ -1340,6 +1378,7 @@ var _ ServerMsg = PortalSuspended{}
 // Response to [FunctionCall], [Query], [Sync].
 type ReadyForQuery Msg
 
+func (m ReadyForQuery) String() string           { return fmt.Sprintf("ReadyForQuery(%v)", Msg(m)) }
 func (m ReadyForQuery) ExpectedType() MsgType    { return MsgServerReadyForQuery }
 func (m ReadyForQuery) CopyTyped() ReadyForQuery { return ReadyForQuery(m.Msg().Copy()) }
 func (m ReadyForQuery) Validate() error {
@@ -1378,6 +1417,7 @@ var _ ServerMsg = ReadyForQuery{}
 // Response to [Describe], [Query].
 type RowDescription Msg
 
+func (m RowDescription) String() string            { return fmt.Sprintf("RowDescription(%v)", Msg(m)) }
 func (m RowDescription) ExpectedType() MsgType     { return MsgServerRowDescription }
 func (m RowDescription) CopyTyped() RowDescription { return RowDescription(m.Msg().Copy()) }
 func (m RowDescription) Validate() error {
@@ -1415,6 +1455,7 @@ var _ ServerMsg = RowDescription{}
 // CopyData is a client or server message.
 type CopyData Msg
 
+func (m CopyData) String() string        { return fmt.Sprintf("CopyData(%v)", Msg(m)) }
 func (m CopyData) ExpectedType() MsgType { return MsgClientCopyData }
 func (m CopyData) CopyTyped() CopyData   { return CopyData(m.Msg().Copy()) }
 func (m CopyData) Validate() error {
@@ -1452,6 +1493,7 @@ var _ ServerMsg = CopyData{}
 // CopyDone is a client or server message.
 type CopyDone Msg
 
+func (m CopyDone) String() string        { return fmt.Sprintf("CopyDone(%v)", Msg(m)) }
 func (m CopyDone) ExpectedType() MsgType { return MsgClientCopyDone }
 func (m CopyDone) CopyTyped() CopyDone   { return CopyDone(m.Msg().Copy()) }
 func (m CopyDone) Validate() error {
@@ -1489,6 +1531,7 @@ var _ ServerMsg = CopyDone{}
 // UnknownMsg wraps a message with an unrecognized type byte.
 type UnknownMsg Msg
 
+func (m UnknownMsg) String() string        { return fmt.Sprintf("UnknownMsg(%v)", Msg(m)) }
 func (m UnknownMsg) ExpectedType() MsgType { return 0 }
 func (m UnknownMsg) CopyTyped() UnknownMsg { return UnknownMsg(m.Msg().Copy()) }
 func (m UnknownMsg) Validate() error {

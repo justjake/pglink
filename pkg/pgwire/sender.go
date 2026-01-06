@@ -29,7 +29,7 @@ func (s Sender) IsServer() bool {
 	return s == SenderServer
 }
 
-func (s Sender) To() Sender {
+func (s Sender) Destination() Sender {
 	switch s {
 	case SenderClient:
 		return SenderServer

@@ -848,7 +848,7 @@ func TestRingBuffer_StreamingMessage(t *testing.T) {
 	}
 
 	// Read the streaming message through RingRange.NewReader()
-	rng := cursor.Slice(cursor.MsgIdx(), cursor.MsgIdx()+1)
+	rng := cursor.Slice(cursor.MsgSeq(), cursor.MsgSeq()+1)
 	reader := rng.NewReader()
 
 	var buf bytes.Buffer
@@ -912,7 +912,7 @@ readLoop:
 				cursor.endIdx = published
 				cursor.msgIdx = cursor.startIdx - 1
 				for cursor.NextMsg() {
-					rng := cursor.Slice(cursor.MsgIdx(), cursor.MsgIdx()+1)
+					rng := cursor.Slice(cursor.MsgSeq(), cursor.MsgSeq()+1)
 					data, err := io.ReadAll(rng.NewReader())
 					if err != nil {
 						t.Fatalf("error reading message: %v", err)
@@ -935,7 +935,7 @@ readLoop:
 
 			for cursor.NextMsg() {
 				// Read through RingRange.NewReader() to handle streaming
-				rng := cursor.Slice(cursor.MsgIdx(), cursor.MsgIdx()+1)
+				rng := cursor.Slice(cursor.MsgSeq(), cursor.MsgSeq()+1)
 				reader := rng.NewReader()
 				data, err := io.ReadAll(reader)
 				if err != nil {
@@ -1719,20 +1719,20 @@ func TestRingMsg_Navigation(t *testing.T) {
 
 		// Check MsgIdx as we navigate
 		if cursor.NextMsg() {
-			if cursor.MsgIdx() != 0 {
-				t.Errorf("MsgIdx = %d, want 0", cursor.MsgIdx())
+			if cursor.MsgSeq() != 0 {
+				t.Errorf("MsgIdx = %d, want 0", cursor.MsgSeq())
 			}
 		}
 
 		if cursor.NextMsg() {
-			if cursor.MsgIdx() != 1 {
-				t.Errorf("MsgIdx = %d, want 1", cursor.MsgIdx())
+			if cursor.MsgSeq() != 1 {
+				t.Errorf("MsgIdx = %d, want 1", cursor.MsgSeq())
 			}
 		}
 
 		if cursor.NextMsg() {
-			if cursor.MsgIdx() != 2 {
-				t.Errorf("MsgIdx = %d, want 2", cursor.MsgIdx())
+			if cursor.MsgSeq() != 2 {
+				t.Errorf("MsgIdx = %d, want 2", cursor.MsgSeq())
 			}
 		}
 
@@ -1745,8 +1745,8 @@ func TestRingMsg_Navigation(t *testing.T) {
 		if !cursor.PrevMsg() {
 			t.Error("PrevMsg should return true")
 		}
-		if cursor.MsgIdx() != 2 {
-			t.Errorf("MsgIdx = %d, want 2", cursor.MsgIdx())
+		if cursor.MsgSeq() != 2 {
+			t.Errorf("MsgIdx = %d, want 2", cursor.MsgSeq())
 		}
 	})
 }
@@ -1873,7 +1873,7 @@ readLoop:
 				cursor.endIdx = published
 				cursor.msgIdx = cursor.startIdx - 1
 				for cursor.NextMsg() {
-					rng := cursor.Slice(cursor.MsgIdx(), cursor.MsgIdx()+1)
+					rng := cursor.Slice(cursor.MsgSeq(), cursor.MsgSeq()+1)
 					data, err := io.ReadAll(rng.NewReader())
 					if err != nil {
 						t.Fatalf("error reading message: %v", err)
@@ -1896,7 +1896,7 @@ readLoop:
 
 			for cursor.NextMsg() {
 				// Read through RingRange.NewReader() to handle streaming
-				rng := cursor.Slice(cursor.MsgIdx(), cursor.MsgIdx()+1)
+				rng := cursor.Slice(cursor.MsgSeq(), cursor.MsgSeq()+1)
 				reader := rng.NewReader()
 				data, err := io.ReadAll(reader)
 				if err != nil {
@@ -1994,7 +1994,7 @@ func TestRingBuffer_StreamingMessage_PublishedBytesUpdated(t *testing.T) {
 	}
 
 	// Read the streaming message
-	rng := cursor.Slice(cursor.MsgIdx(), cursor.MsgIdx()+1)
+	rng := cursor.Slice(cursor.MsgSeq(), cursor.MsgSeq()+1)
 	_, err := io.ReadAll(rng.NewReader())
 	if err != nil {
 		t.Fatalf("error reading streaming message: %v", err)
@@ -2024,7 +2024,7 @@ func TestRingBuffer_StreamingMessage_PublishedBytesUpdated(t *testing.T) {
 	}
 
 	// Additional verification: MessageEnd should still be correct after EOF
-	msgEnd := ring.MessageEnd(cursor.MsgIdx())
+	msgEnd := ring.MessageEnd(cursor.MsgSeq())
 	if msgEnd != msgLen {
 		t.Errorf("MessageEnd after streaming = %d, want %d (message length)", msgEnd, msgLen)
 	}
@@ -2080,7 +2080,7 @@ readLoop:
 				cursor.endIdx = published
 				cursor.msgIdx = cursor.startIdx - 1
 				for cursor.NextMsg() {
-					rng := cursor.Slice(cursor.MsgIdx(), cursor.MsgIdx()+1)
+					rng := cursor.Slice(cursor.MsgSeq(), cursor.MsgSeq()+1)
 					data, err := io.ReadAll(rng.NewReader())
 					if err != nil {
 						t.Fatalf("error reading message: %v", err)
@@ -2101,7 +2101,7 @@ readLoop:
 			cursor.msgIdx = cursor.startIdx - 1
 
 			for cursor.NextMsg() {
-				rng := cursor.Slice(cursor.MsgIdx(), cursor.MsgIdx()+1)
+				rng := cursor.Slice(cursor.MsgSeq(), cursor.MsgSeq()+1)
 				data, err := io.ReadAll(rng.NewReader())
 				if err != nil {
 					t.Fatalf("error reading message %d: %v", len(results), err)

@@ -115,7 +115,7 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 	// At the end of Write, we must have handled any messages.
 	defer func() {
 		if p.complete.Len() > 0 {
-			p.complete.Truncate(p.complete.EndMsgIdx() + 1)
+			p.complete.Truncate(p.complete.EndMsgSeq() + 1)
 		}
 	}()
 
@@ -142,7 +142,7 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 			p.incomplete = IncompleteStreamMsg[SliceMsg]{
 				Remaining: int(endOffset - p.Parser.curIdx),
 				StreamMsg: StreamMsg[SliceMsg]{
-					Idx:    p.complete.EndMsgIdx(),
+					Idx:    p.complete.EndMsgSeq(),
 					Offset: startOffset,
 					T:      SliceMsg{Slice: remaining},
 				},

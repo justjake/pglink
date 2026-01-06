@@ -527,7 +527,7 @@ func (r *RingMsg) WriteTo(w io.Writer) (int64, error) {
 	return r.in.ring.WriteMessage(r.msgIdx, w)
 }
 
-func (r *RingMsg) MsgIdx() int64 {
+func (r *RingMsg) MsgSeq() int64 {
 	return r.msgIdx
 }
 
