@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"strings"
 
 	"github.com/gammazero/deque"
 )
@@ -137,8 +138,23 @@ func NewStreamSliceMessage(idx int64, msg OffsetSlice[byte]) StreamSliceMsg {
 
 // StreamSlice is a slice out of a stream of messages.
 type StreamSlice struct {
-	*StreamMessages
+	*MessageOffsets
 	Slice OffsetSlice[byte]
+}
+
+func (s *StreamSlice) String() string {
+	var builder strings.Builder
+	builder.WriteString("StreamSlice{")
+	first := true
+	for msg := range s.All() {
+		if !first {
+			builder.WriteString(" ")
+		}
+		first = false
+		fmt.Fprintf(&builder, "%v", msg)
+	}
+	builder.WriteString("}")
+	return builder.String()
 }
 
 func (s *StreamSlice) All() iter.Seq[StreamSliceMsg] {
@@ -156,11 +172,11 @@ func (s *StreamSlice) At(idx int64) StreamSliceMsg {
 	return NewStreamSliceMessage(idx, s.Slice.Slice(startOffset, endOffset))
 }
 
-// StreamMessages tracks message metadata in an abstract byte stream.
+// MessageOffsets tracks message metadata in an abstract byte stream.
 // Messages are indexed by a logical message index starting at msgStartIdx.
 // Stores the byte offset where each message starts; the end of message N
 // is the start of message N+1 (or endOffset for the last message).
-type StreamMessages struct {
+type MessageOffsets struct {
 	msgStartIdx int64 // logical index of first message in deque
 	endOffset   int64 // byte offset of end of last message (== stream position)
 
@@ -169,7 +185,22 @@ type StreamMessages struct {
 	offsets deque.Deque[int64]
 }
 
-func (p *StreamMessages) Copy() *StreamMessages {
+func (p *MessageOffsets) String() string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "StreamMessages[%d]{", p.Len())
+	first := true
+	for idx := p.StartMsgIdx(); idx < p.EndMsgIdx(); idx++ {
+		if !first {
+			builder.WriteString(" ")
+		}
+		first = false
+		fmt.Fprintf(&builder, "idx=%v@offset=%v", idx, p.Offset(idx))
+	}
+	builder.WriteString("}")
+	return builder.String()
+}
+
+func (p *MessageOffsets) Copy() *MessageOffsets {
 	result := *p
 	result.offsets = deque.Deque[int64]{}
 	result.offsets.Copy(p.offsets)
@@ -177,14 +208,14 @@ func (p *StreamMessages) Copy() *StreamMessages {
 }
 
 // Push adds a new message. The type is currently unused but available for future use.
-func (p *StreamMessages) Push(_ MsgType, startOffset, endOffset int64) {
+func (p *MessageOffsets) Push(_ MsgType, startOffset, endOffset int64) {
 	p.offsets.PushBack(startOffset)
 	p.endOffset = endOffset
 }
 
 // Shift removes and returns the first message's byte range.
 // Returns ok=false if no messages are available.
-func (p *StreamMessages) Shift() (startOffset, endOffset int64, ok bool) {
+func (p *MessageOffsets) Shift() (startOffset, endOffset int64, ok bool) {
 	if p.offsets.Len() == 0 {
 		return 0, 0, false
 	}
@@ -199,7 +230,7 @@ func (p *StreamMessages) Shift() (startOffset, endOffset int64, ok bool) {
 }
 
 // ShiftN removes the first n messages.
-func (p *StreamMessages) ShiftN(n int) {
+func (p *MessageOffsets) ShiftN(n int) {
 	if n <= 0 {
 		return
 	}
@@ -215,51 +246,51 @@ func (p *StreamMessages) ShiftN(n int) {
 }
 
 // Truncate removes all messages before newStartMsgIdx.
-func (p *StreamMessages) Truncate(newStartMsgIdx int64) {
+func (p *MessageOffsets) Truncate(newStartMsgIdx int64) {
 	toRemove := int(newStartMsgIdx - p.msgStartIdx)
 	p.ShiftN(toRemove)
 }
 
 // Len returns the number of messages currently tracked.
-func (p *StreamMessages) Len() int {
+func (p *MessageOffsets) Len() int {
 	return p.offsets.Len()
 }
 
 // StartMsgIdx returns the logical index of the first message.
-func (p *StreamMessages) StartMsgIdx() int64 {
+func (p *MessageOffsets) StartMsgIdx() int64 {
 	return p.msgStartIdx
 }
 
 // EndMsgIdx returns the logical index one past the last message.
-func (p *StreamMessages) EndMsgIdx() int64 {
+func (p *MessageOffsets) EndMsgIdx() int64 {
 	return p.msgStartIdx + int64(p.offsets.Len())
 }
 
-func (p *StreamMessages) StartOffset() int64 {
+func (p *MessageOffsets) StartOffset() int64 {
 	return p.offsets.Front()
 }
 
-func (p *StreamMessages) EndOffset() int64 {
+func (p *MessageOffsets) EndOffset() int64 {
 	return p.endOffset
 }
 
 // Offset returns the start byte offset of the message at msgIdx.
 // Panics if msgIdx is out of range.
-func (p *StreamMessages) Offset(msgIdx int64) int64 {
+func (p *MessageOffsets) Offset(msgIdx int64) int64 {
 	idx := int(msgIdx - p.msgStartIdx)
 	return p.offsets.At(idx)
 }
 
 // Size returns the byte size of the message at msgIdx.
 // Panics if msgIdx is out of range.
-func (p *StreamMessages) Size(msgIdx int64) int64 {
+func (p *MessageOffsets) Size(msgIdx int64) int64 {
 	start, end := p.MsgRange(msgIdx)
 	return end - start
 }
 
 // MsgRange returns the byte range [start, end) of the message at msgIdx.
 // Panics if msgIdx is out of range.
-func (p *StreamMessages) MsgRange(msgIdx int64) (startOffset, endOffset int64) {
+func (p *MessageOffsets) MsgRange(msgIdx int64) (startOffset, endOffset int64) {
 	idx := int(msgIdx - p.msgStartIdx)
 	startOffset = p.offsets.At(idx)
 	if idx+1 < p.offsets.Len() {
@@ -272,7 +303,7 @@ func (p *StreamMessages) MsgRange(msgIdx int64) (startOffset, endOffset int64) {
 
 // Range returns the byte range [start, end) spanning messages [startMsg, endMsg).
 // Panics if indices are out of range.
-func (p *StreamMessages) Range(startMsg, endMsg int64) (startOffset, endOffset int64) {
+func (p *MessageOffsets) Range(startMsg, endMsg int64) (startOffset, endOffset int64) {
 	startOffset = p.Offset(startMsg)
 	if endMsg >= p.EndMsgIdx() {
 		endOffset = p.endOffset

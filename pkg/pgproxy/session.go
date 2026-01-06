@@ -224,6 +224,12 @@ func (s *Session) FlushClient(ctx context.Context) error {
 }
 
 func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
+	if s.Logger().Enabled(ctx, slog.LevelDebug) {
+		s.Logger().Debug("flush", "dest", dest)
+		defer func() {
+			s.Logger().Debug("flush: done")
+		}()
+	}
 	writeQueue := s.writeQueue(dest)
 	if writeQueue.IsEmpty() {
 		return nil

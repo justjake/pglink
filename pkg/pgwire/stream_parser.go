@@ -33,6 +33,10 @@ type StreamBatch struct {
 	Partial  *IncompleteStreamMsg[SliceMsg]
 }
 
+func (b StreamBatch) String() string {
+	return fmt.Sprintf("StreamBatch{%v, Partial: %v}", b.Complete, b.Partial)
+}
+
 type OnBatchCallback func(batch StreamBatch)
 
 // StreamBatchParser parses a stream of PostgreSQL wire protocol messages written to it.
@@ -52,7 +56,7 @@ type StreamBatchParser struct {
 func NewStreamBatchParser(onBatch OnBatchCallback) *StreamBatchParser {
 	parser := &StreamBatchParser{
 		OnBatch:  onBatch,
-		complete: StreamSlice{StreamMessages: &StreamMessages{}},
+		complete: StreamSlice{MessageOffsets: &MessageOffsets{}},
 	}
 	parser.Parser.OnMsg = parser.complete.Push
 	return parser
@@ -172,7 +176,7 @@ func (p *StreamBatchParser) Copy(onBatch OnBatchCallback) *StreamBatchParser {
 	result := *p
 	result.OnBatch = onBatch
 	result.complete.Slice = OffsetSlice[byte]{}
-	result.complete.StreamMessages = result.complete.StreamMessages.Copy()
+	result.complete.MessageOffsets = result.complete.MessageOffsets.Copy()
 	result.Parser.OnMsg = result.complete.Push
 	return &result
 }

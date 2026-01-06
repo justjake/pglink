@@ -40,7 +40,7 @@ type gnetProxyEngine struct {
 
 func (g *gnetProxyEngine) Start() error {
 	g.startOnce.Do(func() {
-		logger := slog.Default().WithGroup("gnet").With("e", fmt.Sprintf("%p", g))
+		logger := slog.Default().WithGroup("gnet")
 		client, err := gnet.NewClient(g, gnet.WithReadBufferCap(gnetBufferMaxSize), gnet.WithTicker(true), gnet.WithMulticore(true), gnet.WithLogger(&gnetLogger{logger}))
 		if err != nil {
 			g.startErr = err
@@ -62,19 +62,19 @@ func (g *gnetProxyEngine) OnBoot(eng gnet.Engine) (action gnet.Action) {
 
 // OnClose implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnClose(c gnet.Conn, err error) (action gnet.Action) {
-	g.logger.Info("gnet.OnClose", "c.fd", c.Fd(), "c.remoteAddr", c.RemoteAddr(), "err", err)
+	g.logger.Info("OnClose", "fd", c.Fd(), "addr", c.RemoteAddr(), "err", err)
 	return gnet.None
 }
 
 // OnOpen implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
-	g.logger.Info("gnet.OnOpen", "c.fd", c.Fd(), "c.remoteAddr", c.RemoteAddr())
+	g.logger.Info("OnOpen", "fd", c.Fd(), "addr", c.RemoteAddr())
 	return nil, gnet.None
 }
 
 // OnShutdown implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnShutdown(eng gnet.Engine) {
-	g.logger.Info("gnet.OnShutdown", "eng", eng)
+	g.logger.Info("OnShutdown", "eng", eng)
 
 	// TODO: cancel all sessions we own.
 }
@@ -85,20 +85,23 @@ func (g *gnetProxyEngine) OnShutdown(eng gnet.Engine) {
 // OnTick implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnTick() (delay time.Duration, action gnet.Action) {
 	g.tickCount++
-	g.logger.Info("gnet.OnTick", "ticks", g.tickCount)
+	if g.tickCount%100 == 0 {
+		g.logger.Debug("OnTick", "ticks", g.tickCount)
+	}
 	return gnetTickDuration, gnet.None
 }
 
 // OnTraffic implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
-	g.logger.Info("gnet.OnTraffic", "c.fd", c.Fd(), "c.remoteAddr", c.RemoteAddr())
+	g.logger.Info("OnTraffic", "fd", c.Fd(), "addr", c.RemoteAddr())
 	handler, ok := c.Context().(gnetTrafficHandler)
 	if !ok {
-		g.logger.Error("gnet.OnTraffic: invalid context: closing conn", "context", c.Context())
+		g.logger.Error("OnTraffic: context not a gnetTrafficHandler: closing conn", "type", fmt.Sprintf("%T", c.Context()), "context", c.Context())
 		return gnet.Close
 	}
+	g.logger.Debug("OnTraffic: calling handler", "handler", fmt.Sprintf("%T", handler))
 	res := handler.OnTraffic(c)
-	g.logger.Info("gnet.OnTraffic: action", "action", res)
+	g.logger.Info("OnTraffic: action", "action", res)
 	return res
 }
 
@@ -228,6 +231,12 @@ func (g *gnetProxyRuntime) StartConn(ctx context.Context, role ProxyRole, conn C
 		return fmt.Errorf("gnet enroll: %w", err)
 	}
 	ok = true
+	g.logger.Debug("enrolled conn",
+		"role", role,
+		"conn", fmt.Sprintf("%T", conn),
+		"netConn", fmt.Sprintf("%T", netConn),
+		"gconn", fmt.Sprintf("%T", gconn),
+	)
 
 	g.wg.Add(1)
 	proxyConn.onClose = g.wg.Done
@@ -281,6 +290,13 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, queued
 		return fmt.Errorf("connection not started")
 	}
 
+	if g.logger.Enabled(ctx, slog.LevelDebug) {
+		g.logger.Debug("gnetProxyRuntime.WriteConn", "role", role, "queued", queued)
+		defer func() {
+			g.logger.Debug("gnetProxyRuntime.WriteConn: done")
+		}()
+	}
+
 	// TODO: use writev
 	proxyConn := *connPtr
 	_, err := queued.WriteTo(proxyConn.gconn)
@@ -295,13 +311,28 @@ func (g *gnetProxyRuntime) handleBatch(p *gnetProxyConn, batch pgwire.StreamBatc
 
 	for msg := range batch.Complete.All() {
 		if err := g.handleMessage(p, msg); err != nil {
+			p.logger.Error("exit: handler returned error", "error", err)
+			g.runErr = err
 			return
 		}
 	}
 
 	if batch.Partial != nil {
 		if err := g.handleMessage(p, batch.Partial); err != nil {
+			p.logger.Error("exit: handler returned error (partial message)", "error", err)
+			g.runErr = err
 			return
+		}
+	}
+
+	flushErr := g.session.Flush(g.runCtx)
+	if flushErr != nil {
+		if err := g.handleConnErr(p, flushErr); err != nil {
+			p.logger.Error("exit: handler returned error (handling flush error)", "error", err, "flushErr", flushErr)
+			g.runErr = err
+			return
+		} else {
+			p.logger.Warn("failed to flush after handling batch", "error", flushErr)
 		}
 	}
 }
@@ -376,7 +407,7 @@ func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	// TODO: panic/recover?
 
 	if p.gconn != gconn {
-		p.logger.Error("gnetProxyConn.OnTraffic: invalid gconn", "gconn", fmt.Sprintf("%p", gconn), "p.gconn", fmt.Sprintf("%p", p.gconn))
+		p.logger.Error("gnetProxyConn.OnTraffic: invalid gconn", "gconn", gconn, "p.gconn", p.gconn)
 		return gnet.Close
 	}
 
@@ -417,6 +448,8 @@ func (p *gnetProxyConn) handleTraffic(c gnet.Conn) error {
 	written, err := p.parser.Write(buf)
 	_, discardErr := c.Discard(written)
 
+	p.logger.Debug("parser.Write", "written", written, "parser", p.parser)
+
 	if discardErr != nil {
 		return errors.Join(err, fmt.Errorf("gnetProxyConn.handleTraffic: failed to discard: %w", discardErr))
 	}
@@ -427,10 +460,11 @@ func (p *gnetProxyConn) handleTraffic(c gnet.Conn) error {
 		return fmt.Errorf("gnetProxyConn.handleTraffic: failed to write to parser: %w", err)
 	}
 
-	return nil
+	return p.runtime.runErr
 }
 
 func (p *gnetProxyConn) handleBatch(batch pgwire.StreamBatch) {
+	p.logger.Debug("handleBatch", "batch", batch)
 	// delegate
 	p.runtime.handleBatch(p, batch)
 }
