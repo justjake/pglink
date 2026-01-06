@@ -154,6 +154,24 @@ func (o *Orchestrator) Run(ctx context.Context) (*BenchmarkResults, error) {
 		}
 		if targetResult != nil {
 			results.Results = append(results.Results, *targetResult)
+
+			// Check for 100% failure rate: if a target completed but collected 0 metrics,
+			// all its benchmarks failed. Fail early to save time.
+			if len(targetResult.Metrics) == 0 && len(targetResult.Rounds) > 0 {
+				o.Logger.Error("target had 100% failure rate - all benchmarks failed",
+					"target", target.Name,
+					"rounds", len(targetResult.Rounds))
+
+				// Write partial results before failing
+				if err := o.writeResults(results); err != nil {
+					o.Logger.Error("failed to write partial results", "error", err)
+				}
+				if err := o.generateBenchmarkReport(results); err != nil {
+					o.Logger.Warn("failed to generate partial benchmark report", "error", err)
+				}
+
+				return results, fmt.Errorf("target %q failed all benchmarks (0 metrics collected)", target.Name)
+			}
 		}
 	}
 

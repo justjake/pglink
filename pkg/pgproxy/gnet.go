@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/justjake/pglink/pkg/pgwire"
@@ -24,6 +25,7 @@ type gnetTrafficHandler interface {
 	// Also check out the comments on Reader and Writer interfaces.
 	OnTraffic(c gnet.Conn) (action gnet.Action)
 	OnClose(c gnet.Conn) (action gnet.Action)
+	OnOpen(c gnet.Conn) (action gnet.Action)
 }
 
 type gnetProxyEngine struct {
@@ -69,6 +71,12 @@ func (g *gnetProxyEngine) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 // OnOpen implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
 	g.logger.Info("OnOpen", "fd", c.Fd(), "addr", c.RemoteAddr())
+	handler, ok := c.Context().(gnetTrafficHandler)
+	if !ok {
+		g.logger.Error("OnOpen: context not a gnetTrafficHandler: closing conn", "type", fmt.Sprintf("%T", c.Context()), "context", c.Context())
+		return nil, gnet.Close
+	}
+	handler.OnOpen(c)
 	return nil, gnet.None
 }
 
@@ -123,7 +131,7 @@ type gnetProxyRuntime struct {
 	client  *gnetProxyConn
 	backend *gnetProxyConn
 	loop    gnet.EventLoop
-	running bool
+	running atomic.Bool
 	runErr  error
 	pos     pos
 }
@@ -145,7 +153,7 @@ func NewGnetProxyRuntime(ctx context.Context, session *Session) (Runtime, error)
 // Run implements [Runtime].
 // Called on main thread.
 func (g *gnetProxyRuntime) Run(ctx context.Context) error {
-	if g.running {
+	if g.running.Load() {
 		return fmt.Errorf("already running")
 	}
 
@@ -153,7 +161,7 @@ func (g *gnetProxyRuntime) Run(ctx context.Context) error {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 
-		if g.running {
+		if g.running.Load() {
 			return fmt.Errorf("already running")
 		}
 
@@ -161,8 +169,16 @@ func (g *gnetProxyRuntime) Run(ctx context.Context) error {
 			return fmt.Errorf("client not started")
 		}
 
-		g.running = true
+		g.running.Store(true)
 		g.runCtx = ctx
+		if err := g.client.gconn.Wake(nil); err != nil {
+			return fmt.Errorf("failed to wake client: %w", err)
+		}
+		if g.backend != nil {
+			if err := g.backend.gconn.Wake(nil); err != nil {
+				return fmt.Errorf("failed to wake backend: %w", err)
+			}
+		}
 
 		return nil
 	}
@@ -171,9 +187,8 @@ func (g *gnetProxyRuntime) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() {
-		g.mu.Lock()
-		g.running = false
-		g.mu.Unlock()
+		g.running.Store(false)
+		g.logger.Debug("Run: done", "err", g.runErr)
 	}()
 
 	g.wg.Wait()
@@ -311,7 +326,11 @@ func (g *gnetProxyRuntime) handleBatch(p *gnetProxyConn, batch pgwire.StreamBatc
 
 	for msg := range batch.Complete.All() {
 		if err := g.handleMessage(p, msg); err != nil {
-			p.logger.Error("exit: handler returned error", "error", err)
+			if IsCleanTermination(err) {
+				p.logger.Info("exit: clean termination", "error", err)
+			} else {
+				p.logger.Error("exit: handler returned error", "error", err)
+			}
 			g.runErr = err
 			return
 		}
@@ -392,8 +411,9 @@ type gnetProxyConn struct {
 	onClose func()
 
 	// state
-	gconn  gnet.Conn
-	parser *pgwire.StreamBatchParser
+	started atomic.Bool
+	gconn   gnet.Conn
+	parser  *pgwire.StreamBatchParser
 }
 
 type filedupConn interface {
@@ -403,10 +423,16 @@ type filedupConn interface {
 var _ filedupConn = (*net.TCPConn)(nil)
 var _ gnetTrafficHandler = (*gnetProxyConn)(nil)
 
+func (p *gnetProxyConn) OnOpen(c gnet.Conn) (action gnet.Action) {
+	p.gconn = c
+	p.logger.Debug("gconn opened")
+	return gnet.None
+}
+
 func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	// TODO: panic/recover?
 
-	if p.gconn != gconn {
+	if p.gconn != nil && p.gconn != gconn {
 		p.logger.Error("gnetProxyConn.OnTraffic: invalid gconn", "gconn", gconn, "p.gconn", p.gconn)
 		return gnet.Close
 	}
@@ -438,7 +464,21 @@ func (p *gnetProxyConn) Close() error {
 }
 
 func (p *gnetProxyConn) handleTraffic(c gnet.Conn) error {
+	if !p.runtime.running.Load() {
+		p.logger.Debug("not running, ignoring traffic")
+		return nil
+	}
+
+	if p.runtime.runCtx.Err() != nil {
+		return p.runtime.runCtx.Err()
+	}
+
 	max := c.InboundBuffered()
+	if max == 0 {
+		p.logger.Debug("no inbound buffered, ignoring traffic")
+		return nil
+	}
+
 	buf, err := c.Next(max)
 	if err != nil {
 		return fmt.Errorf("gnetStream.OnTraffic: failed to read next %v bytes: %w", max, err)

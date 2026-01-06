@@ -37,6 +37,39 @@ Use shorter duration for faster feedback when debugging benchmark issues:
 bin/bench -cases copy_in -duration 10s -rounds 1
 ```
 
+### Benchmark targets
+
+By default, `bin/bench` runs pglink, pgbouncer, and direct benchmarks. Control targets with flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-pglink` | true | Run pglink proxy benchmarks |
+| `-pgbouncer` | true | Run pgbouncer proxy benchmarks |
+| `-direct` | true | Run direct PostgreSQL connection benchmarks |
+| `-mitm-proxy` | false | Run mitm-proxy benchmarks (simple passthrough proxy for baseline comparison) |
+
+Examples:
+
+```bash
+# Compare pglink vs direct only
+bin/bench -pgbouncer=false
+
+# Run mitm-proxy vs direct vs pgbouncer (without pglink)
+bin/bench -mitm-proxy -pglink=false
+
+# Run all targets including mitm-proxy
+bin/bench -mitm-proxy
+```
+
+### mitm-proxy options
+
+The mitm-proxy is a minimal passthrough proxy useful for measuring proxy overhead:
+
+| Flag | Description |
+|------|-------------|
+| `-mitm-single-thread` | Run mitm-proxy with GOMAXPROCS=1 (single-threaded) |
+| `-mitm-split` | Use split I/O mode for mitm-proxy (2-goroutine model) |
+
 ### Enable debug logging
 
 Use the `-debug` flag to enable debug-level logging for spawned pglink processes:

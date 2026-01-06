@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/pgproxy"
@@ -67,6 +69,7 @@ func main() {
 	handler := tint.NewHandler(os.Stdout, &tint.Options{
 		Level:     slogLevel,
 		AddSource: true,
+		NoColor:   !term.IsTerminal(int(os.Stdout.Fd())),
 	})
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
