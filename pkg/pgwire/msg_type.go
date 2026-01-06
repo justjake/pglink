@@ -137,13 +137,17 @@ var MsgIsServer = MsgLookup[bool]{
 // MsgIsStartup indicates whether a message type is part of the startup/auth phase.
 // These messages are only valid before the connection is fully established.
 var MsgIsStartup = MsgLookup[bool]{
+	// Client startup messages (synthetic type bytes)
+	MsgStartup:       true, // StartupMessage
+	MsgSSLRequest:    true, // SSLRequest
+	MsgCancelRequest: true, // CancelRequest
+	MsgGSSENCRequest: true, // GSSENCRequest
+
 	// Server startup messages
 	'R': true, // Authentication (all variants)
 	'K': true, // BackendKeyData
-	'S': true, // ParameterStatus (sent during startup)
-	'Z': true, // ReadyForQuery (marks end of startup)
-	'E': true, // ErrorResponse (can occur during startup)
-	'N': true, // NoticeResponse (can occur during startup)
+	// Note: ParameterStatus ('S') is sent during startup but also anytime parameters change,
+	// so it's not strictly a startup message. Also 'S' conflicts with client Sync.
 
 	// Client startup messages (after StartupMessage which has no type byte)
 	'p': true, // PasswordMessage / SASLInitialResponse / SASLResponse
@@ -366,4 +370,67 @@ func MsgTypeIndex(slice []MsgType, msg MsgType) int {
 	}
 	byteSlice := unsafe.Slice((*byte)(unsafe.SliceData(slice)), len(slice))
 	return bytes.IndexByte(byteSlice, byte(msg))
+}
+
+// MsgParsePriority lists message types in descending order of frequency/importance.
+// Used by Typed() to optimize hot path parsing by checking most common types first.
+// Ambiguous types (same byte for client/server with different meanings) are listed last
+// since they require a Sender check.
+var MsgParsePriority = []MsgType{
+	// High-frequency data transfer (hot path)
+	MsgServerDataRow,          // 'D' - most frequent in result sets
+	MsgServerCopyData,         // 'd' - frequent during COPY
+	MsgServerReadyForQuery,    // 'Z' - end of each query cycle
+	MsgServerCommandComplete,  // 'C' - end of each command
+
+	// Query protocol messages
+	MsgClientQuery,   // 'Q' - simple queries
+	MsgClientParse,   // 'P' - extended protocol
+	MsgClientBind,    // 'B' - extended protocol
+	MsgClientExecute, // 'E' - extended protocol (ambiguous but listed for client)
+	MsgClientSync,    // 'S' - extended protocol (ambiguous but listed for client)
+
+	// Response acknowledgments
+	MsgServerBindComplete,  // '2'
+	MsgServerParseComplete, // '1'
+	MsgServerCloseComplete, // '3'
+
+	// Metadata responses
+	MsgServerRowDescription,       // 'T'
+	MsgServerParameterDescription, // 't'
+	MsgServerNoData,               // 'n'
+
+	// Copy protocol
+	MsgServerCopyInResponse,   // 'G'
+	MsgServerCopyOutResponse,  // 'H' - ambiguous with Flush
+	MsgServerCopyBothResponse, // 'W'
+	MsgServerCopyDone,         // 'c'
+	MsgClientCopyFail,         // 'f'
+
+	// Error/notice handling
+	MsgServerErrorResponse,  // 'E' - ambiguous with Execute
+	MsgServerNoticeResponse, // 'N'
+
+	// Startup/auth
+	MsgServerAuth,           // 'R'
+	MsgServerBackendKeyData, // 'K'
+	MsgServerParameterStatus, // 'S' - ambiguous with Sync
+
+	// Less common
+	MsgClientClose,               // 'C' - ambiguous with CommandComplete
+	MsgClientDescribe,            // 'D' - ambiguous with DataRow
+	MsgClientFlush,               // 'H' - ambiguous with CopyOutResponse
+	MsgClientTerminate,           // 'X'
+	MsgClientFunc,                // 'F'
+	MsgClientPassword,            // 'p'
+	MsgServerEmptyQueryResponse,  // 'I'
+	MsgServerPortalSuspended,     // 's'
+	MsgServerFuncCallResponse,    // 'V'
+	MsgServerNotificationResponse, // 'A'
+
+	// Startup messages (synthetic types)
+	MsgStartup,       // 0x00
+	MsgSSLRequest,    // 0x01
+	MsgCancelRequest, // 0x02
+	MsgGSSENCRequest, // 0x03
 }
