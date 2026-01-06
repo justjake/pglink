@@ -383,7 +383,7 @@ func (p *pos) tryMarkHandled(action string) error {
 	if p.handled {
 		return fmt.Errorf("cannot %s: %w: %v", action, ErrPosAlreadyHandled, p)
 	}
-	if p.baseLogger.Enabled(p.ctx, slog.LevelDebug) {
+	if p.baseLogger != nil && p.baseLogger.Enabled(p.ctx, slog.LevelDebug) {
 		p.Logger().Debug("handled", "action", action)
 	}
 	p.handled = true

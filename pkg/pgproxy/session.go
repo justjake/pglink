@@ -114,37 +114,47 @@ func (s *Session) Run(ctx context.Context) error {
 // HandlePos handles a message position and any errors.
 // This method is called by the session's [Runtime].
 func (s *Session) HandlePos(ctx context.Context, pos Pos, posErr error) error {
-	trackCtx, trackErr := s.trackPos(ctx, pos.From(), pos.unwrap())
-	if trackErr != nil {
-		pos.Logger().Error("failed to track message before handler", "err", trackErr)
-		if handlerErr := s.cfg.Handler(ctx, s, pos, trackErr); handlerErr != nil {
-			return handlerErr
+	if pos != nil {
+		trackCtx, trackErr := s.trackPos(ctx, pos.From(), pos.unwrap())
+		if trackErr != nil {
+			pos.Logger().Error("failed to track message before handler", "err", trackErr)
+			if handlerErr := s.cfg.Handler(ctx, s, pos, trackErr); handlerErr != nil {
+				return handlerErr
+			}
 		}
-	}
-	if trackCtx != nil {
-		ctx = trackCtx
-	}
+		if trackCtx != nil {
+			ctx = trackCtx
+		}
 
-	pos.unwrap().ctx = ctx
-	defer func() {
-		pos.unwrap().ctx = nil
-	}()
+		pos.unwrap().ctx = ctx
+		defer func() {
+			pos.unwrap().ctx = nil
+		}()
+	}
 
 	var handleErr error
-	logger := pos.Logger()
+	var logger *slog.Logger
+	if pos != nil {
+		logger = pos.Logger()
+	} else {
+		logger = s.Logger()
+	}
 	if logger.Enabled(ctx, slog.LevelDebug) {
-		logger.Debug("calling handler")
+		logger.Debug("call handler", "pos", pos, "posErr", posErr)
+		defer func() {
+			logger.Debug("called handler: done")
+		}()
 	}
 
 	if handleErr = s.cfg.Handler(ctx, s, pos, posErr); handleErr != nil {
 		if !errors.Is(handleErr, io.EOF) {
-			pos.Logger().Error("handler returned error", "err", handleErr)
+			logger.Error("handler returned error", "err", handleErr)
 		}
 		return handleErr
 	}
 
 	if notHandledErr := pos.unwrap().notHandledError(); notHandledErr != nil {
-		pos.Logger().Error("poxy message not handled, exiting")
+		logger.Error("poxy message not handled, exiting")
 		return notHandledErr
 	}
 

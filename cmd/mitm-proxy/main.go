@@ -241,6 +241,7 @@ func (p *MitmProxy) StartupHandler(ctx context.Context, conn *pgserver.Authorize
 		ProcessID:         pgwire.ProcessID(hijacked.PID),
 		SecretKey:         pgwire.SecretKey(hijacked.SecretKey),
 		StartupParameters: startupParams,
+		CancelHandler:     p.CancelHandler,
 		ExtraData:         hijacked, // Pass backend connection to handler
 	}, nil
 }
@@ -329,6 +330,12 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (ret
 		return nil
 	}
 	return runErr
+}
+
+func (p *MitmProxy) CancelHandler(ctx context.Context, conn *pgserver.ClientConn, cancel *pgserver.CancelConn) error {
+	p.Logger.Error("cancel request received, exiting process", "user", conn.User, "database", conn.Database, "pid", conn.ProcessID)
+	os.Exit(2)
+	return nil
 }
 
 // parseBackendURI parses and validates the backend URI.

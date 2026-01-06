@@ -1,9 +1,11 @@
 package pgproxy
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -101,7 +103,7 @@ func (g *gnetProxyEngine) OnTick() (delay time.Duration, action gnet.Action) {
 
 // OnTraffic implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
-	g.logger.Info("OnTraffic", "fd", c.Fd(), "addr", c.RemoteAddr())
+	g.logger.Debug("OnTraffic", "fd", c.Fd(), "addr", c.RemoteAddr())
 	handler, ok := c.Context().(gnetTrafficHandler)
 	if !ok {
 		g.logger.Error("OnTraffic: context not a gnetTrafficHandler: closing conn", "type", fmt.Sprintf("%T", c.Context()), "context", c.Context())
@@ -109,7 +111,7 @@ func (g *gnetProxyEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
 	}
 	g.logger.Debug("OnTraffic: calling handler", "handler", fmt.Sprintf("%T", handler))
 	res := handler.OnTraffic(c)
-	g.logger.Info("OnTraffic: action", "action", res)
+	g.logger.Debug("OnTraffic: action", "action", res)
 	return res
 }
 
@@ -241,22 +243,57 @@ func (g *gnetProxyRuntime) StartConn(ctx context.Context, role ProxyRole, conn C
 	}
 	proxyConn.parser = pgwire.NewStreamBatchParser(proxyConn.handleBatch)
 
+	onSuccess := func(gconn gnet.Conn) {
+		g.logger.Debug("enrolled conn",
+			"role", role,
+			"conn", fmt.Sprintf("%T", conn),
+			"netConn", fmt.Sprintf("%T", netConn),
+			"gconn", fmt.Sprintf("%T", gconn),
+		)
+
+		g.wg.Add(1)
+		proxyConn.onClose = g.wg.Done
+		proxyConn.gconn = gconn
+		*connPtr = proxyConn
+	}
+
+	if loop := g.eventLoop(); loop != nil {
+		// Must register on the same event loop as other connections
+		// so we run in the same goroutine.
+		ch, err := loop.Enroll(gnet.NewContext(ctx, proxyConn), fileConn)
+		if err != nil {
+			return fmt.Errorf("gnet enroll: event loop: %w", err)
+		}
+
+		// If we are calling from inside the event loop, waiting on the result will deadlock.
+		// Asynchronously wait on a background goroutine, then complete on the event loop thread.
+		ok = true // so far as we know anyways
+		*connPtr = proxyConn
+		await(ctx, loop, ch, func(result gnet.RegisteredResult, err error) error {
+			if err != nil {
+				g.runErr = errors.Join(
+					fmt.Errorf("gnet enroll: event loop: awaited: %w", err),
+					fileConn.Close(),
+					file.Close(),
+				)
+				g.logger.Error("gnet enroll: event loop: awaited: failed", "error", g.runErr)
+				_ = g.Stop(ctx)
+				return g.runErr
+			}
+			onSuccess(result.Conn)
+			return nil
+		})
+		return nil
+	}
+
+	// First connection, no event loop assigned.
 	gconn, err := g.engine.client.EnrollContext(fileConn, proxyConn)
 	if err != nil {
 		return fmt.Errorf("gnet enroll: %w", err)
 	}
-	ok = true
-	g.logger.Debug("enrolled conn",
-		"role", role,
-		"conn", fmt.Sprintf("%T", conn),
-		"netConn", fmt.Sprintf("%T", netConn),
-		"gconn", fmt.Sprintf("%T", gconn),
-	)
 
-	g.wg.Add(1)
-	proxyConn.onClose = g.wg.Done
-	proxyConn.gconn = gconn
-	*connPtr = proxyConn
+	ok = true
+	onSuccess(gconn)
 	return nil
 }
 
@@ -300,21 +337,33 @@ func (g *gnetProxyRuntime) StopConn(ctx context.Context, role ProxyRole) error {
 // WriteConn implements [Runtime].
 // Assumed to be only called from within the loop...?
 func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, queued *pgwire.WriteQueue) error {
-	connPtr := g.conn(role)
-	if *connPtr == nil {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	p := *g.conn(role)
+	if p == nil {
 		return fmt.Errorf("connection not started")
 	}
 
+	var written int64
 	if g.logger.Enabled(ctx, slog.LevelDebug) {
 		g.logger.Debug("gnetProxyRuntime.WriteConn", "role", role, "queued", queued)
 		defer func() {
-			g.logger.Debug("gnetProxyRuntime.WriteConn: done")
+			g.logger.Debug("gnetProxyRuntime.WriteConn: done", "written", written)
 		}()
 	}
 
 	// TODO: use writev
-	proxyConn := *connPtr
-	_, err := queued.WriteTo(proxyConn.gconn)
+	var writeTarget io.Writer
+	if p.gconn == nil {
+		// Still starting up
+		g.logger.Debug("gnetProxyRuntime.WriteConn: connection not started yet, promise to write later")
+		writeTarget = &p.promisedWrites
+	} else {
+		writeTarget = p.gconn
+	}
+	written, err := queued.WriteTo(writeTarget)
 	if err != nil {
 		return fmt.Errorf("gconn WriteTo: %w", err)
 	}
@@ -338,7 +387,11 @@ func (g *gnetProxyRuntime) handleBatch(p *gnetProxyConn, batch pgwire.StreamBatc
 
 	if batch.Partial != nil {
 		if err := g.handleMessage(p, batch.Partial); err != nil {
-			p.logger.Error("exit: handler returned error (partial message)", "error", err)
+			if IsCleanTermination(err) {
+				p.logger.Info("exit: clean termination (partial message)", "error", err)
+			} else {
+				p.logger.Error("exit: handler returned error (partial message)", "error", err)
+			}
 			g.runErr = err
 			return
 		}
@@ -382,7 +435,11 @@ func (g *gnetProxyRuntime) handleMessage(p *gnetProxyConn, msg ProxyMessage) err
 
 	err := g.session.HandlePos(g.runCtx, pos, nil)
 	if err != nil {
-		g.logger.Error("gnetProxyRuntime.handleMessage: failed to handle message, shutting down", "error", err)
+		if !IsCleanTermination(err) {
+			g.logger.Error("gnetProxyRuntime.handleMessage: failed to handle message, shutting down", "error", err)
+		} else {
+			g.logger.Info("stopping runtime: clean termination", "error", err)
+		}
 		stopErr := g.Stop(g.runCtx)
 		if stopErr != nil {
 			g.logger.Error("gnetProxyRuntime.handleMessage: failed to stop runtime!", "error", stopErr)
@@ -401,6 +458,47 @@ func (g *gnetProxyRuntime) conn(role ProxyRole) **gnetProxyConn {
 	}
 }
 
+func (g *gnetProxyRuntime) eventLoop() gnet.EventLoop {
+	if g.client != nil {
+		return g.client.gconn.EventLoop()
+	}
+	return nil
+}
+
+// Receive from ch on loop.
+func await[T any](ctx context.Context, loop gnet.EventLoop, ch <-chan T, then func(T, error) error) {
+	go func() {
+		var err error
+		var result T
+		var ok bool
+
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			// ok
+		case result, ok = <-ch:
+			if !ok {
+				err = fmt.Errorf("channel closed")
+			}
+			err = ctx.Err()
+		}
+
+		var runnable gnet.RunnableFunc = func(ctx context.Context) error {
+			err := then(result, err)
+			if err != nil {
+				slog.Default().Error("await: then() returned error", "error", err)
+			}
+			return err
+		}
+
+		scheduleErr := loop.Execute(ctx, runnable)
+		if scheduleErr != nil {
+			slog.Default().Error("await: couldn't schedule on event loop, handling on waiter goroutine", "error", scheduleErr)
+			_ = runnable.Run(ctx)
+		}
+	}()
+}
+
 var _ Runtime = (*gnetProxyRuntime)(nil)
 
 type gnetProxyConn struct {
@@ -411,9 +509,10 @@ type gnetProxyConn struct {
 	onClose func()
 
 	// state
-	started atomic.Bool
-	gconn   gnet.Conn
-	parser  *pgwire.StreamBatchParser
+	started        atomic.Bool
+	gconn          gnet.Conn
+	promisedWrites bytes.Buffer
+	parser         *pgwire.StreamBatchParser
 }
 
 type filedupConn interface {
@@ -425,7 +524,15 @@ var _ gnetTrafficHandler = (*gnetProxyConn)(nil)
 
 func (p *gnetProxyConn) OnOpen(c gnet.Conn) (action gnet.Action) {
 	p.gconn = c
-	p.logger.Debug("gconn opened")
+	p.logger.Debug("gconn opened", "promisedWrites", p.promisedWrites.Len())
+	if p.promisedWrites.Len() > 0 {
+		_, err := p.promisedWrites.WriteTo(c)
+		if err != nil {
+			p.logger.Error("gnetProxyConn.OnOpen: exit: failed to write promised writes", "error", err)
+			return gnet.Close
+		}
+	}
+
 	return gnet.None
 }
 
@@ -438,7 +545,9 @@ func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	}
 
 	if err := p.handleTraffic(gconn); err != nil {
-		p.logger.Error("gnetProxyConn.OnTraffic: failed to handle traffic", "error", err)
+		if !IsCleanTermination(err) {
+			p.logger.Error("gnetProxyConn.OnTraffic: failed to handle traffic", "error", err)
+		}
 		return gnet.Close
 	}
 
