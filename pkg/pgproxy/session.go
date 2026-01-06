@@ -346,6 +346,20 @@ func (s *Session) QueueSend(ctx context.Context, msg pgwire.Message) error {
 	return s.writeQueue(dest(msg)).WriteMsg(msg)
 }
 
+func (s *Session) QueueSendMsg(ctx context.Context, msg pgwire.Msg) error {
+	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
+		return closedErr
+	}
+
+	if msg.Destination().IsServer() {
+		if _, err := s.AcquireBackend(ctx); err != nil {
+			return fmt.Errorf("queue send: %w", err)
+		}
+	}
+
+	panic("not implemented")
+}
+
 func (s *Session) QueueSendPos(ctx context.Context, pos Pos) error {
 	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
 		return closedErr
