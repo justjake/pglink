@@ -102,15 +102,22 @@ func (g *gnetProxyEngine) OnTick() (delay time.Duration, action gnet.Action) {
 
 // OnTraffic implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
-	g.logger.Debug("OnTraffic", "fd", c.Fd(), "addr", c.RemoteAddr())
+	debugEnabled := g.logger.Enabled(context.Background(), slog.LevelDebug)
+	if debugEnabled {
+		g.logger.Debug("OnTraffic", "fd", c.Fd(), "addr", c.RemoteAddr())
+	}
 	handler, ok := c.Context().(gnetTrafficHandler)
 	if !ok {
 		g.logger.Error("OnTraffic: context not a gnetTrafficHandler: closing conn", "type", fmt.Sprintf("%T", c.Context()), "context", c.Context())
 		return gnet.Close
 	}
-	g.logger.Debug("OnTraffic: calling handler", "handler", fmt.Sprintf("%T", handler))
+	if debugEnabled {
+		g.logger.Debug("OnTraffic: calling handler", "handler", fmt.Sprintf("%T", handler))
+	}
 	res := handler.OnTraffic(c)
-	g.logger.Debug("OnTraffic: action", "action", res)
+	if debugEnabled {
+		g.logger.Debug("OnTraffic: action", "action", res)
+	}
 	return res
 }
 
@@ -127,14 +134,15 @@ type gnetProxyRuntime struct {
 	msgParser flyweightParser
 
 	// state
-	mu      sync.Mutex
-	wg      sync.WaitGroup
-	client  *gnetProxyConn
-	backend *gnetProxyConn
-	loop    gnet.EventLoop
-	running atomic.Bool
-	runErr  error
-	pos     pos
+	mu       sync.Mutex
+	wg       sync.WaitGroup
+	client   *gnetProxyConn
+	backend  *gnetProxyConn
+	loop     gnet.EventLoop
+	running  atomic.Bool
+	runErr   error
+	pos      pos
+	sliceMsg pgwire.StreamSliceMsg
 }
 
 func NewGnetProxyRuntime(ctx context.Context, session *Session) (Runtime, error) {
@@ -243,12 +251,14 @@ func (g *gnetProxyRuntime) StartConn(ctx context.Context, role ProxyRole, conn C
 	proxyConn.parser = pgwire.NewStreamBatchParser(proxyConn.handleBatch)
 
 	onSuccess := func(gconn gnet.Conn) {
-		g.logger.Debug("enrolled conn",
-			"role", role,
-			"conn", fmt.Sprintf("%T", conn),
-			"netConn", fmt.Sprintf("%T", netConn),
-			"gconn", fmt.Sprintf("%T", gconn),
-		)
+		if g.logger.Enabled(context.Background(), slog.LevelDebug) {
+			g.logger.Debug("enrolled conn",
+				"role", role,
+				"conn", fmt.Sprintf("%T", conn),
+				"netConn", fmt.Sprintf("%T", netConn),
+				"gconn", fmt.Sprintf("%T", gconn),
+			)
+		}
 
 		g.wg.Add(1)
 		proxyConn.onClose = g.wg.Done
@@ -379,10 +389,16 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, queued
 }
 
 func (g *gnetProxyRuntime) handleBatch(p *gnetProxyConn, batch pgwire.StreamBatch) {
-	g.logger.Debug("gnetProxyRuntime.handleBatch", "p", p, "batch", batch)
+	if g.logger.Enabled(g.runCtx, slog.LevelDebug) {
+		g.logger.Debug("gnetProxyRuntime.handleBatch", "p", p, "batch", batch)
+	}
 
+	defer func() {
+		g.sliceMsg = pgwire.StreamSliceMsg{}
+	}()
 	for msg := range batch.Complete.All() {
-		if err := g.handleMessage(p, msg); err != nil {
+		g.sliceMsg = msg
+		if err := g.handleMessage(p, &g.sliceMsg); err != nil {
 			if IsCleanTermination(err) {
 				p.logger.Info("exit: clean termination", "error", err)
 			} else {
@@ -637,7 +653,9 @@ func (p *gnetProxyConn) handleTraffic(c gnet.Conn) error {
 }
 
 func (p *gnetProxyConn) handleBatch(batch pgwire.StreamBatch) {
-	p.logger.Debug("handleBatch", "batch", batch)
+	if p.logger.Enabled(context.Background(), slog.LevelDebug) {
+		p.logger.Debug("handleBatch", "batch", batch)
+	}
 	// delegate
 	p.runtime.handleBatch(p, batch)
 }

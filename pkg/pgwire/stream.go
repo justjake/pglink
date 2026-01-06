@@ -58,60 +58,60 @@ type StreamMsg[T RawMessageSource] struct {
 	T      T
 }
 
-var _ MsgIdx = StreamMsg[RawMessageSource]{}
-var _ MsgOffset = StreamMsg[RawMessageSource]{}
+var _ MsgIdx = (*StreamMsg[RawMessageSource])(nil)
+var _ MsgOffset = (*StreamMsg[RawMessageSource])(nil)
 
 // MsgOffset implements [MsgOffset].
-func (s StreamMsg[T]) MsgOffset() int64 {
+func (s *StreamMsg[T]) MsgOffset() int64 {
 	return s.Offset
 }
 
 // MsgIdx implements [MsgIdx].
-func (s StreamMsg[T]) MsgIdx() int64 {
+func (s *StreamMsg[T]) MsgIdx() int64 {
 	return s.Idx
 }
 
 // AppendTo implements [RawMessageSource].
-func (s StreamMsg[T]) AppendTo(buf []byte) ([]byte, error) {
+func (s *StreamMsg[T]) AppendTo(buf []byte) ([]byte, error) {
 	return s.T.AppendTo(buf)
 }
 
 // Body implements [RawMessageSource].
-func (s StreamMsg[T]) Body() []byte {
+func (s *StreamMsg[T]) Body() []byte {
 	return s.T.Body()
 }
 
 // Bytes implements [RawMessageSource].
-func (s StreamMsg[T]) Bytes() []byte {
+func (s *StreamMsg[T]) Bytes() []byte {
 	return s.T.Bytes()
 }
 
 // Len implements [RawMessageSource].
-func (s StreamMsg[T]) Len() int {
+func (s *StreamMsg[T]) Len() int {
 	return s.T.Len()
 }
 
 // MessageType implements [RawMessageSource].
-func (s StreamMsg[T]) MessageType() MsgType {
+func (s *StreamMsg[T]) MessageType() MsgType {
 	return s.T.MessageType()
 }
 
 // NewReader implements [RawMessageSource].
-func (s StreamMsg[T]) NewReader() io.Reader {
+func (s *StreamMsg[T]) NewReader() io.Reader {
 	return s.T.NewReader()
 }
 
 // Retain implements [RawMessageSource].
-func (s StreamMsg[T]) Retain() RawMessageSource {
+func (s *StreamMsg[T]) Retain() RawMessageSource {
 	source := s.T.Retain()
 	if t, ok := source.(T); ok {
-		return StreamMsg[T]{
+		return &StreamMsg[T]{
 			Idx:    s.Idx,
 			Offset: s.Offset,
 			T:      t,
 		}
 	}
-	return StreamMsg[RawMessageSource]{
+	return &StreamMsg[RawMessageSource]{
 		Idx:    s.Idx,
 		Offset: s.Offset,
 		T:      source,

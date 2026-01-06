@@ -50,7 +50,8 @@ type StreamBatchParser struct {
 	OnBatch             OnBatchCallback
 	Parser              StreamParser
 	// Must not be aliased after the Write method returns.
-	complete StreamSlice
+	complete   StreamSlice
+	incomplete IncompleteStreamMsg[SliceMsg]
 }
 
 func NewStreamBatchParser(onBatch OnBatchCallback) *StreamBatchParser {
@@ -122,7 +123,7 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 	remaining := b[written:]
 
 	// if the suffix indicatges a message of size >MaxParseMessageSize, then we must stream it.
-	var incompleteMsg IncompleteStreamMsg[SliceMsg]
+	var incompleteMsg *IncompleteStreamMsg[SliceMsg]
 	if _, startOffset, endOffset, ok := p.Parser.PeekPendingMessage(remaining); ok {
 		len := int(endOffset - startOffset)
 		// It's big.
@@ -138,7 +139,7 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 			}
 
 			// We must emit a batch containing any complete messages within the written bytes.
-			incompleteMsg = IncompleteStreamMsg[SliceMsg]{
+			p.incomplete = IncompleteStreamMsg[SliceMsg]{
 				Remaining: int(endOffset - p.Parser.curIdx),
 				StreamMsg: StreamMsg[SliceMsg]{
 					Idx:    p.complete.EndMsgIdx(),
@@ -146,6 +147,10 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 					T:      SliceMsg{Slice: remaining},
 				},
 			}
+			defer func() {
+				p.incomplete = IncompleteStreamMsg[SliceMsg]{}
+			}()
+			incompleteMsg = &p.incomplete
 		}
 	}
 
@@ -153,19 +158,16 @@ func (p *StreamBatchParser) Write(b []byte) (int, error) {
 		if p.complete.Len() > 0 {
 			// Ignore first message.
 			p.complete.Shift()
-		} else if incompleteMsg.Remaining > 0 {
+		} else if incompleteMsg != nil {
 			// the partial message is the "first" message
 			// it's currently streaming
-			incompleteMsg = IncompleteStreamMsg[SliceMsg]{}
+			incompleteMsg = nil
 		}
 	}
 
 	// Emit batch, if any.
 	if (p.complete.Len() > 0 || incompleteMsg.Remaining > 0) && p.OnBatch != nil {
-		res := StreamBatch{p.complete, nil}
-		if incompleteMsg.Remaining > 0 {
-			res.Partial = &incompleteMsg
-		}
+		res := StreamBatch{p.complete, incompleteMsg}
 		p.OnBatch(res)
 	}
 
