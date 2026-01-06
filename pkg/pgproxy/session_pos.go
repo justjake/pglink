@@ -16,6 +16,11 @@ var ErrPosNotHandled = errors.New("pos not handled")
 var ErrWrongDestination = errors.New("wrong destination")
 var ErrPosActionMismatch = errors.New("pos action mismatch")
 
+type ProxyMessage interface {
+	pgwire.RawMessageSource
+	pgwire.MsgIdx
+}
+
 // Pos represents a position in a message stream of a proxy [Session].
 // Pos is only valid until the next call to [Session.Next].
 // Each pos must be handled with an action, or skipped.
@@ -26,7 +31,7 @@ type Pos interface {
 	FromServer() bool
 
 	// Index of the message in the `From()` message stream.
-	FromMsgIdx() int64
+	MsgIdx() int64
 
 	// Returns the message at this position.
 	// Panics if the message is not a valid message.
@@ -56,7 +61,26 @@ type Pos interface {
 	// Returns an error if the rewritten message is for the source.
 	// Returns an error if the message has already been handled.
 	Rewrite(ctx context.Context, rewritten pgwire.Message) error
-	// Respond to the message with a message for the source.
+	// Respond to a client message with a server message without forwarding it.
+	// Responses to client requests must be made with Respond, rather than direct
+	// Send calls on the [Session].
+	//
+	// The PostgreSQL wire protocol is strictly-ordered and allows pipelining of
+	// requests from clients. Responses must be sent First-In-First-Out.
+	//
+	// A client may send pipeline like:
+	//
+	// ```
+	// Parse(A) // -> Forward
+	// Parse(B) // -> Respond(!)
+	// Parse(C) // -> Forward
+	// Sync()   // -> Forward
+	// ```
+	//
+	// If the proxy wants to forward Parse(A) and Parse(C), but respond to
+	// Parse(B) itself, we must wait to send the Parse(B) response message *after*
+	// the Parse(A) response message.
+	//
 	// Returns an error if the response is for the destination.
 	// Returns an error if the message has already been handled.
 	Respond(ctx context.Context, response pgwire.Message) error
@@ -70,10 +94,6 @@ type Pos interface {
 
 	String() string
 
-	// Ctx returns a context derived from the one passed to [Session.Next] or [Session.Stream],
-	// modified by [MessageTracker]s.
-	Ctx() context.Context
-
 	// Readers for message data.
 	pgwire.RawMessageSource
 
@@ -82,24 +102,29 @@ type Pos interface {
 }
 
 type pos struct {
-	session *Session
-	*pgwire.RingMsg
-	Cursor     *pgwire.Cursor
+	ProxyMessage
+	session    *Session
 	from       ProxyRole
 	baseLogger *slog.Logger
-	logger     *slog.Logger
-	ctx        context.Context
-	handled    bool
+
+	handled bool
+	logger  *slog.Logger
+	ctx     context.Context
+	parser  messageParser
 }
 
 // var _ Pos = (*pos)(nil)
 
-func (p *pos) reset(session *Session, cursor *pgwire.Cursor, from ProxyRole) {
+func (p *pos) reset(from ProxyRole, msg ProxyMessage, session *Session, ctx context.Context) {
 	p.session = session
-	p.Cursor = cursor
-	p.RingMsg = &cursor.RingMsg
+	p.ProxyMessage = msg
 	p.from = from
-	p.baseLogger = session.Logger()
+	p.ctx = ctx
+	if session != nil {
+		p.baseLogger = session.Logger()
+	} else {
+		p.baseLogger = nil
+	}
 	p.logger = nil
 	p.handled = false
 }
@@ -132,7 +157,16 @@ func (p *pos) AsMessage() (pgwire.Message, error) {
 }
 
 func (p *pos) AsClient() (pgwire.ClientMessage, error) {
-	return p.Cursor.AsClient()
+	msg, err := p.parser.Parse(p.ProxyMessage)
+	if err != nil {
+		return nil, err
+	}
+
+	if clientMsg, ok := msg.(pgwire.ClientMessage); ok {
+		return clientMsg, nil
+	}
+
+	return nil, fmt.Errorf("message is not a client message: %T", msg)
 }
 
 // ClientMsg implements [Pos].
@@ -149,11 +183,6 @@ func (p *pos) From() ProxyRole {
 	return p.from
 }
 
-// FromMsgIdx implements [Pos].
-func (p *pos) FromMsgIdx() int64 {
-	return p.Cursor.MsgIdx()
-}
-
 // Logger implements [Pos].
 func (p *pos) Logger() *slog.Logger {
 	if p.logger != nil {
@@ -161,15 +190,22 @@ func (p *pos) Logger() *slog.Logger {
 	}
 	p.logger = p.baseLogger.With(
 		"from", p.from,
-		"cursor", p.Cursor.String(),
-		"idx", p.Cursor.MsgIdx(),
-		"type", p.Cursor.MessageType(),
+		"idx", p.MsgIdx(),
+		"type", p.MessageType(),
 	)
 	return p.logger
 }
 
 func (p *pos) AsServer() (pgwire.ServerMessage, error) {
-	return p.Cursor.AsServer()
+	msg, err := p.parser.Parse(p.ProxyMessage)
+	if err != nil {
+		return nil, err
+	}
+
+	if serverMsg, ok := msg.(pgwire.ServerMessage); ok {
+		return serverMsg, nil
+	}
+	return nil, fmt.Errorf("message is not a server message: %T", msg)
 }
 
 // ServerMsg implements [Pos].
@@ -216,8 +252,8 @@ func (p *pos) Dispatch(ctx context.Context, action Action) (err error) {
 	unwrapped := action.unwrap()
 
 	if unwrapped.incoming != nil {
-		if unwrapped.incoming.Source() != p.RingMsg {
-			return fmt.Errorf("%w: %v: action source %v != pos %v", ErrPosActionMismatch, action, unwrapped.incoming.Source(), p.RingMsg)
+		if unwrapped.incoming.Source() != p.ProxyMessage {
+			return fmt.Errorf("%w: %v: action source %v != pos %v", ErrPosActionMismatch, action, unwrapped.incoming.Source(), p.ProxyMessage)
 		}
 	}
 
@@ -358,4 +394,8 @@ func (p *pos) notHandledError() error {
 		return fmt.Errorf("%w: %v", ErrPosNotHandled, p)
 	}
 	return nil
+}
+
+type messageParser interface {
+	Parse(source pgwire.RawMessageSource) (pgwire.Message, error)
 }

@@ -2,113 +2,54 @@ package pgproxy
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
-	"iter"
 	"log/slog"
-	"sync/atomic"
+	"net"
+	"os"
+	"sync"
 	"time"
 
-	"github.com/gammazero/deque"
 	"github.com/justjake/pglink/pkg/pgwire"
 	"github.com/panjf2000/gnet/v2"
 )
 
 const gnetTickDuration = 1 * time.Second
+const gnetBufferMaxSize = 64 * 1024              // 64KiB
+const gnetMaxMessageSize = gnetBufferMaxSize / 2 // TODO
 
-var errNotResolved = errors.New("promise not resolved")
-
-// The goal of gnet is to avoid goroutine schedule overhead. this promise construct will probably not help
-// we are using it while standing up gnet, can optimize later.
-type promise[T any] struct {
-	r      atomic.Bool
-	done   chan struct{}
-	err    error
-	result T
-}
-
-func newPromise[T any]() *promise[T] {
-	return &promise[T]{
-		done: make(chan struct{}),
-	}
-}
-
-func (p *promise[t]) Resolved() bool {
-	return p.r.Load()
-}
-
-func (p *promise[T]) Result() (result T, err error) {
-	if !p.Resolved() {
-		err = errNotResolved
-		return
-	}
-	return p.result, p.err
-}
-
-func (p *promise[T]) Wait(ctx context.Context) (result T, err error) {
-	select {
-	case <-p.done:
-		return p.Result()
-	case <-ctx.Done():
-		err = ctx.Err()
-		return
-	}
-}
-
-func (p *promise[T]) Resolve(result T, err error) *promise[T] {
-	if p.r.CompareAndSwap(false, true) {
-		if err != nil {
-			p.err = err
-			close(p.done)
-		} else {
-			p.result = result
-			close(p.done)
-		}
-	}
-	return p
-}
-
-// EventHandler represents the engine events' callbacks for the Run call.
-// Each event has an Action return value that is used manage the state
-// of the connection and engine.
-type gnetEventHandler interface {
-	// OnBoot fires when the engine is ready for accepting connections.
-	// The parameter engine has information and various utilities.
-	OnBoot(eng gnet.Engine) (action gnet.Action)
-
-	// OnShutdown fires when the engine is being shut down, it is called right after
-	// all event-loops and connections are closed.
-	OnShutdown(eng gnet.Engine)
-
-	// OnOpen fires when a new connection has been opened.
-	//
-	// The Conn c has information about the connection such as its local and remote addresses.
-	// The parameter out is the return value which is going to be sent back to the remote.
-	// Sending large amounts of data back to the remote in OnOpen is usually not recommended.
-	OnOpen(c gnet.Conn) (out []byte, action gnet.Action)
-
-	// OnClose fires when a connection has been closed.
-	// The parameter err is the last known connection error.
-	OnClose(c gnet.Conn, err error) (action gnet.Action)
-
+type gnetTrafficHandler interface {
 	// OnTraffic fires when a socket receives data from the remote.
 	//
 	// Also check out the comments on Reader and Writer interfaces.
 	OnTraffic(c gnet.Conn) (action gnet.Action)
-
-	// OnTick fires immediately after the engine starts and will fire again
-	// following the duration specified by the delay return value.
-	OnTick() (delay time.Duration, action gnet.Action)
+	OnClose(c gnet.Conn) (action gnet.Action)
 }
 
 type gnetProxyEngine struct {
-	// gnet.BuiltinEventEngine
-	eng    gnet.Engine
-	client gnet.Client
-	logger *slog.Logger
-	ticks  int
+	logger    *slog.Logger
+	eng       gnet.Engine
+	client    *gnet.Client
+	tickCount int
+
+	startOnce sync.Once
+	startErr  error
+
+	mu sync.Mutex
+}
+
+func (g *gnetProxyEngine) Start() error {
+	g.startOnce.Do(func() {
+		logger := slog.Default().WithGroup("gnet").With("e", fmt.Sprintf("%p", g))
+		client, err := gnet.NewClient(g, gnet.WithReadBufferCap(gnetBufferMaxSize), gnet.WithTicker(true), gnet.WithMulticore(true), gnet.WithLogger(&gnetLogger{logger}))
+		if err != nil {
+			g.startErr = err
+			return
+		}
+		g.client = client
+		g.logger = logger
+	})
+	return g.startErr
 }
 
 // OnBoot implements [gnet.EventHandler].
@@ -133,6 +74,8 @@ func (g *gnetProxyEngine) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
 // OnShutdown implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnShutdown(eng gnet.Engine) {
 	g.logger.Info("gnet.OnShutdown", "eng", eng)
+
+	// TODO: cancel all sessions we own.
 }
 
 // OnTick fires immediately after the engine starts and will fire again
@@ -140,888 +83,395 @@ func (g *gnetProxyEngine) OnShutdown(eng gnet.Engine) {
 //
 // OnTick implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnTick() (delay time.Duration, action gnet.Action) {
-	g.ticks++
-	g.logger.Info("gnet.OnTick", "ticks", g.ticks)
+	g.tickCount++
+	g.logger.Info("gnet.OnTick", "ticks", g.tickCount)
 	return gnetTickDuration, gnet.None
 }
 
 // OnTraffic implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
-	handler, ok := c.Context().(*gnetProxyConn)
+	g.logger.Info("gnet.OnTraffic", "c", c)
+	handler, ok := c.Context().(gnetTrafficHandler)
 	if !ok {
 		g.logger.Error("gnet.OnTraffic: invalid context: closing conn", "gconn", c, "context", c.Context())
 		return gnet.Close
 	}
-	return handler.OnTraffic(c)
+	res := handler.OnTraffic(c)
+	g.logger.Info("gnet.OnTraffic: action", "c", c, "action", res)
+	return res
 }
 
 var _ gnet.EventHandler = (*gnetProxyEngine)(nil)
 
-type gnetProxyConn struct {
-	gconn  gnet.Conn
-	ring   *pgwire.RingBuffer
-	logger *slog.Logger
+var defaultGnetEngine = &gnetProxyEngine{}
+
+type gnetProxyRuntime struct {
+	// static
+	session   *Session
+	logger    *slog.Logger
+	engine    *gnetProxyEngine
+	runCtx    context.Context
+	msgParser flyweightParser
+
+	// state
+	mu      sync.Mutex
+	wg      sync.WaitGroup
+	client  *gnetProxyConn
+	backend *gnetProxyConn
+	loop    gnet.EventLoop
+	running bool
+	runErr  error
+	pos     pos
 }
 
+func NewGnetProxyRuntime(ctx context.Context, session *Session) (*gnetProxyRuntime, error) {
+	if err := defaultGnetEngine.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start gnet engine: %w", err)
+	}
+
+	runtime := &gnetProxyRuntime{
+		session: session,
+		logger:  session.Logger().WithGroup("runtime").With("type", "gnet"),
+		engine:  defaultGnetEngine,
+	}
+
+	return runtime, nil
+}
+
+// Run implements [Runtime].
+// Called on main thread.
+func (g *gnetProxyRuntime) Run(ctx context.Context) error {
+	if g.running {
+		return fmt.Errorf("already running")
+	}
+
+	synced := func() error {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+
+		if g.running {
+			return fmt.Errorf("already running")
+		}
+
+		if g.client == nil {
+			return fmt.Errorf("client not started")
+		}
+
+		g.running = true
+		g.runCtx = ctx
+
+		return nil
+	}
+
+	if err := synced(); err != nil {
+		return err
+	}
+	defer func() {
+		g.mu.Lock()
+		g.running = false
+		g.mu.Unlock()
+	}()
+
+	g.wg.Wait()
+	return g.runErr
+}
+
+// StartConn implements [Runtime].
+// Called on main thread.
+func (g *gnetProxyRuntime) StartConn(ctx context.Context, role ProxyRole, conn Conn) (err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	connPtr := g.conn(role)
+	if *connPtr != nil {
+		return fmt.Errorf("connection already exists")
+	}
+
+	netConn, err := conn.AcquireNetConn(ctx)
+	if err != nil {
+		return err
+	}
+
+	dupableConn, ok := netConn.(filedupConn)
+	if !ok {
+		return fmt.Errorf("Conn.AcquireNetConn returned a net.Conn without a File() method")
+	}
+
+	file, err := dupableConn.File()
+	if err != nil {
+		return fmt.Errorf("failed to get file from net.Conn: %w", err)
+	}
+	defer func() {
+		err = errors.Join(err, file.Close())
+	}()
+
+	fileConn, err := net.FileConn(file)
+	if err != nil {
+		return fmt.Errorf("failed to convert file to net.Conn: %w", err)
+	}
+	defer func() {
+		// gnet closes this for us, but just to be sure.
+		err = errors.Join(err, fileConn.Close())
+	}()
+
+	proxyConn := &gnetProxyConn{
+		role:    role,
+		runtime: g,
+		logger:  g.logger.With("role", role),
+	}
+	proxyConn.parser = pgwire.NewStreamBatchParser(proxyConn.handleBatch)
+
+	gconn, err := g.engine.client.EnrollContext(fileConn, proxyConn)
+	if err != nil {
+		return fmt.Errorf("gnet enroll: %w", err)
+	}
+
+	g.wg.Add(1)
+	proxyConn.onClose = g.wg.Done
+	proxyConn.gconn = gconn
+	*connPtr = proxyConn
+	return nil
+}
+
+// Stop implements [Runtime].
+func (g *gnetProxyRuntime) Stop(ctx context.Context) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.client != nil {
+		if err := g.client.Close(); err != nil {
+			return fmt.Errorf("failed to close client: %w", err)
+		}
+		g.client = nil
+	}
+	if g.backend != nil {
+		if err := g.backend.Close(); err != nil {
+			return fmt.Errorf("failed to close backend: %w", err)
+		}
+		g.backend = nil
+	}
+	return nil
+}
+
+// StopConn implements [Runtime].
+func (g *gnetProxyRuntime) StopConn(ctx context.Context, role ProxyRole) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	connPtr := g.conn(role)
+	if *connPtr == nil {
+		return fmt.Errorf("connection not started")
+	}
+	err := (*connPtr).Close()
+	if err != nil {
+		return fmt.Errorf("failed to close connection: %w", err)
+	}
+	*connPtr = nil
+	return nil
+}
+
+// WriteConn implements [Runtime].
+// Assumed to be only called from within the loop...?
+func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, queued *pgwire.WriteQueue) error {
+	connPtr := g.conn(role)
+	if *connPtr == nil {
+		return fmt.Errorf("connection not started")
+	}
+
+	// TODO: use writev
+	proxyConn := *connPtr
+	_, err := queued.WriteTo(proxyConn.gconn)
+	if err != nil {
+		return fmt.Errorf("gconn WriteTo: %w", err)
+	}
+	return nil
+}
+
+func (g *gnetProxyRuntime) handleBatch(p *gnetProxyConn, batch pgwire.StreamBatch) {
+	g.logger.Debug("gnetProxyRuntime.handleBatch", "p", p, "batch", batch)
+
+	for msg := range batch.Complete.All() {
+		if err := g.handleMessage(p, msg); err != nil {
+			return
+		}
+	}
+
+	if batch.Partial != nil {
+		if err := g.handleMessage(p, batch.Partial); err != nil {
+			return
+		}
+	}
+}
+
+func (g *gnetProxyRuntime) handleConnErr(p *gnetProxyConn, err error) error {
+	outErr := g.session.HandlePos(g.runCtx, nil, err)
+	if outErr != nil {
+		g.logger.Error("gnetProxyRuntime.handleConnErr: failed to handle connection error, shutting down", "error", outErr)
+		stopErr := g.Stop(g.runCtx)
+		if stopErr != nil {
+			g.logger.Error("gnetProxyRuntime.handleConnErr: failed to stop runtime!", "error", stopErr)
+		}
+		return errors.Join(outErr, stopErr)
+	}
+	return nil
+}
+
+func (g *gnetProxyRuntime) handleMessage(p *gnetProxyConn, msg ProxyMessage) error {
+	parser := &g.msgParser
+	parser.Prepare(p.role)
+	defer parser.Release()
+
+	pos := &g.pos
+	pos.reset(p.role, msg, g.session, g.runCtx, parser)
+	defer func() {
+		pos.reset(RoleProxy, nil, nil, nil, nil)
+	}()
+
+	err := g.session.HandlePos(g.runCtx, pos, nil)
+	if err != nil {
+		g.logger.Error("gnetProxyRuntime.handleMessage: failed to handle message, shutting down", "error", err)
+		stopErr := g.Stop(g.runCtx)
+		if stopErr != nil {
+			g.logger.Error("gnetProxyRuntime.handleMessage: failed to stop runtime!", "error", stopErr)
+		}
+		return errors.Join(err, stopErr)
+	}
+
+	return nil
+}
+
+func (g *gnetProxyRuntime) conn(role ProxyRole) **gnetProxyConn {
+	if role == RoleClient {
+		return &g.client
+	} else {
+		return &g.backend
+	}
+}
+
+var _ Runtime = (*gnetProxyRuntime)(nil)
+
+type gnetProxyConn struct {
+	// static
+	role    ProxyRole
+	runtime *gnetProxyRuntime
+	logger  *slog.Logger
+	onClose func()
+
+	// state
+	gconn  gnet.Conn
+	parser *pgwire.StreamBatchParser
+}
+
+type filedupConn interface {
+	File() (f *os.File, err error)
+}
+
+var _ filedupConn = (*net.TCPConn)(nil)
+var _ gnetTrafficHandler = (*gnetProxyConn)(nil)
+
 func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
+	// TODO: panic/recover?
+
 	if p.gconn != gconn {
 		p.logger.Error("gnetProxyConn.OnTraffic: invalid gconn", "gconn", gconn, "p.gconn", p.gconn)
+		return gnet.Close
+	}
+
+	if err := p.handleTraffic(gconn); err != nil {
+		p.logger.Error("gnetProxyConn.OnTraffic: failed to handle traffic", "error", err)
 		return gnet.Close
 	}
 
 	return gnet.None
 }
 
-// ParseState is the internal state machine state for message parsing.
-type ParseState int
-
-const (
-	ParseIdle ParseState = iota
-	ParseReadingSize
-	ParseReadingBody
-)
-
-func (s ParseState) String() string {
-	switch s {
-	case ParseIdle:
-		return "idle"
-	case ParseReadingSize:
-		return "reading_size"
-	case ParseReadingBody:
-		return "reading_body"
-	default:
-		return fmt.Sprintf("unknown(%d)", s)
+func (p *gnetProxyConn) OnClose(c gnet.Conn) (action gnet.Action) {
+	p.logger.Info("gnetProxyConn.OnClose", "c", c)
+	if err := p.Close(); err != nil {
+		p.logger.Error("gnetProxyConn.OnClose: failed to close", "error", err)
+		return gnet.Close
 	}
+	return gnet.None
 }
 
-type GnetStream struct {
-	bufmsgs StreamMessages
-	buf     OffsetSlice[byte]
-	parser  StreamParser
-	onBatch func(StreamSlice)
-
-	streamDestination io.Writer
+func (p *gnetProxyConn) Close() error {
+	err := p.gconn.Close()
+	if err != nil {
+		return fmt.Errorf("gconn Close: %w", err)
+	}
+	p.onClose()
+	return nil
 }
 
-const MaxMessageSize = 1024 * 1024 // 1MB
-
-func (s *GnetStream) OnTraffic(c gnet.Conn) error {
-	if s.bufmsgs.Len() > 0 {
-		return fmt.Errorf("gnetStream.OnTraffic: buffer messages not empty: %v", s.bufmsgs)
-	}
-
-	if !s.parser.Idle() {
-		return fmt.Errorf("gnetStream.OnTraffic: parser not idle: %v", s.parser)
-	}
-
+func (p *gnetProxyConn) handleTraffic(c gnet.Conn) error {
 	max := c.InboundBuffered()
 	buf, err := c.Next(max)
 	if err != nil {
-		fmt.Errorf("gnetStream.OnTraffic: failed to read next %v bytes: %w", max, err)
+		return fmt.Errorf("gnetStream.OnTraffic: failed to read next %v bytes: %w", max, err)
 	}
 
-	// Copy the parser to accept partial writes without updating state.
-	parser := s.parser
-	parser.OnMsg = s.bufmsgs.Push
-	written, err := parser.Write(buf)
-	defer func() {
-		_, discardErr := c.Discard(written)
-		if discardErr != nil {
-			panic(fmt.Errorf("discard error: %w", discardErr))
-		}
-	}()
+	// Parser will call p.handleBatch implicitly if necessary.
+	written, err := p.parser.Write(buf)
+	_, discardErr := c.Discard(written)
 
-	if err != nil {
-		return fmt.Errorf("parse error: %w", err)
+	if discardErr != nil {
+		return errors.Join(err, fmt.Errorf("gnetProxyConn.handleTraffic: failed to discard: %w", discardErr))
 	}
-
-	if parser.Idle() {
-		s.parser = parser
-	} else if s.bufmsgs.Len() > 0 {
-		// accept whole message prefix
-		written = int(s.bufmsgs.EndOffset() - s.bufmsgs.StartOffset())
-		s.parser.ResetToIdleAt(s.bufmsgs.EndOffset())
-	} else if parser.BytesNeeded() > MaxMessageSize {
-		// too big to buffer, switch to streaming.
-		panic("streaming not implemented")
-	} else {
-		written = 0
+	if errors.Is(err, pgwire.ErrIncompleteMessage) {
+		p.logger.Debug("gnetProxyConn.handleTraffic: incomplete message (waiting for more data)", "error", err)
 		return nil
-	}
-
-	streamSlice := StreamSlice{
-		StreamMessages: &s.bufmsgs,
-		Slice: OffsetSlice[byte]{
-			Offset: s.bufmsgs.StartOffset(),
-			B:      buf,
-		},
-	}
-
-	var lastHandledIdx int64 = -1
-	defer func() {
-		if lastHandledIdx != -1 {
-			s.bufmsgs.Truncate(lastHandledIdx + 1)
-		}
-	}()
-
-	for msg := range streamSlice.Whole() {
-		// TODO: process msg
-		_ = msg
-		lastHandledIdx = msg.Idx
+	} else if err != nil {
+		return fmt.Errorf("gnetProxyConn.handleTraffic: failed to write to parser: %w", err)
 	}
 
 	return nil
 }
 
-type OffsetSlice[T any] struct {
-	Offset int64
-	B      []T
+func (p *gnetProxyConn) handleBatch(batch pgwire.StreamBatch) {
+	// delegate
+	p.runtime.handleBatch(p, batch)
 }
 
-func NewOffsetSlice[T any](offset int64, bytes []T) OffsetSlice[T] {
-	return OffsetSlice[T]{
-		Offset: offset,
-		B:      bytes,
+type flyweightParser struct {
+	client *pgwire.ClientFlyweights
+	server *pgwire.ServerFlyweights
+}
+
+func (p *flyweightParser) Prepare(role ProxyRole) {
+	if role == RoleClient && p.client == nil {
+		p.client = clientFlyweightPool.Get().(*pgwire.ClientFlyweights)
+	} else if role == RoleServer && p.server == nil {
+		p.server = serverFlyweightPool.Get().(*pgwire.ServerFlyweights)
 	}
 }
 
-func (s OffsetSlice[T]) Len() int {
-	return len(s.B)
-}
-
-func (s OffsetSlice[T]) StartOffset() int64 {
-	return s.Offset
-}
-
-func (s OffsetSlice[T]) EndOffset() int64 {
-	return s.Offset + int64(len(s.B))
-}
-
-func (s OffsetSlice[T]) String() string {
-	return fmt.Sprintf("StreamSlice{[%d,%d) %d bytes}", s.Offset, s.EndOffset(), len(s.B))
-}
-
-func (s OffsetSlice[T]) Slice(start, end int64) OffsetSlice[T] {
-	return OffsetSlice[T]{
-		Offset: start,
-		B:      s.B[start-s.Offset : end-s.Offset],
-	}
-}
-
-type StreamSliceMsg struct {
-	Idx       int64
-	Offset    int64
-	Remaining int // bytes remaining if message is incomplete (0 if complete)
-	pgwire.SliceMsg
-}
-
-func NewStreamSliceMessage(idx int64, msg OffsetSlice[byte]) StreamSliceMsg {
-	return StreamSliceMsg{
-		Idx:    idx,
-		Offset: msg.Offset,
-		SliceMsg: pgwire.SliceMsg{
-			Slice: msg.B,
-		},
-	}
-}
-
-type StreamSlice struct {
-	*StreamMessages
-	Slice OffsetSlice[byte]
-}
-
-func (s *StreamSlice) Whole() iter.Seq[StreamSliceMsg] {
-	return func(yield func(StreamSliceMsg) bool) {
-		for idx := s.StartMsgIdx(); idx < s.EndMsgIdx(); idx++ {
-			if !yield(s.At(idx)) {
-				return
-			}
-		}
-	}
-}
-
-func (s *StreamSlice) At(idx int64) StreamSliceMsg {
-	startOffset, endOffset := s.MsgRange(idx)
-	dataEndOffset := s.Slice.EndOffset()
-	if endOffset > dataEndOffset {
-		slice := s.Slice.Slice(startOffset, dataEndOffset)
-		msg := NewStreamSliceMessage(idx, slice)
-		msg.Remaining = int(endOffset - dataEndOffset)
-		return msg
+func (p *flyweightParser) Parse(source pgwire.RawMessageSource) (pgwire.Message, error) {
+	if p.client != nil {
+		return p.client.Parse(source)
 	} else {
-		return NewStreamSliceMessage(idx, s.Slice.Slice(startOffset, endOffset))
+		return p.server.Parse(source)
 	}
 }
 
-// StreamMessages tracks message metadata in an abstract byte stream.
-// Messages are indexed by a logical message index starting at msgStartIdx.
-// Stores the byte offset where each message starts; the end of message N
-// is the start of message N+1 (or endOffset for the last message).
-type StreamMessages struct {
-	msgStartIdx int64 // logical index of first message in deque
-	endOffset   int64 // byte offset of end of last message (== stream position)
-
-	// offsets[i] is the byte offset where message (msgStartIdx + i) starts.
-	// len(offsets) == number of messages tracked.
-	offsets deque.Deque[int64]
-}
-
-func (p *StreamMessages) Copy() *StreamMessages {
-	result := *p
-	result.offsets = deque.Deque[int64]{}
-	result.offsets.Copy(p.offsets)
-	return &result
-}
-
-// Push adds a new message. The type is currently unused but available for future use.
-func (p *StreamMessages) Push(_ pgwire.MsgType, startOffset, endOffset int64) {
-	p.offsets.PushBack(startOffset)
-	p.endOffset = endOffset
-}
-
-// Shift removes and returns the first message's byte range.
-// Returns ok=false if no messages are available.
-func (p *StreamMessages) Shift() (startOffset, endOffset int64, ok bool) {
-	if p.offsets.Len() == 0 {
-		return 0, 0, false
+func (p *flyweightParser) Release() {
+	if p.client != nil {
+		clientFlyweightPool.Put(p.client)
+		p.client = nil
 	}
-	startOffset = p.offsets.PopFront()
-	p.msgStartIdx++
-	if p.offsets.Len() > 0 {
-		endOffset = p.offsets.Front()
-	} else {
-		endOffset = p.endOffset
-	}
-	return startOffset, endOffset, true
-}
-
-// ShiftN removes the first n messages.
-func (p *StreamMessages) ShiftN(n int) {
-	if n <= 0 {
-		return
-	}
-	if n >= p.offsets.Len() {
-		p.msgStartIdx += int64(p.offsets.Len())
-		p.offsets.Clear()
-		return
-	}
-	for i := 0; i < n; i++ {
-		p.offsets.PopFront()
-	}
-	p.msgStartIdx += int64(n)
-}
-
-// Truncate removes all messages before newStartMsgIdx.
-func (p *StreamMessages) Truncate(newStartMsgIdx int64) {
-	toRemove := int(newStartMsgIdx - p.msgStartIdx)
-	p.ShiftN(toRemove)
-}
-
-// Len returns the number of messages currently tracked.
-func (p *StreamMessages) Len() int {
-	return p.offsets.Len()
-}
-
-// StartMsgIdx returns the logical index of the first message.
-func (p *StreamMessages) StartMsgIdx() int64 {
-	return p.msgStartIdx
-}
-
-// EndMsgIdx returns the logical index one past the last message.
-func (p *StreamMessages) EndMsgIdx() int64 {
-	return p.msgStartIdx + int64(p.offsets.Len())
-}
-
-func (p *StreamMessages) StartOffset() int64 {
-	return p.offsets.Front()
-}
-
-func (p *StreamMessages) EndOffset() int64 {
-	return p.endOffset
-}
-
-// Offset returns the start byte offset of the message at msgIdx.
-// Panics if msgIdx is out of range.
-func (p *StreamMessages) Offset(msgIdx int64) int64 {
-	idx := int(msgIdx - p.msgStartIdx)
-	return p.offsets.At(idx)
-}
-
-// Size returns the byte size of the message at msgIdx.
-// Panics if msgIdx is out of range.
-func (p *StreamMessages) Size(msgIdx int64) int64 {
-	start, end := p.MsgRange(msgIdx)
-	return end - start
-}
-
-// MsgRange returns the byte range [start, end) of the message at msgIdx.
-// Panics if msgIdx is out of range.
-func (p *StreamMessages) MsgRange(msgIdx int64) (startOffset, endOffset int64) {
-	idx := int(msgIdx - p.msgStartIdx)
-	startOffset = p.offsets.At(idx)
-	if idx+1 < p.offsets.Len() {
-		endOffset = p.offsets.At(idx + 1)
-	} else {
-		endOffset = p.endOffset
-	}
-	return
-}
-
-// Range returns the byte range [start, end) spanning messages [startMsg, endMsg).
-// Panics if indices are out of range.
-func (p *StreamMessages) Range(startMsg, endMsg int64) (startOffset, endOffset int64) {
-	startOffset = p.Offset(startMsg)
-	if endMsg >= p.EndMsgIdx() {
-		endOffset = p.endOffset
-	} else {
-		endOffset = p.Offset(endMsg)
-	}
-	return
-}
-
-type IncompleteStreamSliceMsg struct {
-	Remaining int
-	StreamSliceMsg
-}
-
-func (s *IncompleteStreamSliceMsg) MessageLen() int {
-	return s.Remaining + len(s.SliceMsg.Slice)
-}
-
-type OnBatchCallback func(complete StreamSlice, partial IncompleteStreamSliceMsg)
-
-// StreamBatchParser parses a stream of PostgreSQL wire protocol messages.
-// It only accepts writes that produce a message batch (i.e. complete messages).
-//
-// See the [Write] method for details.
-type StreamBatchParser struct {
-	// Size of messages that must be streamed because they are too large to keep
-	// in memory.
-	MaxParseMessageSize int
-	OnBatch             OnBatchCallback
-	Parser              StreamParser
-	// Must not be aliased after the Write method returns.
-	complete StreamSlice
-}
-
-func NewStreamBatchParser(onBatch OnBatchCallback) *StreamBatchParser {
-	parser := &StreamBatchParser{
-		OnBatch:  onBatch,
-		complete: StreamSlice{StreamMessages: &StreamMessages{}},
-	}
-	parser.Parser.OnMsg = parser.complete.Push
-	return parser
-}
-
-// Write segments up to len(b) bytes into a message batch, which is passed to the [OnBatch] callback.
-// A batch is >0 complete messages, plus 0 or 1 incomplete message with size > MaxParseMessageSize.
-// The returned written bytes are equal to the number of bytes in the batch.
-//
-// if len(b) !== written:
-// - an underlying parse error occured
-// - b[written:] contains an incomplete message header, so no pending message size can be computed.
-// - b[written:] contains a partial message with known size, but the size < MaxParseMessageSize.
-func (p *StreamBatchParser) Write(b []byte) (int, error) {
-	if len(b) == 0 {
-		return 0, nil
-	}
-
-	// preconditions
-	if p.complete.Slice.Len() > 0 {
-		return 0, fmt.Errorf("stream batch parser: complete slice not empty")
-	}
-	if p.complete.Len() > 0 {
-		return 0, fmt.Errorf("stream batch parser: complete batch metadata not empty")
-	}
-
-	skipFirstMessage := false
-	switch p.Parser.State() {
-	case ParseReadingBody:
-		// We are part-way through reading a message.
-		// We only enter this state when the message is >MaxParseMessageSize.
-		// This read must advance:
-		// - If it completes >0 messages, then the first completed message was the streaming message. It must be ignored and not double-reported.
-		// - If it completes 0 messages, then we accept the write to make progress, and emit no batch.
-		skipFirstMessage = true
-	case ParseIdle:
-		// We are idle.
-		// Produce a batch if either:
-		// - b contains at least one complete message
-		// - b contains a partial message that is >MaxParseMessageSize
-		skipFirstMessage = false
-	case ParseReadingSize:
-		return 0, fmt.Errorf("stream batch parser: parser in reading size state (must be idle or reading body)")
-	default:
-		panic("unexpected pgproxy.ParseState")
-	}
-
-	// For the duraction of Write, p.Slice aliases the data in b.
-	// This is only necessary if we emit a batch.
-	p.complete.Slice = OffsetSlice[byte]{Offset: p.Parser.curIdx, B: b}
-	defer func() {
-		p.complete.Slice = OffsetSlice[byte]{}
-	}()
-
-	// At the end of Write, we must have handled any messages.
-	defer func() {
-		if p.complete.Len() > 0 {
-			p.complete.Truncate(p.complete.EndMsgIdx() + 1)
-		}
-	}()
-
-	written, err := p.Parser.WriteComplete(b)
-	remaining := b[written:]
-
-	// if the suffix indicatges a message of size >MaxParseMessageSize, then we must stream it.
-	var incompleteMsg IncompleteStreamSliceMsg
-	if _, startOffset, endOffset, ok := p.Parser.PeekPendingMessage(remaining); ok {
-		len := int(endOffset - startOffset)
-		// It's big.
-		if len > p.MaxParseMessageSize {
-			// Write is guaranteed to succeed by PeekPendingMessage ok.
-			extraWritten, extraErr := p.Parser.Write(remaining)
-			written += extraWritten
-			if extraErr != nil {
-				panic(fmt.Errorf("stream batch parser: large message: unexpected error writing partial message: %w", extraErr))
-			}
-			if p.Parser.State() != ParseReadingBody {
-				panic(fmt.Errorf("stream batch parser: large message: parser did not enter reading body state)"))
-			}
-
-			// We must emit a batch containing any complete messages within the written bytes.
-			incompleteMsg = IncompleteStreamSliceMsg{
-				Remaining: int(endOffset - p.Parser.curIdx),
-				StreamSliceMsg: StreamSliceMsg{
-					Idx:      p.complete.EndMsgIdx(),
-					Offset:   startOffset,
-					SliceMsg: pgwire.SliceMsg{Slice: remaining},
-				},
-			}
-		}
-	}
-
-	if skipFirstMessage {
-		if p.complete.Len() > 0 {
-			// Ignore first message.
-			p.complete.Shift()
-		} else if incompleteMsg.Remaining > 0 {
-			// the partial message is the "first" message
-			// it's currently streaming
-			incompleteMsg = IncompleteStreamSliceMsg{}
-		}
-	}
-
-	// Emit batch, if any.
-	if p.complete.Len() > 0 || incompleteMsg.Remaining > 0 {
-		p.OnBatch(p.complete, incompleteMsg)
-	}
-
-	return written, err
-}
-
-func (p *StreamBatchParser) Copy(onBatch OnBatchCallback) *StreamBatchParser {
-	result := *p
-	result.OnBatch = onBatch
-	result.complete.Slice = OffsetSlice[byte]{}
-	result.complete.StreamMessages = result.complete.StreamMessages.Copy()
-	result.Parser.OnMsg = result.complete.Push
-	return &result
-}
-
-// StreamParser is a PostgreSQL wire protocol message boundary parser for normal mode.
-// It parses messages with format: type (1 byte) + length (4 bytes) + body.
-// Implements io.Writer and calls OnMsg for each complete message.
-//
-// The struct is kept compact by computing derived values from curIdx and msgStart:
-//   - headerN = min(5, curIdx - msgStart)
-//   - bodyLen = lengthField - 4 (when header is complete)
-//   - bodyRead = curIdx - msgStart - 5 (when in body)
-//   - state = derived from (curIdx - msgStart)
-//
-// The zero value is an idle parser with no OnMsg callback.
-type StreamParser struct {
-	// Called when a complete message is parsed.
-	// msgType is the message type byte.
-	// startIdx and endIdx are byte offsets in the stream.
-	OnMsg func(msgType pgwire.MsgType, startIdx, endIdx int64)
-
-	curIdx      int64   // current position in stream (total bytes processed)
-	msgStart    int64   // start of current message (== curIdx when idle)
-	header      [5]byte // type (1) + length (4)
-	lengthField int64   // parsed value from header[1:5] (includes itself, set when header complete)
-}
-
-func NewStreamParser(onComplete func(pgwire.MsgType, int64, int64)) *StreamParser {
-	return &StreamParser{OnMsg: onComplete}
-}
-
-func (p *StreamParser) ResetToIdleAt(idx int64) {
-	p.curIdx = idx
-	p.msgStart = idx
-}
-
-// Idle returns true if no message is currently being parsed.
-func (p *StreamParser) Idle() bool {
-	return p.curIdx == p.msgStart
-}
-
-// offset returns the number of bytes into the current message.
-func (p *StreamParser) offset() int64 {
-	return p.curIdx - p.msgStart
-}
-
-// headerN returns how many header bytes have been accumulated (0-5).
-func (p *StreamParser) headerN() int {
-	return int(min(5, p.offset()))
-}
-
-// bodyLen returns the body length (lengthField - 4).
-// Only valid when headerN() == 5 and lengthField has been set.
-func (p *StreamParser) bodyLen() int64 {
-	return p.lengthField - 4
-}
-
-// bodyRead returns how many body bytes have been consumed.
-// Only valid when offset() >= 5.
-func (p *StreamParser) bodyRead() int64 {
-	return p.offset() - 5
-}
-
-// State returns the current parse state.
-func (p *StreamParser) State() ParseState {
-	offset := p.offset()
-	if offset == 0 {
-		return ParseIdle
-	}
-	if offset < 5 {
-		return ParseReadingSize
-	}
-	return ParseReadingBody
-}
-
-// PendingMessage returns the message currently being written
-// or 0 if idle or indeterminate.
-func (p *StreamParser) PendingMessage() (msgType pgwire.MsgType, startOffset, endOffset int64, ok bool) {
-	if p.State() != ParseReadingBody {
-		return 0, 0, 0, false
-	}
-	msgType = pgwire.MsgType(p.header[0])
-	startOffset = p.msgStart
-	endOffset = startOffset + 1 + p.lengthField
-	ok = true
-	return
-}
-
-// Peeker returns a clone of this parser with no OnMsg callback.
-func (p *StreamParser) Peeker() StreamParser {
-	result := *p
-	result.OnMsg = nil
-	return result
-}
-
-func (p *StreamParser) PeekPendingMessage(b []byte) (msgType pgwire.MsgType, startOffset, endOffset int64, ok bool) {
-	if len(b) == 0 {
-		return 0, 0, 0, false
-	}
-
-	peeker := p.Peeker()
-	_, err := peeker.Write(b)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-
-	return peeker.PendingMessage()
-}
-
-// BytesNeeded returns the number of bytes needed to complete the current message.
-// Returns 0 if idle (no message in progress).
-func (p *StreamParser) BytesNeeded() int {
-	offset := p.offset()
-	if offset == 0 {
-		return 0 // idle
-	}
-	if offset < 5 {
-		return 5 - int(offset) // need rest of header
-	}
-	// In body: need bodyLen - bodyRead
-	return int(p.bodyLen() - p.bodyRead())
-}
-
-var ErrIncompleteMessage = errors.New("incomplete message")
-
-// WriteComplete writes up to the last complete message in b to the parser.
-// Writes of partial messages are rejected by returning [ErrIncompleteMessage].
-func (p *StreamParser) WriteComplete(b []byte) (int, error) {
-	provisional := *p
-	provisionallyWritten, err := provisional.Write(b)
-	written := int(provisional.msgStart - p.curIdx)
-	if written <= 0 {
-		return 0, errors.Join(err, ErrIncompleteMessage)
-	}
-
-	p.ResetToIdleAt(provisional.msgStart)
-	if err != nil {
-		return written, err
-	} else if provisionallyWritten != written {
-		return written, ErrIncompleteMessage
-	} else {
-		return written, nil
+	if p.server != nil {
+		serverFlyweightPool.Put(p.server)
+		p.server = nil
 	}
 }
 
-// Write implements io.Writer. Parses PostgreSQL messages (type + length + body)
-// and calls OnMsg for each complete message found.
-func (p *StreamParser) Write(b []byte) (int, error) {
-	if len(b) == 0 {
-		return 0, nil
-	}
-
-	written := 0
-
-	// Fast path: process complete messages without state transitions
-	for p.Idle() && len(b) >= 5 {
-		length := int64(binary.BigEndian.Uint32(b[1:5]))
-		if length < 4 {
-			return written, fmt.Errorf("invalid message length: %d", length)
-		}
-		msgSize := 1 + length
-		if int64(len(b)) < msgSize {
-			break // incomplete message, use slow path
-		}
-		// Complete message available
-		msgType := pgwire.MsgType(b[0])
-		startIdx := p.curIdx
-		p.curIdx += msgSize
-		p.msgStart = p.curIdx // stay idle
-		if p.OnMsg != nil {
-			p.OnMsg(msgType, startIdx, p.curIdx)
-		}
-		b = b[msgSize:]
-		written += int(msgSize)
-	}
-
-	// Slow path: state machine for partial messages
-	for len(b) > 0 {
-		switch p.State() {
-		case ParseIdle, ParseReadingSize:
-			// Accumulate header bytes
-			headerN := p.headerN()
-			need := 5 - headerN
-			have := len(b)
-			n := min(need, have)
-			copy(p.header[headerN:], b[:n])
-			p.curIdx += int64(n)
-			written += n
-			b = b[n:]
-
-			// Check if header is complete
-			if p.headerN() < 5 {
-				continue
-			}
-
-			// Parse and validate length field
-			p.lengthField = int64(binary.BigEndian.Uint32(p.header[1:5]))
-			if p.lengthField < 4 {
-				return written, fmt.Errorf("invalid message length: %d", p.lengthField)
-			}
-
-			// Check for zero-length body
-			if p.bodyLen() == 0 {
-				p.finishMessage()
-				continue
-			}
-			// Fall through to body reading on next iteration
-
-		case ParseReadingBody:
-			need := p.bodyLen() - p.bodyRead()
-			n := min(need, int64(len(b)))
-			p.curIdx += n
-			written += int(n)
-			b = b[n:]
-
-			if p.bodyRead() >= p.bodyLen() {
-				p.finishMessage()
-			}
-
-		default:
-			return written, fmt.Errorf("invalid state: %v", p.State())
-		}
-	}
-	return written, nil
+var clientFlyweightPool = sync.Pool{
+	New: func() any {
+		return &pgwire.ClientFlyweights{}
+	},
 }
 
-// finishMessage completes a message and calls the callback.
-func (p *StreamParser) finishMessage() {
-	msgType := pgwire.MsgType(p.header[0])
-	if p.OnMsg != nil {
-		p.OnMsg(msgType, p.msgStart, p.curIdx)
-	}
-	p.msgStart = p.curIdx // reset to idle
-}
-
-// FrontendStreamParser parses client->server messages.
-// Handles startup messages (length + body, no type byte) then normal messages.
-type FrontendStreamParser struct {
-	StreamParser
-	startup bool // true while in startup phase
-}
-
-// NewFrontendStream creates a parser for client->server messages.
-func NewFrontendStream(onComplete func(pgwire.MsgType, int64, int64)) *FrontendStreamParser {
-	return &FrontendStreamParser{
-		StreamParser: StreamParser{OnMsg: onComplete},
-		startup:      true,
-	}
-}
-
-// SetNormalPhase transitions to normal message parsing.
-func (p *FrontendStreamParser) SetNormalPhase() {
-	p.startup = false
-}
-
-// Write implements io.Writer.
-func (p *FrontendStreamParser) Write(b []byte) (int, error) {
-	if len(b) == 0 {
-		return 0, nil
-	}
-	if p.startup {
-		return p.writeStartup(b)
-	}
-	return p.StreamParser.Write(b)
-}
-
-// startupHeaderN returns how many startup header bytes have been accumulated (0-4).
-// Startup messages have only a 4-byte length header (no type byte).
-func (p *FrontendStreamParser) startupHeaderN() int {
-	return int(min(4, p.offset()))
-}
-
-// startupBodyLen returns the body length for a startup message (lengthField - 4).
-// Only valid when startupHeaderN() == 4 and lengthField has been set.
-func (p *FrontendStreamParser) startupBodyLen() int64 {
-	return p.lengthField - 4
-}
-
-// startupBodyRead returns how many body bytes have been consumed for a startup message.
-// Only valid when offset() >= 4.
-func (p *FrontendStreamParser) startupBodyRead() int64 {
-	return p.offset() - 4
-}
-
-// writeStartup handles startup messages: length (4 bytes) + body (no type byte).
-func (p *FrontendStreamParser) writeStartup(b []byte) (int, error) {
-	written := 0
-
-	for len(b) > 0 {
-		offset := p.offset()
-
-		if offset < 4 {
-			// Accumulate header bytes (4-byte length only)
-			headerN := int(offset)
-			need := 4 - headerN
-			n := min(need, len(b))
-			copy(p.header[headerN:], b[:n])
-			p.curIdx += int64(n)
-			written += n
-			b = b[n:]
-
-			// Check if header is complete
-			if p.startupHeaderN() < 4 {
-				continue
-			}
-
-			// Parse and validate length field
-			p.lengthField = int64(binary.BigEndian.Uint32(p.header[0:4]))
-			if p.lengthField < 4 {
-				return written, fmt.Errorf("invalid startup message length: %d", p.lengthField)
-			}
-
-			// Check for zero-length body
-			if p.startupBodyLen() == 0 {
-				p.finishStartupMessage()
-				continue
-			}
-			// Fall through to body reading on next iteration
-		} else {
-			// Reading body
-			need := p.startupBodyLen() - p.startupBodyRead()
-			n := min(need, int64(len(b)))
-			p.curIdx += n
-			written += int(n)
-			b = b[n:]
-
-			if p.startupBodyRead() >= p.startupBodyLen() {
-				p.finishStartupMessage()
-			}
-		}
-	}
-	return written, nil
-}
-
-// finishStartupMessage completes a startup message.
-func (p *FrontendStreamParser) finishStartupMessage() {
-	if p.OnMsg != nil {
-		p.OnMsg(pgwire.MsgStartup, p.msgStart, p.curIdx)
-	}
-	p.msgStart = p.curIdx // reset to idle
-}
-
-// BackendStreamParser parses server->client messages.
-// Handles SSL response ('S'/'N' single byte) then normal messages.
-type BackendStreamParser struct {
-	StreamParser
-	startup bool // true while in startup phase
-}
-
-// NewBackendStream creates a parser for server->client messages.
-func NewBackendStream(onComplete func(pgwire.MsgType, int64, int64)) *BackendStreamParser {
-	return &BackendStreamParser{
-		StreamParser: StreamParser{OnMsg: onComplete},
-		startup:      true,
-	}
-}
-
-// SetNormalPhase transitions to normal message parsing.
-func (p *BackendStreamParser) SetNormalPhase() {
-	p.startup = false
-}
-
-// Write implements io.Writer.
-func (p *BackendStreamParser) Write(b []byte) (int, error) {
-	if len(b) == 0 {
-		return 0, nil
-	}
-	if p.startup {
-		return p.writeStartup(b)
-	}
-	return p.StreamParser.Write(b)
-}
-
-// writeStartup handles SSL response detection.
-func (p *BackendStreamParser) writeStartup(b []byte) (int, error) {
-	written := 0
-
-	// Check for SSL response (single byte 'S' or 'N')
-	if p.Idle() {
-		ch := b[0]
-		if ch == 'S' || ch == 'N' {
-			startIdx := p.curIdx
-			p.curIdx++
-			p.msgStart = p.curIdx // stay idle
-			if p.OnMsg != nil {
-				p.OnMsg(pgwire.MsgType(ch), startIdx, p.curIdx)
-			}
-			b = b[1:]
-			written++
-			if len(b) == 0 {
-				return written, nil
-			}
-		}
-		// Not an SSL response - switch to normal phase
-		p.startup = false
-	}
-
-	// Continue with normal message parsing
-	n, err := p.StreamParser.Write(b)
-	return written + n, err
+var serverFlyweightPool = sync.Pool{
+	New: func() any {
+		return &pgwire.ServerFlyweights{}
+	},
 }

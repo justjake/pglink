@@ -17,10 +17,12 @@ type ServerFlowReducers[T any] = pgwire.ServerHandlers[MessageFlowState[T], Mess
 type ClientFlowReducers[T any] = pgwire.ClientHandlers[MessageFlowState[T], MessageFlowState[T]]
 
 type FlowTracker[T any] interface {
+	State() FlowState[T]
 	Flow() (T, bool)
 	Active() bool
 	TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error)
 	TrackEffect(msg pgwire.Message) pure.Effect
+	Reset()
 	ResetEffect() pure.Effect
 }
 
@@ -69,6 +71,10 @@ func NewFlowTracker[T any](onComplete FlowCompleteHandler[T], inactiveState Flow
 	}
 }
 
+func (t *flowTracker[T]) State() FlowState[T] {
+	return t.state.State
+}
+
 func (t *flowTracker[T]) Flow() (T, bool) {
 	return t.state.State.Flow, t.state.State.Active
 }
@@ -92,7 +98,7 @@ func (t *flowTracker[T]) TrackEffect(msg pgwire.Message) pure.Effect {
 func (t *flowTracker[T]) ResetEffect() pure.Effect {
 	return pure.DoNamedCleanup(fmt.Sprintf("Reset(%T)", t.state.State.Flow), func(ctx context.Context) (cleanup pure.Effect, err error) {
 		cleanup = t.state.RevertEffect()
-		t.reset()
+		t.Reset()
 		return cleanup, nil
 	})
 }
@@ -109,18 +115,18 @@ func (t *flowTracker[T]) updateNow(ctx context.Context, msg pgwire.Message) (boo
 		return changed, err
 	}
 
-	if wasActive && !state.Active {
+	if wasActive && !state.Active && t.onComplete != nil {
 		err = t.onComplete(ctx, state)
 	}
 
 	if t.state.Reducer == nil {
-		t.reset()
+		t.Reset()
 	}
 
 	return changed, err
 }
 
-func (t *flowTracker[T]) reset() {
+func (t *flowTracker[T]) Reset() {
 	t.state.Reducer = t.inactiveState
 	t.state.State = FlowState[T]{
 		Active: false,
