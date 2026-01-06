@@ -14,7 +14,7 @@ import (
 	"github.com/panjf2000/gnet/v2"
 )
 
-const gnetTickDuration = 1 * time.Second
+const gnetTickDuration = 10 * time.Second
 const gnetBufferMaxSize = 64 * 1024              // 64KiB
 const gnetMaxMessageSize = gnetBufferMaxSize / 2 // TODO
 
@@ -48,6 +48,7 @@ func (g *gnetProxyEngine) Start() error {
 		}
 		g.client = client
 		g.logger = logger
+		client.Start()
 	})
 	return g.startErr
 }
@@ -61,13 +62,13 @@ func (g *gnetProxyEngine) OnBoot(eng gnet.Engine) (action gnet.Action) {
 
 // OnClose implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnClose(c gnet.Conn, err error) (action gnet.Action) {
-	g.logger.Info("gnet.OnClose", "c", c, "err", err)
+	g.logger.Info("gnet.OnClose", "c.fd", c.Fd(), "c.remoteAddr", c.RemoteAddr(), "err", err)
 	return gnet.None
 }
 
 // OnOpen implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
-	g.logger.Info("gnet.OnOpen", "c", c)
+	g.logger.Info("gnet.OnOpen", "c.fd", c.Fd(), "c.remoteAddr", c.RemoteAddr())
 	return nil, gnet.None
 }
 
@@ -90,14 +91,14 @@ func (g *gnetProxyEngine) OnTick() (delay time.Duration, action gnet.Action) {
 
 // OnTraffic implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
-	g.logger.Info("gnet.OnTraffic", "c", c)
+	g.logger.Info("gnet.OnTraffic", "c.fd", c.Fd(), "c.remoteAddr", c.RemoteAddr())
 	handler, ok := c.Context().(gnetTrafficHandler)
 	if !ok {
-		g.logger.Error("gnet.OnTraffic: invalid context: closing conn", "gconn", c, "context", c.Context())
+		g.logger.Error("gnet.OnTraffic: invalid context: closing conn", "context", c.Context())
 		return gnet.Close
 	}
 	res := handler.OnTraffic(c)
-	g.logger.Info("gnet.OnTraffic: action", "c", c, "action", res)
+	g.logger.Info("gnet.OnTraffic: action", "action", res)
 	return res
 }
 
@@ -124,7 +125,7 @@ type gnetProxyRuntime struct {
 	pos     pos
 }
 
-func NewGnetProxyRuntime(ctx context.Context, session *Session) (*gnetProxyRuntime, error) {
+func NewGnetProxyRuntime(ctx context.Context, session *Session) (Runtime, error) {
 	if err := defaultGnetEngine.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start gnet engine: %w", err)
 	}
@@ -194,7 +195,7 @@ func (g *gnetProxyRuntime) StartConn(ctx context.Context, role ProxyRole, conn C
 
 	dupableConn, ok := netConn.(filedupConn)
 	if !ok {
-		return fmt.Errorf("Conn.AcquireNetConn returned a net.Conn without a File() method")
+		return fmt.Errorf("Conn.AcquireNetConn returned a net.Conn without a File() method: %T", netConn)
 	}
 
 	file, err := dupableConn.File()
@@ -210,8 +211,9 @@ func (g *gnetProxyRuntime) StartConn(ctx context.Context, role ProxyRole, conn C
 		return fmt.Errorf("failed to convert file to net.Conn: %w", err)
 	}
 	defer func() {
-		// gnet closes this for us, but just to be sure.
-		err = errors.Join(err, fileConn.Close())
+		if !ok {
+			err = errors.Join(err, fileConn.Close())
+		}
 	}()
 
 	proxyConn := &gnetProxyConn{
@@ -225,6 +227,7 @@ func (g *gnetProxyRuntime) StartConn(ctx context.Context, role ProxyRole, conn C
 	if err != nil {
 		return fmt.Errorf("gnet enroll: %w", err)
 	}
+	ok = true
 
 	g.wg.Add(1)
 	proxyConn.onClose = g.wg.Done
@@ -373,7 +376,7 @@ func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	// TODO: panic/recover?
 
 	if p.gconn != gconn {
-		p.logger.Error("gnetProxyConn.OnTraffic: invalid gconn", "gconn", gconn, "p.gconn", p.gconn)
+		p.logger.Error("gnetProxyConn.OnTraffic: invalid gconn", "gconn", fmt.Sprintf("%p", gconn), "p.gconn", fmt.Sprintf("%p", p.gconn))
 		return gnet.Close
 	}
 
@@ -430,48 +433,4 @@ func (p *gnetProxyConn) handleTraffic(c gnet.Conn) error {
 func (p *gnetProxyConn) handleBatch(batch pgwire.StreamBatch) {
 	// delegate
 	p.runtime.handleBatch(p, batch)
-}
-
-type flyweightParser struct {
-	client *pgwire.ClientFlyweights
-	server *pgwire.ServerFlyweights
-}
-
-func (p *flyweightParser) Prepare(role ProxyRole) {
-	if role == RoleClient && p.client == nil {
-		p.client = clientFlyweightPool.Get().(*pgwire.ClientFlyweights)
-	} else if role == RoleServer && p.server == nil {
-		p.server = serverFlyweightPool.Get().(*pgwire.ServerFlyweights)
-	}
-}
-
-func (p *flyweightParser) Parse(source pgwire.RawMessageSource) (pgwire.Message, error) {
-	if p.client != nil {
-		return p.client.Parse(source)
-	} else {
-		return p.server.Parse(source)
-	}
-}
-
-func (p *flyweightParser) Release() {
-	if p.client != nil {
-		clientFlyweightPool.Put(p.client)
-		p.client = nil
-	}
-	if p.server != nil {
-		serverFlyweightPool.Put(p.server)
-		p.server = nil
-	}
-}
-
-var clientFlyweightPool = sync.Pool{
-	New: func() any {
-		return &pgwire.ClientFlyweights{}
-	},
-}
-
-var serverFlyweightPool = sync.Pool{
-	New: func() any {
-		return &pgwire.ServerFlyweights{}
-	},
 }

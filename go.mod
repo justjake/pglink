@@ -18,7 +18,9 @@ require (
 	github.com/jackc/pgproto3/v2 v2.1.1
 	github.com/jackc/pgx/v5 v5.7.7-0.20251214134032-4c1308c14b2e
 	github.com/jackc/puddle/v2 v2.2.2
+	github.com/lmittmann/tint v1.1.2
 	github.com/lucasb-eyer/go-colorful v1.2.0
+	github.com/panjf2000/gnet/v2 v2.9.7
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/prometheus v0.308.1
@@ -83,7 +85,6 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/panjf2000/ants/v2 v2.11.3 // indirect
-	github.com/panjf2000/gnet/v2 v2.9.7 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/common v0.67.4 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect

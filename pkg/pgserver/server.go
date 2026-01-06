@@ -500,6 +500,8 @@ func (c *conn) serve(ctx context.Context) {
 			buf := make([]byte, size)
 			buf = buf[:runtime.Stack(buf, false)]
 			c.logger.Error("panic serving connection", "error", err, "stack", string(buf))
+			fmt.Println(err)
+			fmt.Println(string(buf))
 		}
 		closeErr := c.raw.Close()
 		if closeErr != nil && !isAlreadyClosedError(closeErr) {

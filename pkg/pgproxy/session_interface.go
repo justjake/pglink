@@ -88,7 +88,7 @@ type SessionConfig struct {
 
 	// NewRuntime creates the [Runtime] for the session.
 	// If not set, the default runtime is used.
-	NewRuntime func(ctx context.Context, session *Session) (Runtime, error)
+	NewRuntime RuntimeFactory
 
 	// HealthCheck is called periodically while idle. Use to implement idle timeouts.
 	// If not set, no health check is performed, and HealthCheckPeriod is ignored.
@@ -100,6 +100,9 @@ type SessionConfig struct {
 	// If not set, defaults to slog.Default().
 	Logger *slog.Logger
 }
+
+// RuntimeFactory is the type for functions that create a [Runtime] for a [Session].
+type RuntimeFactory func(ctx context.Context, session *Session) (Runtime, error)
 
 // Runtime handles scheduling work for a proxy session and doing low-level I/O on connections.
 // Runtime is intended to be implemented by pgproxy internally.

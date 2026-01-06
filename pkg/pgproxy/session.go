@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log/slog"
 	"slices"
@@ -116,7 +117,7 @@ func (s *Session) HandlePos(ctx context.Context, pos Pos, posErr error) error {
 	trackCtx, trackErr := s.trackPos(ctx, pos.From(), pos.unwrap())
 	if trackErr != nil {
 		pos.Logger().Error("failed to track message before handler", "err", trackErr)
-		if handlerErr := s.HandlePos(ctx, pos, trackErr); handlerErr != nil {
+		if handlerErr := s.cfg.Handler(ctx, s, pos, trackErr); handlerErr != nil {
 			return handlerErr
 		}
 	}
@@ -136,7 +137,9 @@ func (s *Session) HandlePos(ctx context.Context, pos Pos, posErr error) error {
 	}
 
 	if handleErr = s.cfg.Handler(ctx, s, pos, posErr); handleErr != nil {
-		pos.Logger().Error("handler returned error", "err", handleErr)
+		if !errors.Is(handleErr, io.EOF) {
+			pos.Logger().Error("handler returned error", "err", handleErr)
+		}
 		return handleErr
 	}
 
@@ -345,7 +348,7 @@ func (s *Session) QueueSendPos(ctx context.Context, pos Pos) error {
 	if _, err := s.trackPos(ctx, to, unwrapped); err != nil {
 		return err
 	}
-	return s.writeQueue(to).WriteRingMsg(unwrapped.RingMsg)
+	return s.writeQueue(to).WriteRawMsg(pos)
 }
 
 // TerminateClient sends terminationMessage to the client, flushes pending writes, and terminates the client connection.

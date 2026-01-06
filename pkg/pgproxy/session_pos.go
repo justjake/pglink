@@ -115,11 +115,12 @@ type pos struct {
 
 // var _ Pos = (*pos)(nil)
 
-func (p *pos) reset(from ProxyRole, msg ProxyMessage, session *Session, ctx context.Context) {
+func (p *pos) reset(from ProxyRole, msg ProxyMessage, session *Session, ctx context.Context, parser messageParser) {
 	p.session = session
 	p.ProxyMessage = msg
 	p.from = from
 	p.ctx = ctx
+	p.parser = parser
 	if session != nil {
 		p.baseLogger = session.Logger()
 	} else {
@@ -370,7 +371,7 @@ func (p *pos) Ctx() context.Context {
 // String implements [Pos].
 // Subtle: this method shadows the method (RingMsg).String of pos.RingMsg.
 func (p *pos) String() string {
-	return fmt.Sprintf("Pos{%v %v}", p.From(), &p.Cursor.RingMsg)
+	return fmt.Sprintf("Pos{%v %v}", p.From(), &p.ProxyMessage)
 }
 
 // unwrap implements [Pos].

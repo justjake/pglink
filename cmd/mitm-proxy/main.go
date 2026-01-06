@@ -14,16 +14,15 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
-	"os/signal"
 	"runtime"
 	"strings"
-	"syscall"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/justjake/pglink/pkg/pgproxy"
 	"github.com/justjake/pglink/pkg/pgserver"
 	"github.com/justjake/pglink/pkg/pgwire"
+	"github.com/lmittmann/tint"
 )
 
 func main() {
@@ -65,7 +64,11 @@ func main() {
 	default:
 		slogLevel = slog.LevelInfo
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel}))
+	handler := tint.NewHandler(os.Stdout, &tint.Options{
+		Level:     slogLevel,
+		AddSource: true,
+	})
+	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
 	// Enable stats collection when debug logging or -stats flag is enabled
@@ -100,19 +103,19 @@ func main() {
 	defer cancel()
 
 	// Signal handling
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		sig := <-sigChan
-		logger.Info("received shutdown signal", "signal", sig)
+	// sigChan := make(chan os.Signal, 1)
+	// signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// go func() {
+	// 	sig := <-sigChan
+	// 	logger.Info("received shutdown signal", "signal", sig)
 
-		// Log stats if enabled (at INFO level so it's visible without debug)
-		if pgwire.Stats.Enabled {
-			logger.Info("pgwire stats", "stats", pgwire.StatsSnapshot())
-		}
+	// 	// Log stats if enabled (at INFO level so it's visible without debug)
+	// 	if pgwire.Stats.Enabled {
+	// 		logger.Info("pgwire stats", "stats", pgwire.StatsSnapshot())
+	// 	}
 
-		cancel()
-	}()
+	// 	cancel()
+	// }()
 
 	proxy := &MitmProxy{
 		BackendCfg: backendCfg,
@@ -257,18 +260,56 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (ret
 	backendAdapter := NewHijackedBackend(hijacked, p.Logger)
 
 	// Determine IO mode
-	ioMode := pgproxy.IOModeDefault
+	var newRuntime pgproxy.RuntimeFactory
 	if p.UseSplit {
-		ioMode = pgproxy.IOModeSplit
+		newRuntime = pgproxy.NewGnetProxyRuntime
+	} else {
+		newRuntime = pgproxy.NewRingBufferRuntime
 	}
 
 	session, err := pgproxy.NewSession(ctx, pgproxy.SessionConfig{
-		Frontend: frontendAdapter,
+		Frontend:   frontendAdapter,
+		NewRuntime: newRuntime,
 		AcquireBackend: func(ctx context.Context) (pgproxy.Backend, error) {
 			return backendAdapter, nil
 		},
 		Logger: p.Logger,
-		IOMode: ioMode,
+		Handler: func(ctx context.Context, session *pgproxy.Session, pos pgproxy.Pos, err error) error {
+			if err != nil {
+				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+					return io.EOF // Signal normal termination to Run()
+				}
+				return err
+			}
+
+			// Log messages at debug level
+			if p.Logger.Enabled(ctx, slog.LevelDebug) {
+				var parsed any
+				if pos.FromClient() {
+					parsed = pos.ClientMsg().ParseAny()
+				} else {
+					parsed = pos.ServerMsg().ParseAny()
+				}
+				p.Logger.Debug("MSG", "from", pos.From(), "type", pos.MessageType(), "msg", mustJSON(parsed))
+			}
+
+			// Check for terminate from client
+			if pos.FromClient() {
+				if _, ok := pos.ClientMsg().(*pgwire.ClientTerminate); ok {
+					if err := pos.Skip(); err != nil {
+						return err
+					}
+					return io.EOF // Signal normal termination
+				}
+			}
+
+			// Forward message to destination
+			if err := pos.Forward(ctx); err != nil {
+				return fmt.Errorf("forward: %w", err)
+			}
+
+			return nil
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
@@ -278,42 +319,7 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (ret
 	}()
 
 	// Proxy using Run() which dispatches based on IOMode
-	runErr := session.Run(ctx, func(pos pgproxy.Pos, err error) error {
-		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-				return io.EOF // Signal normal termination to Run()
-			}
-			return err
-		}
-
-		// Log messages at debug level
-		if p.Logger.Enabled(ctx, slog.LevelDebug) {
-			var parsed any
-			if pos.FromClient() {
-				parsed = pos.ClientMsg().ParseAny()
-			} else {
-				parsed = pos.ServerMsg().ParseAny()
-			}
-			p.Logger.Debug("MSG", "from", pos.From(), "type", pos.MessageType(), "msg", mustJSON(parsed))
-		}
-
-		// Check for terminate from client
-		if pos.FromClient() {
-			if _, ok := pos.ClientMsg().(*pgwire.ClientTerminate); ok {
-				if err := pos.Skip(); err != nil {
-					return err
-				}
-				return io.EOF // Signal normal termination
-			}
-		}
-
-		// Forward message to destination
-		if err := pos.Forward(ctx); err != nil {
-			return fmt.Errorf("forward: %w", err)
-		}
-
-		return nil
-	})
+	runErr := session.Run(ctx)
 
 	// Don't return EOF as an error - it signals normal client termination
 	if pgproxy.IsCleanTermination(runErr) {
@@ -383,9 +389,9 @@ type HijackedBackend struct {
 
 func NewHijackedBackend(hijacked *pgconn.HijackedConn, logger *slog.Logger) *HijackedBackend {
 	// Only wrap connection for debug logging if debug is enabled
-	if logger.Enabled(context.Background(), slog.LevelDebug) {
-		hijacked.Conn = &loggingConn{Conn: hijacked.Conn, label: "backend", logger: logger}
-	}
+	// if logger.Enabled(context.Background(), slog.LevelDebug) {
+	// 	hijacked.Conn = &loggingConn{Conn: hijacked.Conn, label: "backend", logger: logger}
+	// }
 	return &HijackedBackend{hijacked: hijacked}
 }
 

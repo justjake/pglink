@@ -42,13 +42,32 @@ type ringBufferRuntime struct {
 	cancelRingCtx func()
 
 	closeOnce sync.Once
+
+	// todo: remove
+	msgParser flyweightParser
+	pos       pos
 }
 
 var _ Runtime = (*ringBufferRuntime)(nil)
 
+func NewRingBufferRuntime(ctx context.Context, session *Session) (Runtime, error) {
+	return newRingBufferRuntime(ctx, session, pgwire.DefaultRingBufferConfig())
+}
+
+func newRingBufferRuntime(ctx context.Context, session *Session, cfg pgwire.RingBufferConfig) (*ringBufferRuntime, error) {
+	ringCtx, cancelRingCtx := context.WithCancel(ctx)
+	runtime := &ringBufferRuntime{
+		Session:       session,
+		ringCfg:       cfg,
+		ringCtx:       ringCtx,
+		cancelRingCtx: cancelRingCtx,
+	}
+	return runtime, nil
+}
+
 // StartConn implements [Runtime].
 func (s *ringBufferRuntime) StartConn(ctx context.Context, role ProxyRole, conn Conn) error {
-	connPtr, netConnPtr, ringPtr, cursorPtr, posPtr := s.conns(role)
+	connPtr, netConnPtr, ringPtr, cursorPtr, _ := s.conns(role)
 	if *connPtr != nil || *netConnPtr != nil || *ringPtr != nil || *cursorPtr != nil {
 		return fmt.Errorf("%s connection already started: %v %v %v %v", role, *connPtr, *netConnPtr, *ringPtr, *cursorPtr)
 	}
@@ -79,7 +98,6 @@ func (s *ringBufferRuntime) StartConn(ctx context.Context, role ProxyRole, conn 
 	*netConnPtr = netConn
 	*ringPtr = ring
 	*cursorPtr = cursor
-	posPtr.reset(s.Session, cursor, role)
 
 	return nil
 }
@@ -99,7 +117,7 @@ func (s *ringBufferRuntime) StopConn(ctx context.Context, role ProxyRole) error 
 		return fmt.Errorf("failed to release net conn: %w", err)
 	}
 
-	posPtr.reset(nil, nil, role)
+	posPtr.reset(role, nil, nil, nil, nil)
 	*connPtr = nil
 	*netConnPtr = nil
 	*ringPtr = nil
@@ -132,22 +150,13 @@ func (s *ringBufferRuntime) WriteConn(ctx context.Context, role ProxyRole, queue
 	return nil
 }
 
-// NewSession creates a new session.
-// The provided `ctx` is expected to be valid for the lifetime of the session.
-// However, you must always call [Session.Close] if NewSession returns successfully, do not rely on context cancellation.
-func newRingBufferRuntime(ctx context.Context, session *Session, cfg pgwire.RingBufferConfig) (*ringBufferRuntime, error) {
-	runtime := &ringBufferRuntime{
-		Session: session,
-		ringCfg: cfg,
-	}
-	return runtime, nil
-}
-
 // Close flushes pending writes then closes the session. It releases the
 // acquired backend, and stops all concurrent reads so the client and backend
 // can be re-used.
 func (s *ringBufferRuntime) Stop(ctx context.Context) error {
-	s.cancelRingCtx()
+	if s.cancelRingCtx != nil {
+		s.cancelRingCtx()
+	}
 
 	if s.cancelWaitCtx != nil {
 		s.cancelWaitCtx()
@@ -167,16 +176,6 @@ func (s *ringBufferRuntime) getCursor(from ProxyRole) *pgwire.Cursor {
 	} else {
 		return s.clientCursor
 	}
-}
-
-func (s *ringBufferRuntime) resetClientPos() *pos {
-	s.clientPos.reset(s.Session, s.clientCursor, RoleClient)
-	return &s.clientPos
-}
-
-func (s *ringBufferRuntime) resetBackendPos() *pos {
-	s.backendPos.reset(s.Session, s.backendCursor, RoleServer)
-	return &s.backendPos
 }
 
 func (s *ringBufferRuntime) healthCheckChan() <-chan time.Time {
@@ -362,24 +361,13 @@ func (s *ringBufferRuntime) iterCursor(from ProxyRole, flushErr *error) iter.Seq
 			return
 		}
 
-		var err error
-		var pos *pos
-
 		defer func() {
 			*flushErr = s.Flush(s.waitCtx())
 		}()
 
 		// if cursor changes (like backend release/re-acquire), drop the loop (and messages)
 		for s.getCursor(from) == cursor && cursor.NextMsg() {
-			if from == RoleServer {
-				_, err = cursor.AsServer()
-				pos = s.resetBackendPos()
-			} else {
-				_, err = cursor.AsClient()
-				pos = s.resetClientPos()
-			}
-
-			if !s.yieldSinglePos(yield, pos, err) {
+			if !s.yieldSinglePos(yield, from) {
 				return
 			}
 		}
@@ -390,8 +378,15 @@ func (s *ringBufferRuntime) iterCursor(from ProxyRole, flushErr *error) iter.Seq
 	}
 }
 
-func (s *ringBufferRuntime) yieldSinglePos(yield func(*pos, error) bool, pos *pos, err error) (loop bool) {
-	return yield(pos, err)
+func (s *ringBufferRuntime) yieldSinglePos(yield func(*pos, error) bool, from ProxyRole) (loop bool) {
+	// todo: remove uglyness
+	pos := &s.pos
+	parser := &s.msgParser
+	parser.Prepare(from)
+	defer parser.Release()
+	pos.reset(from, &s.cursor(from).RingMsg, s.Session, s.waitCtx(), parser)
+	defer pos.reset(RoleProxy, nil, nil, nil, nil)
+	return yield(pos, nil)
 }
 
 func (s *ringBufferRuntime) cursor(role ProxyRole) *pgwire.Cursor {
