@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -66,7 +65,7 @@ func (g *gnetProxyEngine) OnBoot(eng gnet.Engine) (action gnet.Action) {
 
 // OnClose implements [gnet.EventHandler].
 func (g *gnetProxyEngine) OnClose(c gnet.Conn, err error) (action gnet.Action) {
-	g.logger.Info("OnClose", "fd", c.Fd(), "addr", c.RemoteAddr(), "err", err)
+	g.logger.Info("OnClose", "fd", c.Fd(), "addr", c.RemoteAddr(), "err", err, "errT", fmt.Sprintf("%#T", err))
 	return gnet.None
 }
 
@@ -355,18 +354,27 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, queued
 	}
 
 	// TODO: use writev
-	var writeTarget io.Writer
+	var err error
 	if p.gconn == nil {
 		// Still starting up
 		g.logger.Debug("gnetProxyRuntime.WriteConn: connection not started yet, promise to write later")
-		writeTarget = &p.promisedWrites
+		written, err = queued.WriteTo(&p.promisedWrites)
+		if err != nil {
+			return fmt.Errorf("gconn WriteTo promisedWrites buffer: %w", err)
+		}
+	} else if buffers := queued.Buffers(); buffers != nil {
+		writtenInt, err := p.gconn.Writev(buffers)
+		written = int64(writtenInt)
+		if err != nil {
+			return fmt.Errorf("gconn Writev: %w", err)
+		}
 	} else {
-		writeTarget = p.gconn
+		written, err = queued.WriteTo(p.gconn)
+		if err != nil {
+			return fmt.Errorf("gconn WriteTo: %w", err)
+		}
 	}
-	written, err := queued.WriteTo(writeTarget)
-	if err != nil {
-		return fmt.Errorf("gconn WriteTo: %w", err)
-	}
+
 	return nil
 }
 
@@ -513,6 +521,7 @@ type gnetProxyConn struct {
 	gconn          gnet.Conn
 	promisedWrites bytes.Buffer
 	parser         *pgwire.StreamBatchParser
+	closed         atomic.Bool
 }
 
 type filedupConn interface {
@@ -523,6 +532,11 @@ var _ filedupConn = (*net.TCPConn)(nil)
 var _ gnetTrafficHandler = (*gnetProxyConn)(nil)
 
 func (p *gnetProxyConn) OnOpen(c gnet.Conn) (action gnet.Action) {
+	if p.closed.Load() {
+		p.logger.Debug("gnetProxyConn.OnOpen: already closed, ignoring")
+		return gnet.Close
+	}
+
 	p.gconn = c
 	p.logger.Debug("gconn opened", "promisedWrites", p.promisedWrites.Len())
 	if p.promisedWrites.Len() > 0 {
@@ -538,6 +552,11 @@ func (p *gnetProxyConn) OnOpen(c gnet.Conn) (action gnet.Action) {
 
 func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	// TODO: panic/recover?
+
+	if p.closed.Load() {
+		p.logger.Debug("gnetProxyConn.OnOpen: already closed, ignoring")
+		return gnet.Close
+	}
 
 	if p.gconn != nil && p.gconn != gconn {
 		p.logger.Error("gnetProxyConn.OnTraffic: invalid gconn", "gconn", gconn, "p.gconn", p.gconn)
@@ -564,11 +583,16 @@ func (p *gnetProxyConn) OnClose(c gnet.Conn) (action gnet.Action) {
 }
 
 func (p *gnetProxyConn) Close() error {
-	err := p.gconn.Close()
-	if err != nil {
-		return fmt.Errorf("gconn Close: %w", err)
+	if p.gconn != nil {
+		err := p.gconn.Close()
+		if err != nil {
+			return fmt.Errorf("gconn Close: %w", err)
+		}
 	}
-	p.onClose()
+	if p.onClose != nil {
+		p.onClose()
+	}
+	p.closed.Store(true)
 	return nil
 }
 

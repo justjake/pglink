@@ -133,13 +133,9 @@ func (s *Session) HandlePos(ctx context.Context, pos Pos, posErr error) error {
 	}
 
 	var handleErr error
-	var logger *slog.Logger
-	if pos != nil {
-		logger = pos.Logger()
-	} else {
-		logger = s.Logger()
-	}
+	logger := s.Logger()
 	if logger.Enabled(ctx, slog.LevelDebug) {
+		logger = pos.Logger()
 		logger.Debug("call handler", "pos", pos, "posErr", posErr)
 		defer func() {
 			logger.Debug("called handler: done")

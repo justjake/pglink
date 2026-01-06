@@ -156,8 +156,8 @@ func (q *WriteQueue) WriteTo(w io.Writer) (int64, error) {
 	return q.writeToWriter(w)
 }
 
-// writeToConn uses net.Buffers (writev syscall) to write all data in a single syscall.
-func (q *WriteQueue) writeToConn(conn net.Conn) (int64, error) {
+// Buffers returns writev buffers for immediate use.
+func (q *WriteQueue) Buffers() net.Buffers {
 	// Use inline backing array if it fits, otherwise allocate.
 	// This avoids allocation in the common case (1-2 items).
 	// We store writeBufs inline in WriteQueue to avoid escape when calling WriteTo.
@@ -205,15 +205,25 @@ func (q *WriteQueue) writeToConn(conn net.Conn) (int64, error) {
 
 	// If we have streaming messages, fall back to slow path
 	if hasStreaming {
-		RecordStreamingWrite()
-		return q.writeToWriter(conn)
+		return nil
 	}
 
 	// Record statistics
 	RecordWritev(len(q.writeBufs), prefixBytes, ringBytes, ringBufs, wrapArounds > 0)
+	return q.writeBufs
+}
+
+// writeToConn uses net.Buffers (writev syscall) to write all data in a single syscall.
+func (q *WriteQueue) writeToConn(conn net.Conn) (int64, error) {
+	buffers := q.Buffers()
+
+	if buffers == nil {
+		RecordStreamingWrite()
+		return q.writeToWriter(conn)
+	}
 
 	// Write all buffers in one syscall using writev
-	return q.writeBufs.WriteTo(conn)
+	return buffers.WriteTo(conn)
 }
 
 // writeToWriter is the fallback that writes each item individually.
