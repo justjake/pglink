@@ -140,7 +140,9 @@ func (s *Session) HandlePos(ctx context.Context, pos *Pos2, posErr error) error 
 	var handleErr error
 	logger := s.Logger()
 	if logger.Enabled(ctx, slog.LevelDebug) {
-		logger = pos.Logger()
+		if pos != nil {
+			logger = pos.Logger()
+		}
 		logger.Debug("call handler", "pos", pos, "posErr", posErr)
 		defer func() {
 			logger.Debug("called handler: done")
@@ -368,7 +370,7 @@ func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwir
 		return closedErr
 	}
 
-	encoded, err := terminationMessage.Encode()
+	encoded, err := terminationMessage.EncodeTyped()
 	if err != nil {
 		logger.Warn("ignored error encoding termination message", "err", err)
 	} else if err := s.QueueSendMsg(ctx, encoded.Msg()); err != nil {

@@ -2,21 +2,21 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+eval "$(mise activate bash --shims)"
 
-# Build benchmark tool
-./bin/go build -o out/bench ./cmd/bench
+cmd=(go run ./cmd/bench)
 
 # Presets
 case "${1:-}" in
     smoke)
         shift
-        exec ./out/bench -duration 2s -warmup 1s -rounds 1 "$@"
+        exec "${cmd[@]}" -duration 2s -warmup 1s -rounds 1 "$@"
         ;;
     full)
         shift
-        exec ./out/bench -duration 10s -warmup 2s -rounds 6 "$@"
+        exec "${cmd[@]}" -duration 10s -warmup 2s -rounds 6 "$@"
         ;;
     *)
-        exec ./out/bench "$@"
+        exec "${cmd[@]}" "$@"
         ;;
 esac

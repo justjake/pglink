@@ -375,10 +375,10 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, outbox
 	}
 
 	var written int64
-	if g.logger.Enabled(ctx, slog.LevelDebug) {
-		g.logger.Debug("gnetProxyRuntime.WriteConn", "role", role, "queued", outbox)
+	if p.debugEnabled() {
+		p.logger.Debug("gnetProxyRuntime.WriteConn", "role", role, "queued", outbox)
 		defer func() {
-			g.logger.Debug("gnetProxyRuntime.WriteConn: done", "written", written, "error", err)
+			p.logger.Debug("gnetProxyRuntime.WriteConn: done", "written", written, "error", err)
 		}()
 	}
 
@@ -392,9 +392,14 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, outbox
 	}()
 
 	var streamFrom pgwire.Sender
+	var i int
 	for outbox.Len() > 0 {
 		// TODO: backpressure that doesn't drop messages.
 		msg, s, ok := outbox.Next()
+		if p.debugEnabled() {
+			p.logger.Debug(fmt.Sprintf("gnetProxyRuntime.WriteConn[%v]: queue[%d]: %v, %v, %v", p.role, i, msg, s, ok), "outbox", outbox)
+		}
+
 		if !ok {
 			break
 		}
@@ -404,6 +409,22 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, outbox
 			streamFrom = s
 			break
 		}
+
+		i++
+	}
+
+	if p.debugEnabled() {
+		var bytes int64
+		for _, buf := range bufs {
+			bytes += int64(len(buf))
+		}
+		var streamFromStr string
+		if streamFrom != 0 {
+			streamFromStr = streamFrom.String()
+		} else {
+			streamFromStr = "none"
+		}
+		p.logger.Debug("gnetProxyRuntime.WriteConn: job", "bytes", bytes, "bufs", len(bufs), "streamFrom", streamFromStr)
 	}
 
 	if len(bufs) == 0 && streamFrom == 0 {
@@ -445,10 +466,14 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, outbox
 	// backend and forward a message.
 	// then, we flushed; but the conn isn't enrolled yet.
 	if p.gconn == nil {
+		if p.debugEnabled() {
+			p.logger.Debug("gnetProxyRuntime.WriteConn: gconn nil: writing to promisedWrites", "bufs", len(bufs))
+		}
 		written, err = bufs.WriteTo(&p.promisedWrites)
 		if err != nil {
 			return fmt.Errorf("gconn WriteTo promisedWrites buffer: %w", err)
 		}
+		return
 	}
 
 	writtenInt, err := p.gconn.Writev([][]byte(bufs))
@@ -540,6 +565,7 @@ func (g *gnetProxyRuntime) pipeStreamingMessage(to io.Writer, from pgwire.Sender
 		return fmt.Errorf("cannot stream from %v: sender already wrote %v bytes", from, fromConn.streamingLargeMessageWriter.Written)
 	}
 
+	g.logger.Debug("gnetProxyRuntime.pipeStreamingMessage: setting writer", "from", from, "to", to)
 	fromConn.streamingLargeMessageWriter.Writer = to
 	fromConn.streamingLargeMessageWriter.OnComplete = onComplete
 	return nil

@@ -289,23 +289,16 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (ret
 
 			// Log messages at debug level
 			if p.Logger.Enabled(ctx, slog.LevelDebug) {
-				var parsed any
-				if pos.FromClient() {
-					parsed = pos.ClientMsg().ParseAny()
-				} else {
-					parsed = pos.ServerMsg().ParseAny()
-				}
-				p.Logger.Debug("MSG", "from", pos.From(), "type", pos.MessageType(), "msg", mustJSON(parsed))
+				parsed, err := pgwire.Typed(pos.Msg).ParseAny()
+				p.Logger.Debug("MSG", "from", pos.From(), "type", pos.MessageType(), "msg", mustJSON(parsed), "err", err)
 			}
 
 			// Check for terminate from client
-			if pos.FromClient() {
-				if _, ok := pos.ClientMsg().(*pgwire.ClientTerminate); ok {
-					if err := pos.Skip(); err != nil {
-						return err
-					}
-					return io.EOF // Signal normal termination
+			if pos.MessageType() == pgwire.MsgClientTerminate {
+				if err := pos.Skip(); err != nil {
+					return err
 				}
+				return io.EOF // Signal normal termination
 			}
 
 			// Forward message to destination

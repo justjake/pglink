@@ -38,7 +38,7 @@ func (e *Err) ToMessage() Message {
 	return Server(&e.ErrorResponse)
 }
 
-func (e *Err) Encode() (ErrorResponse, error) {
+func (e *Err) EncodeTyped() (ErrorResponse, error) {
 	encoded, err := e.ErrorResponse.Encode(nil)
 	if err != nil {
 		return ErrorResponse{}, err
@@ -92,7 +92,7 @@ func newProtocolViolationCaller(cause error, msg any, callerSkip int) *Err {
 	}
 	return err
 }
-func NewProtocolViolation(cause error, msg TypedMsg) *Err {
+func NewProtocolViolation(cause error, msg any) *Err {
 	return newProtocolViolationCaller(cause, msg, 1)
 }
 

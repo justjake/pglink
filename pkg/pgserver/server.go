@@ -651,7 +651,7 @@ loop:
 			// Reject plaintext connections when TLS is required.
 			// c.tls is set by updateToTLS() when TLS handshake completes (via SSLRequest or fast-start).
 			if s.TLSConfig != nil && !s.TLSOptional && c.tls == nil {
-				err = pgwire.NewProtocolViolation(fmt.Errorf("%w: TLS required", ErrTLSFailed), pgwire.Client(msg))
+				err = pgwire.NewProtocolViolation(fmt.Errorf("%w: TLS required", ErrTLSFailed), msg)
 				break loop
 			}
 

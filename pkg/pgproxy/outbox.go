@@ -2,7 +2,6 @@ package pgproxy
 
 import (
 	"fmt"
-	"iter"
 
 	"github.com/gammazero/deque"
 	"github.com/justjake/pglink/pkg/pgwire"
@@ -20,6 +19,7 @@ type Outbox struct {
 }
 
 func (o *Outbox) PushMsg(msg pgwire.Msg) {
+	o.queue.Grow(1)
 	o.queue.PushBack(msg)
 }
 
@@ -49,11 +49,8 @@ func (o *Outbox) Peek(i int) (msg pgwire.Msg, streamFrom pgwire.Sender, ok bool)
 // Discard the first n messages in the queue.
 // Panics if n > len(o.queue).
 func (o *Outbox) Discard(n int) {
-	next, done := iter.Pull(o.queue.IterPopFront())
-	defer done()
-	for i := 0; i < n; i++ {
-		// will panic if n > len(o.queue)
-		next()
+	for range n {
+		o.queue.PopFront()
 	}
 }
 
