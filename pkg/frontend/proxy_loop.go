@@ -259,9 +259,9 @@ func (ps *proxyState) handleClientMessage(ctx context.Context, pos pgproxy.Pos) 
 		return pgproxy.Forward(msg), nil
 
 	// Copy
-	case *pgwire.ClientCopyData:
+	case *pgwire.OldClientCopyData:
 		return pgproxy.Forward(msg), nil
-	case *pgwire.ClientCopyDone:
+	case *pgwire.OldClientCopyDone:
 		return pgproxy.Forward(msg), nil
 	case *pgwire.ClientCopyFail:
 		return pgproxy.Forward(msg), nil
@@ -548,7 +548,7 @@ func (ps *proxyState) handleServerMessage(ctx context.Context, pos pgproxy.Pos) 
 	case *pgwire.ServerCopyOutResponse:
 		ps.copyMode = pgwire.CopyOut
 		return pgproxy.Forward(msg), nil
-	case *pgwire.ServerCopyDone:
+	case *pgwire.OldServerCopyDone:
 		ps.copyMode = pgwire.CopyNone
 		return pgproxy.Forward(msg), nil
 	default:

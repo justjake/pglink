@@ -42,7 +42,7 @@ func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *Una
 		return nil, err
 	}
 
-	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive(ctx))
+	msg, err := pgwire.Expect[*pgproto3.PasswordMessage](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (a *PasswordAuthenticator) CleartextPassword(ctx context.Context, conn *Una
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", err)
 	}
-	if subtle.ConstantTimeCompare([]byte(msg.Parse().Password), []byte(creds.Password())) != 1 {
+	if subtle.ConstantTimeCompare([]byte(msg.Password), []byte(creds.Password())) != 1 {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", nil)
 	}
 
@@ -80,7 +80,7 @@ func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *Unauthori
 		return nil, err
 	}
 
-	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive(ctx))
+	msg, err := pgwire.Expect[*pgproto3.PasswordMessage](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (a *PasswordAuthenticator) MD5Password(ctx context.Context, conn *Unauthori
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", err)
 	}
 
-	if subtle.ConstantTimeCompare([]byte(msg.Parse().Password), []byte(pgwire.MD5Password(creds, salt))) != 1 {
+	if subtle.ConstantTimeCompare([]byte(msg.Password), []byte(pgwire.MD5Password(creds, salt))) != 1 {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "password authentication failed", nil)
 	}
 
@@ -120,19 +120,19 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, err
 	}
 
-	clientFirstMsg, err := pgwire.Expect[*pgwire.ClientSASLInitialResponse](conn.Receive(ctx))
+	clientFirstMsg, err := pgwire.Expect[*pgproto3.SASLInitialResponse](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
 
-	mechanism := clientFirstMsg.Parse().AuthMechanism
+	mechanism := clientFirstMsg.AuthMechanism
 	if !slices.Contains(mechanisms, mechanism) {
 		err := pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "unsupported SASL mechanism", nil)
 		err.Detail = fmt.Sprintf("supported mechanisms: %v", mechanisms)
 		return nil, err
 	}
 
-	cbFlag, cbTypeStr, err := scram.ParseChannelBindingFlag(string(clientFirstMsg.Parse().Data))
+	cbFlag, cbTypeStr, err := scram.ParseChannelBindingFlag(string(clientFirstMsg.Data))
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "invalid channel binding", err)
 	}
@@ -183,7 +183,7 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "failed to create SCRAM server", err)
 	}
 
-	serverFirstMsg, err := scramServer.ProcessClientFirstMessage(string(clientFirstMsg.Parse().Data))
+	serverFirstMsg, err := scramServer.ProcessClientFirstMessage(string(clientFirstMsg.Data))
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "failed to process client-first-message", err)
 	}
@@ -199,12 +199,12 @@ func (a *PasswordAuthenticator) SASL(ctx context.Context, conn *UnauthorizedConn
 		return nil, fmt.Errorf("failed to set auth type to SASLContinue: %w", err)
 	}
 
-	clientFinalMsg, err := pgwire.Expect[*pgwire.ClientSASLResponse](conn.Receive(ctx))
+	clientFinalMsg, err := pgwire.Expect[*pgproto3.SASLResponse](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
 
-	serverFinalMsg, err := scramServer.ProcessClientFinalMessage(string(clientFinalMsg.Parse().Data))
+	serverFinalMsg, err := scramServer.ProcessClientFinalMessage(string(clientFinalMsg.Data))
 	if err != nil {
 		return nil, pgwire.NewErr(pgwire.ErrorFatal, pgerrcode.InvalidPassword, "SCRAM authentication failed", err)
 	}

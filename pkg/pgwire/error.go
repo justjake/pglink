@@ -38,6 +38,17 @@ func (e *Err) ToMessage() Message {
 	return Server(&e.ErrorResponse)
 }
 
+func (e *Err) Encode() (ErrorResponse, error) {
+	encoded, err := e.ErrorResponse.Encode(nil)
+	if err != nil {
+		return ErrorResponse{}, err
+	}
+	return ErrorResponse{
+		Sender: SenderServer,
+		Data:   encoded,
+	}, nil
+}
+
 func NewErr(severity Severity, code string, message string, cause error) *Err {
 	_, file, line, _ := runtime.Caller(1)
 	err := &Err{
@@ -57,7 +68,7 @@ func NewErr(severity Severity, code string, message string, cause error) *Err {
 	return err
 }
 
-func newProtocolViolationCaller(cause error, msg Message, callerSkip int) *Err {
+func newProtocolViolationCaller(cause error, msg any, callerSkip int) *Err {
 	var msgStr string
 	if msg != nil {
 		msgStr = fmt.Sprintf("unexpected message %T", msg)
@@ -81,11 +92,11 @@ func newProtocolViolationCaller(cause error, msg Message, callerSkip int) *Err {
 	}
 	return err
 }
-func NewProtocolViolation(cause error, msg Message) *Err {
+func NewProtocolViolation(cause error, msg TypedMsg) *Err {
 	return newProtocolViolationCaller(cause, msg, 1)
 }
 
-func Expect[T Message](msg Message, err error) (T, error) {
+func Expect[T pgproto3.Message](msg pgproto3.Message, err error) (T, error) {
 	var zero T
 
 	if err != nil {

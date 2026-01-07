@@ -733,8 +733,8 @@ var (
 	_ ServerCopy = (*ServerCopyInResponse)(nil)
 	_ ServerCopy = (*ServerCopyOutResponse)(nil)
 	_ ServerCopy = (*ServerCopyBothResponse)(nil)
-	_ ServerCopy = (*ServerCopyData)(nil)
-	_ ServerCopy = (*ServerCopyDone)(nil)
+	_ ServerCopy = (*OldServerCopyData)(nil)
+	_ ServerCopy = (*OldServerCopyDone)(nil)
 )
 
 // Response to COPY FROM STDIN.
@@ -802,43 +802,43 @@ func (m ServerCopyBothResponse) Retain() ServerCopyBothResponse {
 }
 
 // Copy Mode: data row.
-type ServerCopyData FromServer[*pgproto3.CopyData]
+type OldServerCopyData FromServer[*pgproto3.CopyData]
 
-func (*ServerCopyData) Server() {}
-func (*ServerCopyData) Copy()   {}
-func (m *ServerCopyData) Parse() *pgproto3.CopyData {
+func (*OldServerCopyData) Server() {}
+func (*OldServerCopyData) Copy()   {}
+func (m *OldServerCopyData) Parse() *pgproto3.CopyData {
 	return (*FromServer[*pgproto3.CopyData])(m).Parse()
 }
-func (m *ServerCopyData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerCopyData) Source() RawMessageSource              { return m.source }
-func (m *ServerCopyData) IsParsed() bool                        { return m.isParsed }
-func (m *ServerCopyData) ParseAny() pgproto3.Message            { return m.Parse() }
+func (m *OldServerCopyData) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *OldServerCopyData) Source() RawMessageSource              { return m.source }
+func (m *OldServerCopyData) IsParsed() bool                        { return m.isParsed }
+func (m *OldServerCopyData) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerCopyData) Retain() ServerCopyData {
+func (m OldServerCopyData) Retain() OldServerCopyData {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CopyData])(&m).retainFields()
-	return ServerCopyData{source: src, parsed: parsed, isParsed: isParsed}
+	return OldServerCopyData{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // Copy Mode: copy completed.
-type ServerCopyDone FromServer[*pgproto3.CopyDone]
+type OldServerCopyDone FromServer[*pgproto3.CopyDone]
 
-func (*ServerCopyDone) Server() {}
-func (*ServerCopyDone) Copy()   {}
-func (m *ServerCopyDone) Parse() *pgproto3.CopyDone {
+func (*OldServerCopyDone) Server() {}
+func (*OldServerCopyDone) Copy()   {}
+func (m *OldServerCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromServer[*pgproto3.CopyDone])(m).Parse()
 }
-func (m *ServerCopyDone) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
-func (m *ServerCopyDone) Source() RawMessageSource              { return m.source }
-func (m *ServerCopyDone) IsParsed() bool                        { return m.isParsed }
-func (m *ServerCopyDone) ParseAny() pgproto3.Message            { return m.Parse() }
+func (m *OldServerCopyDone) ParseBackend() pgproto3.BackendMessage { return m.Parse() }
+func (m *OldServerCopyDone) Source() RawMessageSource              { return m.source }
+func (m *OldServerCopyDone) IsParsed() bool                        { return m.isParsed }
+func (m *OldServerCopyDone) ParseAny() pgproto3.Message            { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ServerCopyDone) Retain() ServerCopyDone {
+func (m OldServerCopyDone) Retain() OldServerCopyDone {
 	src, parsed, isParsed := (*FromServer[*pgproto3.CopyDone])(&m).retainFields()
-	return ServerCopyDone{source: src, parsed: parsed, isParsed: isParsed}
+	return OldServerCopyDone{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ToServerCopy converts a pgproto3.BackendMessage to a ServerCopy if it matches one of the known types.
@@ -852,9 +852,9 @@ func ToServerCopy(msg pgproto3.BackendMessage) (ServerCopy, bool) {
 	case *pgproto3.CopyBothResponse:
 		return (*ServerCopyBothResponse)(ServerParsed(m)), true
 	case *pgproto3.CopyData:
-		return (*ServerCopyData)(ServerParsed(m)), true
+		return (*OldServerCopyData)(ServerParsed(m)), true
 	case *pgproto3.CopyDone:
-		return (*ServerCopyDone)(ServerParsed(m)), true
+		return (*OldServerCopyDone)(ServerParsed(m)), true
 	}
 	return nil, false
 }
@@ -865,8 +865,8 @@ type ServerCopyHandlers[T any] struct {
 	CopyInResponse   func(msg *ServerCopyInResponse) (T, error)
 	CopyOutResponse  func(msg *ServerCopyOutResponse) (T, error)
 	CopyBothResponse func(msg *ServerCopyBothResponse) (T, error)
-	CopyData         func(msg *ServerCopyData) (T, error)
-	CopyDone         func(msg *ServerCopyDone) (T, error)
+	CopyData         func(msg *OldServerCopyData) (T, error)
+	CopyDone         func(msg *OldServerCopyDone) (T, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -894,12 +894,12 @@ func (h ServerCopyHandlers[T]) HandleDefault(msg ServerCopy, defaultHandler func
 			return h.CopyBothResponse(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerCopyData:
+	case *OldServerCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(msg)
 		}
 		return defaultHandler(msg)
-	case *ServerCopyDone:
+	case *OldServerCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(msg)
 		}
@@ -920,8 +920,8 @@ type ServerCopyHandlersCtx[Arg, Result any] struct {
 	CopyInResponse   func(ctx context.Context, msg *ServerCopyInResponse, arg Arg) (Result, error)
 	CopyOutResponse  func(ctx context.Context, msg *ServerCopyOutResponse, arg Arg) (Result, error)
 	CopyBothResponse func(ctx context.Context, msg *ServerCopyBothResponse, arg Arg) (Result, error)
-	CopyData         func(ctx context.Context, msg *ServerCopyData, arg Arg) (Result, error)
-	CopyDone         func(ctx context.Context, msg *ServerCopyDone, arg Arg) (Result, error)
+	CopyData         func(ctx context.Context, msg *OldServerCopyData, arg Arg) (Result, error)
+	CopyDone         func(ctx context.Context, msg *OldServerCopyDone, arg Arg) (Result, error)
 }
 
 // HandleDefault dispatches to the appropriate handler, or calls defaultHandler if the handler is nil.
@@ -949,12 +949,12 @@ func (h ServerCopyHandlersCtx[Arg, Result]) HandleDefault(ctx context.Context, m
 			return h.CopyBothResponse(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyData:
+	case *OldServerCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyDone:
+	case *OldServerCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(ctx, msg, arg)
 		}
@@ -1460,8 +1460,8 @@ type ServerHandlers[Arg, Result any] struct {
 	CopyInResponse   func(ctx context.Context, msg *ServerCopyInResponse, arg Arg) (Result, error)
 	CopyOutResponse  func(ctx context.Context, msg *ServerCopyOutResponse, arg Arg) (Result, error)
 	CopyBothResponse func(ctx context.Context, msg *ServerCopyBothResponse, arg Arg) (Result, error)
-	CopyData         func(ctx context.Context, msg *ServerCopyData, arg Arg) (Result, error)
-	CopyDone         func(ctx context.Context, msg *ServerCopyDone, arg Arg) (Result, error)
+	CopyData         func(ctx context.Context, msg *OldServerCopyData, arg Arg) (Result, error)
+	CopyDone         func(ctx context.Context, msg *OldServerCopyDone, arg Arg) (Result, error)
 
 	// Response
 	Response             *ServerResponseHandlersCtx[Arg, Result]
@@ -1660,7 +1660,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyData:
+	case *OldServerCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyData != nil {
@@ -1669,7 +1669,7 @@ func (h ServerHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Serv
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ServerCopyDone:
+	case *OldServerCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyDone != nil {

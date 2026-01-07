@@ -1,6 +1,10 @@
 package pgwire
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/jackc/pgx/v5/pgproto3"
+)
 
 // ErrMsgGoTypeMismatch is returned when a typed message wrapper's actual MsgType
 // doesn't match its expected type.
@@ -24,6 +28,9 @@ type TypedMsg interface {
 	Msg() Msg
 	// Copy returns a copy of this message as TypedMsg with its own data slice.
 	Copy() TypedMsg
+	// ParseAny decodes the message body into its corresponding pgproto3 type.
+	// Returns pgproto3.Message interface to allow uniform handling.
+	ParseAny() (pgproto3.Message, error)
 }
 
 // ClientMsg is a TypedMsg that can only be sent by clients (frontend).
@@ -44,4 +51,21 @@ type ServerMsg interface {
 	ExpectedFrom() Sender
 	// CopyServer returns a copy as a ServerMsg.
 	CopyServer() ServerMsg
+}
+
+func DecodeTypedMsg[
+	T any,
+	R interface {
+		Parse() (T, error)
+	},
+	PT interface {
+		*T
+		pgproto3.Message
+	},
+](msg R) (out pgproto3.Message, err error) {
+	t, err := msg.Parse()
+	if err != nil {
+		return nil, err
+	}
+	return PT(&t), nil
 }

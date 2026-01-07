@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+
+	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 var ErrNoMessageSource = errors.New("pgwire: no message source")
@@ -24,7 +26,7 @@ func (m *ClientStartupMessage) Database() string {
 
 // DataSize returns the size of the copy data without parsing the full message.
 // This allows counting bytes transferred during COPY without allocation.
-func (m *ClientCopyData) DataSize() int {
+func (m *OldClientCopyData) DataSize() int {
 	if m.isParsed {
 		return len(m.parsed.Data)
 	}
@@ -37,7 +39,23 @@ func (m *ClientCopyData) DataSize() int {
 
 // DataSize returns the size of the copy data without parsing the full message.
 // This allows counting bytes transferred during COPY without allocation.
-func (m *ServerCopyData) DataSize() int {
+func (m ClientCopyData) DataSize() int {
+	if len, ok := m.Msg().RequiredLen(); ok {
+		return len - 5
+	}
+	return m.Msg().Len()
+}
+
+func (m ServerCopyData) DataSize() int {
+	if len, ok := m.Msg().RequiredLen(); ok {
+		return len - 5
+	}
+	return m.Msg().Len()
+}
+
+// DataSize returns the size of the copy data without parsing the full message.
+// This allows counting bytes transferred during COPY without allocation.
+func (m *OldServerCopyData) DataSize() int {
 	if m.isParsed {
 		return len(m.parsed.Data)
 	}
@@ -59,6 +77,14 @@ func (m *ServerReadyForQuery) TxStatus() TxStatus {
 		}
 	}
 	panic(ErrNoMessageSource)
+}
+
+func (m ReadyForQuery) TxStatus() (TxStatus, error) {
+	data := m.Msg().Data
+	if len(data) > 5 {
+		return TxStatus(data[5]), nil
+	}
+	return 0, ErrMsgTooShort
 }
 
 func (m *ClientBind) BindData() (BindData, error) {
@@ -189,4 +215,56 @@ func WriteMsg(dest io.Writer, msg Message) (int, error) {
 		return int(n), err
 	}
 	return 0, ErrNoMessageSource
+}
+
+func (m ParameterStatus) NameValue() (string, string, error) {
+	body, err := m.Msg().BodyErr()
+	if err != nil {
+		return "", "", err
+	}
+
+	var pgmsg pgproto3.ParameterStatus
+	if err := pgmsg.Decode(body); err != nil {
+		return "", "", err
+	}
+
+	return pgmsg.Name, pgmsg.Value, nil
+}
+
+func (m Parse) Name() (string, error) {
+	parser := MessageParser{m.Msg().Data}
+	if err := parser.SkipMessageHeader(); err != nil {
+		return "", err
+	}
+	return parser.ReadString()
+}
+
+func (m Parse) Query() (string, error) {
+	body, err := m.Msg().BodyErr()
+	if err != nil {
+		return "", err
+	}
+
+	parser := MessageParser{body}
+	if err := parser.SkipMessageHeader(); err != nil {
+		return "", err
+	}
+	if _, err := parser.ReadString(); err != nil {
+		return "", err
+	}
+	return parser.ReadString()
+}
+
+func (m Parse) ParameterOIDs() ([]uint32, error) {
+	body, err := m.Msg().BodyErr()
+	if err != nil {
+		return nil, err
+	}
+
+	var parser pgproto3.Parse
+	if err := parser.Decode(body); err != nil {
+		return nil, err
+	}
+
+	return parser.ParameterOIDs, nil
 }

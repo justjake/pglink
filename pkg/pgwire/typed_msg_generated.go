@@ -6,10 +6,12 @@ package pgwire
 import (
 	"fmt"
 	"io"
+
+	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 // Bind is a client request message.
-// Responses: [BindComplete], [Execute].
+// Responses: [BindComplete], [ErrorResponse].
 type Bind Msg
 
 func (m Bind) String() string        { return fmt.Sprintf("Bind(%v)", Msg(m)) }
@@ -27,7 +29,6 @@ func (m Bind) Validate() error {
 	}
 	return nil
 }
-
 func (m Bind) ExpectedFrom() Sender        { return SenderClient }
 func (m Bind) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Bind) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -35,6 +36,12 @@ func (m Bind) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Bind) From() Sender   { return Msg(m).Sender }
 func (m Bind) Msg() Msg       { return Msg(m) }
 func (m Bind) Copy() TypedMsg { return m.CopyTyped() }
+func (m Bind) Parse() (out pgproto3.Bind, err error) {
+	return DecodeMsg[pgproto3.Bind](m.Msg())
+}
+func (m Bind) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Bind) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Bind) Len() int                            { return Msg(m).Len() }
@@ -66,7 +73,6 @@ func (m CancelRequest) Validate() error {
 	}
 	return nil
 }
-
 func (m CancelRequest) ExpectedFrom() Sender        { return SenderClient }
 func (m CancelRequest) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m CancelRequest) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -74,6 +80,12 @@ func (m CancelRequest) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m CancelRequest) From() Sender   { return Msg(m).Sender }
 func (m CancelRequest) Msg() Msg       { return Msg(m) }
 func (m CancelRequest) Copy() TypedMsg { return m.CopyTyped() }
+func (m CancelRequest) Parse() (out pgproto3.CancelRequest, err error) {
+	return DecodeMsg[pgproto3.CancelRequest](m.Msg())
+}
+func (m CancelRequest) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m CancelRequest) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m CancelRequest) Len() int                            { return Msg(m).Len() }
@@ -87,7 +99,7 @@ func (m CancelRequest) Retain() RawMessageSource            { return Msg(m).Reta
 var _ ClientMsg = CancelRequest{}
 
 // Close is a client request message.
-// Responses: [CloseComplete], [Execute].
+// Responses: [CloseComplete], [ErrorResponse].
 type Close Msg
 
 func (m Close) String() string        { return fmt.Sprintf("Close(%v)", Msg(m)) }
@@ -105,7 +117,6 @@ func (m Close) Validate() error {
 	}
 	return nil
 }
-
 func (m Close) ExpectedFrom() Sender        { return SenderClient }
 func (m Close) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Close) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -113,6 +124,12 @@ func (m Close) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Close) From() Sender   { return Msg(m).Sender }
 func (m Close) Msg() Msg       { return Msg(m) }
 func (m Close) Copy() TypedMsg { return m.CopyTyped() }
+func (m Close) Parse() (out pgproto3.Close, err error) {
+	return DecodeMsg[pgproto3.Close](m.Msg())
+}
+func (m Close) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Close) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Close) Len() int                            { return Msg(m).Len() }
@@ -124,6 +141,92 @@ func (m Close) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf
 func (m Close) Retain() RawMessageSource            { return Msg(m).Retain() }
 
 var _ ClientMsg = Close{}
+
+// ClientCopyData is a client message.
+type ClientCopyData Msg
+
+func (m ClientCopyData) String() string            { return fmt.Sprintf("ClientCopyData(%v)", Msg(m)) }
+func (m ClientCopyData) ExpectedType() MsgType     { return MsgClientCopyData }
+func (m ClientCopyData) CopyTyped() ClientCopyData { return ClientCopyData(m.Msg().Copy()) }
+func (m ClientCopyData) Validate() error {
+	if err := Msg(m).Validate(); err != nil {
+		return err
+	}
+	if m.MessageType() != m.ExpectedType() {
+		return ErrMsgGoTypeMismatch
+	}
+	if m.From() != m.ExpectedFrom() {
+		return ErrMsgSenderMismatch
+	}
+	return nil
+}
+func (m ClientCopyData) ExpectedFrom() Sender        { return SenderClient }
+func (m ClientCopyData) ExpectedClientType() MsgType { return m.ExpectedType() }
+func (m ClientCopyData) CopyClient() ClientMsg       { return m.CopyTyped() }
+
+func (m ClientCopyData) From() Sender   { return Msg(m).Sender }
+func (m ClientCopyData) Msg() Msg       { return Msg(m) }
+func (m ClientCopyData) Copy() TypedMsg { return m.CopyTyped() }
+func (m ClientCopyData) Parse() (out pgproto3.CopyData, err error) {
+	return DecodeMsg[pgproto3.CopyData](m.Msg())
+}
+func (m ClientCopyData) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
+
+func (m ClientCopyData) MessageType() MsgType                { return Msg(m).MessageType() }
+func (m ClientCopyData) Len() int                            { return Msg(m).Len() }
+func (m ClientCopyData) Bytes() []byte                       { return Msg(m).Bytes() }
+func (m ClientCopyData) Body() []byte                        { return Msg(m).Body() }
+func (m ClientCopyData) NewReader() io.Reader                { return Msg(m).NewReader() }
+func (m ClientCopyData) WriteTo(w io.Writer) (int64, error)  { return Msg(m).WriteTo(w) }
+func (m ClientCopyData) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf) }
+func (m ClientCopyData) Retain() RawMessageSource            { return Msg(m).Retain() }
+
+var _ ClientMsg = ClientCopyData{}
+
+// ClientCopyDone is a client message.
+type ClientCopyDone Msg
+
+func (m ClientCopyDone) String() string            { return fmt.Sprintf("ClientCopyDone(%v)", Msg(m)) }
+func (m ClientCopyDone) ExpectedType() MsgType     { return MsgClientCopyDone }
+func (m ClientCopyDone) CopyTyped() ClientCopyDone { return ClientCopyDone(m.Msg().Copy()) }
+func (m ClientCopyDone) Validate() error {
+	if err := Msg(m).Validate(); err != nil {
+		return err
+	}
+	if m.MessageType() != m.ExpectedType() {
+		return ErrMsgGoTypeMismatch
+	}
+	if m.From() != m.ExpectedFrom() {
+		return ErrMsgSenderMismatch
+	}
+	return nil
+}
+func (m ClientCopyDone) ExpectedFrom() Sender        { return SenderClient }
+func (m ClientCopyDone) ExpectedClientType() MsgType { return m.ExpectedType() }
+func (m ClientCopyDone) CopyClient() ClientMsg       { return m.CopyTyped() }
+
+func (m ClientCopyDone) From() Sender   { return Msg(m).Sender }
+func (m ClientCopyDone) Msg() Msg       { return Msg(m) }
+func (m ClientCopyDone) Copy() TypedMsg { return m.CopyTyped() }
+func (m ClientCopyDone) Parse() (out pgproto3.CopyDone, err error) {
+	return DecodeMsg[pgproto3.CopyDone](m.Msg())
+}
+func (m ClientCopyDone) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
+
+func (m ClientCopyDone) MessageType() MsgType                { return Msg(m).MessageType() }
+func (m ClientCopyDone) Len() int                            { return Msg(m).Len() }
+func (m ClientCopyDone) Bytes() []byte                       { return Msg(m).Bytes() }
+func (m ClientCopyDone) Body() []byte                        { return Msg(m).Body() }
+func (m ClientCopyDone) NewReader() io.Reader                { return Msg(m).NewReader() }
+func (m ClientCopyDone) WriteTo(w io.Writer) (int64, error)  { return Msg(m).WriteTo(w) }
+func (m ClientCopyDone) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf) }
+func (m ClientCopyDone) Retain() RawMessageSource            { return Msg(m).Retain() }
+
+var _ ClientMsg = ClientCopyDone{}
 
 // CopyFail is a client message.
 type CopyFail Msg
@@ -143,7 +246,6 @@ func (m CopyFail) Validate() error {
 	}
 	return nil
 }
-
 func (m CopyFail) ExpectedFrom() Sender        { return SenderClient }
 func (m CopyFail) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m CopyFail) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -151,6 +253,12 @@ func (m CopyFail) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m CopyFail) From() Sender   { return Msg(m).Sender }
 func (m CopyFail) Msg() Msg       { return Msg(m) }
 func (m CopyFail) Copy() TypedMsg { return m.CopyTyped() }
+func (m CopyFail) Parse() (out pgproto3.CopyFail, err error) {
+	return DecodeMsg[pgproto3.CopyFail](m.Msg())
+}
+func (m CopyFail) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m CopyFail) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m CopyFail) Len() int                            { return Msg(m).Len() }
@@ -164,7 +272,7 @@ func (m CopyFail) Retain() RawMessageSource            { return Msg(m).Retain() 
 var _ ClientMsg = CopyFail{}
 
 // Describe is a client request message.
-// Responses: [RowDescription], [NoData], [Execute], [ParameterDescription].
+// Responses: [RowDescription], [NoData], [ErrorResponse], [ParameterDescription].
 type Describe Msg
 
 func (m Describe) String() string        { return fmt.Sprintf("Describe(%v)", Msg(m)) }
@@ -182,7 +290,6 @@ func (m Describe) Validate() error {
 	}
 	return nil
 }
-
 func (m Describe) ExpectedFrom() Sender        { return SenderClient }
 func (m Describe) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Describe) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -190,6 +297,12 @@ func (m Describe) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Describe) From() Sender   { return Msg(m).Sender }
 func (m Describe) Msg() Msg       { return Msg(m) }
 func (m Describe) Copy() TypedMsg { return m.CopyTyped() }
+func (m Describe) Parse() (out pgproto3.Describe, err error) {
+	return DecodeMsg[pgproto3.Describe](m.Msg())
+}
+func (m Describe) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Describe) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Describe) Len() int                            { return Msg(m).Len() }
@@ -203,7 +316,7 @@ func (m Describe) Retain() RawMessageSource            { return Msg(m).Retain() 
 var _ ClientMsg = Describe{}
 
 // Execute is a client request message.
-// Responses: [Close], [EmptyQueryResponse], [Execute], [PortalSuspended], [CopyInResponse], [Flush], [CopyBothResponse].
+// Responses: [CommandComplete], [EmptyQueryResponse], [ErrorResponse], [PortalSuspended], [CopyInResponse], [CopyOutResponse], [CopyBothResponse].
 type Execute Msg
 
 func (m Execute) String() string        { return fmt.Sprintf("Execute(%v)", Msg(m)) }
@@ -221,7 +334,6 @@ func (m Execute) Validate() error {
 	}
 	return nil
 }
-
 func (m Execute) ExpectedFrom() Sender        { return SenderClient }
 func (m Execute) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Execute) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -229,6 +341,12 @@ func (m Execute) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Execute) From() Sender   { return Msg(m).Sender }
 func (m Execute) Msg() Msg       { return Msg(m) }
 func (m Execute) Copy() TypedMsg { return m.CopyTyped() }
+func (m Execute) Parse() (out pgproto3.Execute, err error) {
+	return DecodeMsg[pgproto3.Execute](m.Msg())
+}
+func (m Execute) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Execute) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Execute) Len() int                            { return Msg(m).Len() }
@@ -259,7 +377,6 @@ func (m Flush) Validate() error {
 	}
 	return nil
 }
-
 func (m Flush) ExpectedFrom() Sender        { return SenderClient }
 func (m Flush) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Flush) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -267,6 +384,12 @@ func (m Flush) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Flush) From() Sender   { return Msg(m).Sender }
 func (m Flush) Msg() Msg       { return Msg(m) }
 func (m Flush) Copy() TypedMsg { return m.CopyTyped() }
+func (m Flush) Parse() (out pgproto3.Flush, err error) {
+	return DecodeMsg[pgproto3.Flush](m.Msg())
+}
+func (m Flush) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Flush) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Flush) Len() int                            { return Msg(m).Len() }
@@ -280,7 +403,7 @@ func (m Flush) Retain() RawMessageSource            { return Msg(m).Retain() }
 var _ ClientMsg = Flush{}
 
 // FunctionCall is a client request message.
-// Responses: [ReadyForQuery], [FunctionCallResponse], [Execute], [NoticeResponse], [CopyInResponse], [Flush], [CopyBothResponse].
+// Responses: [ReadyForQuery], [FunctionCallResponse], [ErrorResponse], [NoticeResponse], [CopyInResponse], [CopyOutResponse], [CopyBothResponse].
 type FunctionCall Msg
 
 func (m FunctionCall) String() string          { return fmt.Sprintf("FunctionCall(%v)", Msg(m)) }
@@ -298,7 +421,6 @@ func (m FunctionCall) Validate() error {
 	}
 	return nil
 }
-
 func (m FunctionCall) ExpectedFrom() Sender        { return SenderClient }
 func (m FunctionCall) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m FunctionCall) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -306,6 +428,12 @@ func (m FunctionCall) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m FunctionCall) From() Sender   { return Msg(m).Sender }
 func (m FunctionCall) Msg() Msg       { return Msg(m) }
 func (m FunctionCall) Copy() TypedMsg { return m.CopyTyped() }
+func (m FunctionCall) Parse() (out pgproto3.FunctionCall, err error) {
+	return DecodeMsg[pgproto3.FunctionCall](m.Msg())
+}
+func (m FunctionCall) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m FunctionCall) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m FunctionCall) Len() int                            { return Msg(m).Len() }
@@ -318,14 +446,14 @@ func (m FunctionCall) Retain() RawMessageSource            { return Msg(m).Retai
 
 var _ ClientMsg = FunctionCall{}
 
-// GSSENCRequest is a client startup message.
+// GSSEncRequest is a client startup message.
 // Startup messages only appear before the first [ReadyForQuery] response.
-type GSSENCRequest Msg
+type GSSEncRequest Msg
 
-func (m GSSENCRequest) String() string           { return fmt.Sprintf("GSSENCRequest(%v)", Msg(m)) }
-func (m GSSENCRequest) ExpectedType() MsgType    { return MsgGSSENCRequest }
-func (m GSSENCRequest) CopyTyped() GSSENCRequest { return GSSENCRequest(m.Msg().Copy()) }
-func (m GSSENCRequest) Validate() error {
+func (m GSSEncRequest) String() string           { return fmt.Sprintf("GSSEncRequest(%v)", Msg(m)) }
+func (m GSSEncRequest) ExpectedType() MsgType    { return MsgGSSEncRequest }
+func (m GSSEncRequest) CopyTyped() GSSEncRequest { return GSSEncRequest(m.Msg().Copy()) }
+func (m GSSEncRequest) Validate() error {
 	if err := Msg(m).Validate(); err != nil {
 		return err
 	}
@@ -337,28 +465,33 @@ func (m GSSENCRequest) Validate() error {
 	}
 	return nil
 }
+func (m GSSEncRequest) ExpectedFrom() Sender        { return SenderClient }
+func (m GSSEncRequest) ExpectedClientType() MsgType { return m.ExpectedType() }
+func (m GSSEncRequest) CopyClient() ClientMsg       { return m.CopyTyped() }
 
-func (m GSSENCRequest) ExpectedFrom() Sender        { return SenderClient }
-func (m GSSENCRequest) ExpectedClientType() MsgType { return m.ExpectedType() }
-func (m GSSENCRequest) CopyClient() ClientMsg       { return m.CopyTyped() }
+func (m GSSEncRequest) From() Sender   { return Msg(m).Sender }
+func (m GSSEncRequest) Msg() Msg       { return Msg(m) }
+func (m GSSEncRequest) Copy() TypedMsg { return m.CopyTyped() }
+func (m GSSEncRequest) Parse() (out pgproto3.GSSEncRequest, err error) {
+	return DecodeMsg[pgproto3.GSSEncRequest](m.Msg())
+}
+func (m GSSEncRequest) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
-func (m GSSENCRequest) From() Sender   { return Msg(m).Sender }
-func (m GSSENCRequest) Msg() Msg       { return Msg(m) }
-func (m GSSENCRequest) Copy() TypedMsg { return m.CopyTyped() }
+func (m GSSEncRequest) MessageType() MsgType                { return Msg(m).MessageType() }
+func (m GSSEncRequest) Len() int                            { return Msg(m).Len() }
+func (m GSSEncRequest) Bytes() []byte                       { return Msg(m).Bytes() }
+func (m GSSEncRequest) Body() []byte                        { return Msg(m).Body() }
+func (m GSSEncRequest) NewReader() io.Reader                { return Msg(m).NewReader() }
+func (m GSSEncRequest) WriteTo(w io.Writer) (int64, error)  { return Msg(m).WriteTo(w) }
+func (m GSSEncRequest) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf) }
+func (m GSSEncRequest) Retain() RawMessageSource            { return Msg(m).Retain() }
 
-func (m GSSENCRequest) MessageType() MsgType                { return Msg(m).MessageType() }
-func (m GSSENCRequest) Len() int                            { return Msg(m).Len() }
-func (m GSSENCRequest) Bytes() []byte                       { return Msg(m).Bytes() }
-func (m GSSENCRequest) Body() []byte                        { return Msg(m).Body() }
-func (m GSSENCRequest) NewReader() io.Reader                { return Msg(m).NewReader() }
-func (m GSSENCRequest) WriteTo(w io.Writer) (int64, error)  { return Msg(m).WriteTo(w) }
-func (m GSSENCRequest) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf) }
-func (m GSSENCRequest) Retain() RawMessageSource            { return Msg(m).Retain() }
-
-var _ ClientMsg = GSSENCRequest{}
+var _ ClientMsg = GSSEncRequest{}
 
 // Parse is a client request message.
-// Responses: [ParseComplete], [Execute].
+// Responses: [ParseComplete], [ErrorResponse].
 type Parse Msg
 
 func (m Parse) String() string        { return fmt.Sprintf("Parse(%v)", Msg(m)) }
@@ -376,7 +509,6 @@ func (m Parse) Validate() error {
 	}
 	return nil
 }
-
 func (m Parse) ExpectedFrom() Sender        { return SenderClient }
 func (m Parse) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Parse) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -384,6 +516,12 @@ func (m Parse) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Parse) From() Sender   { return Msg(m).Sender }
 func (m Parse) Msg() Msg       { return Msg(m) }
 func (m Parse) Copy() TypedMsg { return m.CopyTyped() }
+func (m Parse) Parse() (out pgproto3.Parse, err error) {
+	return DecodeMsg[pgproto3.Parse](m.Msg())
+}
+func (m Parse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Parse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Parse) Len() int                            { return Msg(m).Len() }
@@ -415,7 +553,6 @@ func (m PasswordMessage) Validate() error {
 	}
 	return nil
 }
-
 func (m PasswordMessage) ExpectedFrom() Sender        { return SenderClient }
 func (m PasswordMessage) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m PasswordMessage) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -423,6 +560,12 @@ func (m PasswordMessage) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m PasswordMessage) From() Sender   { return Msg(m).Sender }
 func (m PasswordMessage) Msg() Msg       { return Msg(m) }
 func (m PasswordMessage) Copy() TypedMsg { return m.CopyTyped() }
+func (m PasswordMessage) Parse() (out pgproto3.PasswordMessage, err error) {
+	return DecodeMsg[pgproto3.PasswordMessage](m.Msg())
+}
+func (m PasswordMessage) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m PasswordMessage) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m PasswordMessage) Len() int                            { return Msg(m).Len() }
@@ -436,7 +579,7 @@ func (m PasswordMessage) Retain() RawMessageSource            { return Msg(m).Re
 var _ ClientMsg = PasswordMessage{}
 
 // Query is a client request message.
-// Responses: [ReadyForQuery], [Close], [CopyInResponse], [Flush], [CopyBothResponse], [RowDescription], [Describe], [EmptyQueryResponse], [Execute], [NoticeResponse].
+// Responses: [ReadyForQuery], [CommandComplete], [CopyInResponse], [CopyOutResponse], [CopyBothResponse], [RowDescription], [DataRow], [EmptyQueryResponse], [ErrorResponse], [NoticeResponse].
 type Query Msg
 
 func (m Query) String() string        { return fmt.Sprintf("Query(%v)", Msg(m)) }
@@ -454,7 +597,6 @@ func (m Query) Validate() error {
 	}
 	return nil
 }
-
 func (m Query) ExpectedFrom() Sender        { return SenderClient }
 func (m Query) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Query) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -462,6 +604,12 @@ func (m Query) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Query) From() Sender   { return Msg(m).Sender }
 func (m Query) Msg() Msg       { return Msg(m) }
 func (m Query) Copy() TypedMsg { return m.CopyTyped() }
+func (m Query) Parse() (out pgproto3.Query, err error) {
+	return DecodeMsg[pgproto3.Query](m.Msg())
+}
+func (m Query) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Query) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Query) Len() int                            { return Msg(m).Len() }
@@ -493,7 +641,6 @@ func (m SSLRequest) Validate() error {
 	}
 	return nil
 }
-
 func (m SSLRequest) ExpectedFrom() Sender        { return SenderClient }
 func (m SSLRequest) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m SSLRequest) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -501,6 +648,12 @@ func (m SSLRequest) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m SSLRequest) From() Sender   { return Msg(m).Sender }
 func (m SSLRequest) Msg() Msg       { return Msg(m) }
 func (m SSLRequest) Copy() TypedMsg { return m.CopyTyped() }
+func (m SSLRequest) Parse() (out pgproto3.SSLRequest, err error) {
+	return DecodeMsg[pgproto3.SSLRequest](m.Msg())
+}
+func (m SSLRequest) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m SSLRequest) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m SSLRequest) Len() int                            { return Msg(m).Len() }
@@ -532,7 +685,6 @@ func (m StartupMessage) Validate() error {
 	}
 	return nil
 }
-
 func (m StartupMessage) ExpectedFrom() Sender        { return SenderClient }
 func (m StartupMessage) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m StartupMessage) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -540,6 +692,12 @@ func (m StartupMessage) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m StartupMessage) From() Sender   { return Msg(m).Sender }
 func (m StartupMessage) Msg() Msg       { return Msg(m) }
 func (m StartupMessage) Copy() TypedMsg { return m.CopyTyped() }
+func (m StartupMessage) Parse() (out pgproto3.StartupMessage, err error) {
+	return DecodeMsg[pgproto3.StartupMessage](m.Msg())
+}
+func (m StartupMessage) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m StartupMessage) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m StartupMessage) Len() int                            { return Msg(m).Len() }
@@ -571,7 +729,6 @@ func (m Sync) Validate() error {
 	}
 	return nil
 }
-
 func (m Sync) ExpectedFrom() Sender        { return SenderClient }
 func (m Sync) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Sync) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -579,6 +736,12 @@ func (m Sync) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Sync) From() Sender   { return Msg(m).Sender }
 func (m Sync) Msg() Msg       { return Msg(m) }
 func (m Sync) Copy() TypedMsg { return m.CopyTyped() }
+func (m Sync) Parse() (out pgproto3.Sync, err error) {
+	return DecodeMsg[pgproto3.Sync](m.Msg())
+}
+func (m Sync) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Sync) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Sync) Len() int                            { return Msg(m).Len() }
@@ -609,7 +772,6 @@ func (m Terminate) Validate() error {
 	}
 	return nil
 }
-
 func (m Terminate) ExpectedFrom() Sender        { return SenderClient }
 func (m Terminate) ExpectedClientType() MsgType { return m.ExpectedType() }
 func (m Terminate) CopyClient() ClientMsg       { return m.CopyTyped() }
@@ -617,6 +779,12 @@ func (m Terminate) CopyClient() ClientMsg       { return m.CopyTyped() }
 func (m Terminate) From() Sender   { return Msg(m).Sender }
 func (m Terminate) Msg() Msg       { return Msg(m) }
 func (m Terminate) Copy() TypedMsg { return m.CopyTyped() }
+func (m Terminate) Parse() (out pgproto3.Terminate, err error) {
+	return DecodeMsg[pgproto3.Terminate](m.Msg())
+}
+func (m Terminate) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m Terminate) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Terminate) Len() int                            { return Msg(m).Len() }
@@ -648,7 +816,6 @@ func (m Authentication) Validate() error {
 	}
 	return nil
 }
-
 func (m Authentication) ExpectedFrom() Sender        { return SenderServer }
 func (m Authentication) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m Authentication) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -656,6 +823,9 @@ func (m Authentication) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m Authentication) From() Sender   { return Msg(m).Sender }
 func (m Authentication) Msg() Msg       { return Msg(m) }
 func (m Authentication) Copy() TypedMsg { return m.CopyTyped() }
+func (m Authentication) ParseAny() (pgproto3.Message, error) {
+	return nil, fmt.Errorf("Authentication has no single pgproto3 equivalent")
+}
 
 func (m Authentication) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m Authentication) Len() int                            { return Msg(m).Len() }
@@ -687,7 +857,6 @@ func (m BackendKeyData) Validate() error {
 	}
 	return nil
 }
-
 func (m BackendKeyData) ExpectedFrom() Sender        { return SenderServer }
 func (m BackendKeyData) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m BackendKeyData) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -695,6 +864,12 @@ func (m BackendKeyData) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m BackendKeyData) From() Sender   { return Msg(m).Sender }
 func (m BackendKeyData) Msg() Msg       { return Msg(m) }
 func (m BackendKeyData) Copy() TypedMsg { return m.CopyTyped() }
+func (m BackendKeyData) Parse() (out pgproto3.BackendKeyData, err error) {
+	return DecodeMsg[pgproto3.BackendKeyData](m.Msg())
+}
+func (m BackendKeyData) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m BackendKeyData) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m BackendKeyData) Len() int                            { return Msg(m).Len() }
@@ -726,7 +901,6 @@ func (m BindComplete) Validate() error {
 	}
 	return nil
 }
-
 func (m BindComplete) ExpectedFrom() Sender        { return SenderServer }
 func (m BindComplete) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m BindComplete) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -734,6 +908,12 @@ func (m BindComplete) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m BindComplete) From() Sender   { return Msg(m).Sender }
 func (m BindComplete) Msg() Msg       { return Msg(m) }
 func (m BindComplete) Copy() TypedMsg { return m.CopyTyped() }
+func (m BindComplete) Parse() (out pgproto3.BindComplete, err error) {
+	return DecodeMsg[pgproto3.BindComplete](m.Msg())
+}
+func (m BindComplete) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m BindComplete) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m BindComplete) Len() int                            { return Msg(m).Len() }
@@ -747,7 +927,7 @@ func (m BindComplete) Retain() RawMessageSource            { return Msg(m).Retai
 var _ ServerMsg = BindComplete{}
 
 // CloseComplete is a server response message.
-// Response to [Close].
+// Response to [CommandComplete].
 type CloseComplete Msg
 
 func (m CloseComplete) String() string           { return fmt.Sprintf("CloseComplete(%v)", Msg(m)) }
@@ -765,7 +945,6 @@ func (m CloseComplete) Validate() error {
 	}
 	return nil
 }
-
 func (m CloseComplete) ExpectedFrom() Sender        { return SenderServer }
 func (m CloseComplete) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m CloseComplete) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -773,6 +952,12 @@ func (m CloseComplete) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m CloseComplete) From() Sender   { return Msg(m).Sender }
 func (m CloseComplete) Msg() Msg       { return Msg(m) }
 func (m CloseComplete) Copy() TypedMsg { return m.CopyTyped() }
+func (m CloseComplete) Parse() (out pgproto3.CloseComplete, err error) {
+	return DecodeMsg[pgproto3.CloseComplete](m.Msg())
+}
+func (m CloseComplete) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m CloseComplete) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m CloseComplete) Len() int                            { return Msg(m).Len() }
@@ -786,7 +971,7 @@ func (m CloseComplete) Retain() RawMessageSource            { return Msg(m).Reta
 var _ ServerMsg = CloseComplete{}
 
 // CommandComplete is a server response message.
-// Response to [Execute], [Query].
+// Response to [ErrorResponse], [Query].
 type CommandComplete Msg
 
 func (m CommandComplete) String() string             { return fmt.Sprintf("CommandComplete(%v)", Msg(m)) }
@@ -804,7 +989,6 @@ func (m CommandComplete) Validate() error {
 	}
 	return nil
 }
-
 func (m CommandComplete) ExpectedFrom() Sender        { return SenderServer }
 func (m CommandComplete) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m CommandComplete) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -812,6 +996,12 @@ func (m CommandComplete) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m CommandComplete) From() Sender   { return Msg(m).Sender }
 func (m CommandComplete) Msg() Msg       { return Msg(m) }
 func (m CommandComplete) Copy() TypedMsg { return m.CopyTyped() }
+func (m CommandComplete) Parse() (out pgproto3.CommandComplete, err error) {
+	return DecodeMsg[pgproto3.CommandComplete](m.Msg())
+}
+func (m CommandComplete) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m CommandComplete) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m CommandComplete) Len() int                            { return Msg(m).Len() }
@@ -825,7 +1015,7 @@ func (m CommandComplete) Retain() RawMessageSource            { return Msg(m).Re
 var _ ServerMsg = CommandComplete{}
 
 // CopyBothResponse is a server response message.
-// Response to [Execute], [FunctionCall], [Query].
+// Response to [ErrorResponse], [FunctionCall], [Query].
 type CopyBothResponse Msg
 
 func (m CopyBothResponse) String() string              { return fmt.Sprintf("CopyBothResponse(%v)", Msg(m)) }
@@ -843,7 +1033,6 @@ func (m CopyBothResponse) Validate() error {
 	}
 	return nil
 }
-
 func (m CopyBothResponse) ExpectedFrom() Sender        { return SenderServer }
 func (m CopyBothResponse) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m CopyBothResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -851,6 +1040,12 @@ func (m CopyBothResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m CopyBothResponse) From() Sender   { return Msg(m).Sender }
 func (m CopyBothResponse) Msg() Msg       { return Msg(m) }
 func (m CopyBothResponse) Copy() TypedMsg { return m.CopyTyped() }
+func (m CopyBothResponse) Parse() (out pgproto3.CopyBothResponse, err error) {
+	return DecodeMsg[pgproto3.CopyBothResponse](m.Msg())
+}
+func (m CopyBothResponse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m CopyBothResponse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m CopyBothResponse) Len() int                            { return Msg(m).Len() }
@@ -863,8 +1058,94 @@ func (m CopyBothResponse) Retain() RawMessageSource            { return Msg(m).R
 
 var _ ServerMsg = CopyBothResponse{}
 
+// ServerCopyData is a server message.
+type ServerCopyData Msg
+
+func (m ServerCopyData) String() string            { return fmt.Sprintf("ServerCopyData(%v)", Msg(m)) }
+func (m ServerCopyData) ExpectedType() MsgType     { return MsgServerCopyData }
+func (m ServerCopyData) CopyTyped() ServerCopyData { return ServerCopyData(m.Msg().Copy()) }
+func (m ServerCopyData) Validate() error {
+	if err := Msg(m).Validate(); err != nil {
+		return err
+	}
+	if m.MessageType() != m.ExpectedType() {
+		return ErrMsgGoTypeMismatch
+	}
+	if m.From() != m.ExpectedFrom() {
+		return ErrMsgSenderMismatch
+	}
+	return nil
+}
+func (m ServerCopyData) ExpectedFrom() Sender        { return SenderServer }
+func (m ServerCopyData) ExpectedServerType() MsgType { return m.ExpectedType() }
+func (m ServerCopyData) CopyServer() ServerMsg       { return m.CopyTyped() }
+
+func (m ServerCopyData) From() Sender   { return Msg(m).Sender }
+func (m ServerCopyData) Msg() Msg       { return Msg(m) }
+func (m ServerCopyData) Copy() TypedMsg { return m.CopyTyped() }
+func (m ServerCopyData) Parse() (out pgproto3.CopyData, err error) {
+	return DecodeMsg[pgproto3.CopyData](m.Msg())
+}
+func (m ServerCopyData) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
+
+func (m ServerCopyData) MessageType() MsgType                { return Msg(m).MessageType() }
+func (m ServerCopyData) Len() int                            { return Msg(m).Len() }
+func (m ServerCopyData) Bytes() []byte                       { return Msg(m).Bytes() }
+func (m ServerCopyData) Body() []byte                        { return Msg(m).Body() }
+func (m ServerCopyData) NewReader() io.Reader                { return Msg(m).NewReader() }
+func (m ServerCopyData) WriteTo(w io.Writer) (int64, error)  { return Msg(m).WriteTo(w) }
+func (m ServerCopyData) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf) }
+func (m ServerCopyData) Retain() RawMessageSource            { return Msg(m).Retain() }
+
+var _ ServerMsg = ServerCopyData{}
+
+// ServerCopyDone is a server message.
+type ServerCopyDone Msg
+
+func (m ServerCopyDone) String() string            { return fmt.Sprintf("ServerCopyDone(%v)", Msg(m)) }
+func (m ServerCopyDone) ExpectedType() MsgType     { return MsgServerCopyDone }
+func (m ServerCopyDone) CopyTyped() ServerCopyDone { return ServerCopyDone(m.Msg().Copy()) }
+func (m ServerCopyDone) Validate() error {
+	if err := Msg(m).Validate(); err != nil {
+		return err
+	}
+	if m.MessageType() != m.ExpectedType() {
+		return ErrMsgGoTypeMismatch
+	}
+	if m.From() != m.ExpectedFrom() {
+		return ErrMsgSenderMismatch
+	}
+	return nil
+}
+func (m ServerCopyDone) ExpectedFrom() Sender        { return SenderServer }
+func (m ServerCopyDone) ExpectedServerType() MsgType { return m.ExpectedType() }
+func (m ServerCopyDone) CopyServer() ServerMsg       { return m.CopyTyped() }
+
+func (m ServerCopyDone) From() Sender   { return Msg(m).Sender }
+func (m ServerCopyDone) Msg() Msg       { return Msg(m) }
+func (m ServerCopyDone) Copy() TypedMsg { return m.CopyTyped() }
+func (m ServerCopyDone) Parse() (out pgproto3.CopyDone, err error) {
+	return DecodeMsg[pgproto3.CopyDone](m.Msg())
+}
+func (m ServerCopyDone) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
+
+func (m ServerCopyDone) MessageType() MsgType                { return Msg(m).MessageType() }
+func (m ServerCopyDone) Len() int                            { return Msg(m).Len() }
+func (m ServerCopyDone) Bytes() []byte                       { return Msg(m).Bytes() }
+func (m ServerCopyDone) Body() []byte                        { return Msg(m).Body() }
+func (m ServerCopyDone) NewReader() io.Reader                { return Msg(m).NewReader() }
+func (m ServerCopyDone) WriteTo(w io.Writer) (int64, error)  { return Msg(m).WriteTo(w) }
+func (m ServerCopyDone) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf) }
+func (m ServerCopyDone) Retain() RawMessageSource            { return Msg(m).Retain() }
+
+var _ ServerMsg = ServerCopyDone{}
+
 // CopyInResponse is a server response message.
-// Response to [Execute], [FunctionCall], [Query].
+// Response to [ErrorResponse], [FunctionCall], [Query].
 type CopyInResponse Msg
 
 func (m CopyInResponse) String() string            { return fmt.Sprintf("CopyInResponse(%v)", Msg(m)) }
@@ -882,7 +1163,6 @@ func (m CopyInResponse) Validate() error {
 	}
 	return nil
 }
-
 func (m CopyInResponse) ExpectedFrom() Sender        { return SenderServer }
 func (m CopyInResponse) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m CopyInResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -890,6 +1170,12 @@ func (m CopyInResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m CopyInResponse) From() Sender   { return Msg(m).Sender }
 func (m CopyInResponse) Msg() Msg       { return Msg(m) }
 func (m CopyInResponse) Copy() TypedMsg { return m.CopyTyped() }
+func (m CopyInResponse) Parse() (out pgproto3.CopyInResponse, err error) {
+	return DecodeMsg[pgproto3.CopyInResponse](m.Msg())
+}
+func (m CopyInResponse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m CopyInResponse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m CopyInResponse) Len() int                            { return Msg(m).Len() }
@@ -903,7 +1189,7 @@ func (m CopyInResponse) Retain() RawMessageSource            { return Msg(m).Ret
 var _ ServerMsg = CopyInResponse{}
 
 // CopyOutResponse is a server response message.
-// Response to [Execute], [FunctionCall], [Query].
+// Response to [ErrorResponse], [FunctionCall], [Query].
 type CopyOutResponse Msg
 
 func (m CopyOutResponse) String() string             { return fmt.Sprintf("CopyOutResponse(%v)", Msg(m)) }
@@ -921,7 +1207,6 @@ func (m CopyOutResponse) Validate() error {
 	}
 	return nil
 }
-
 func (m CopyOutResponse) ExpectedFrom() Sender        { return SenderServer }
 func (m CopyOutResponse) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m CopyOutResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -929,6 +1214,12 @@ func (m CopyOutResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m CopyOutResponse) From() Sender   { return Msg(m).Sender }
 func (m CopyOutResponse) Msg() Msg       { return Msg(m) }
 func (m CopyOutResponse) Copy() TypedMsg { return m.CopyTyped() }
+func (m CopyOutResponse) Parse() (out pgproto3.CopyOutResponse, err error) {
+	return DecodeMsg[pgproto3.CopyOutResponse](m.Msg())
+}
+func (m CopyOutResponse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m CopyOutResponse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m CopyOutResponse) Len() int                            { return Msg(m).Len() }
@@ -960,7 +1251,6 @@ func (m DataRow) Validate() error {
 	}
 	return nil
 }
-
 func (m DataRow) ExpectedFrom() Sender        { return SenderServer }
 func (m DataRow) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m DataRow) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -968,6 +1258,12 @@ func (m DataRow) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m DataRow) From() Sender   { return Msg(m).Sender }
 func (m DataRow) Msg() Msg       { return Msg(m) }
 func (m DataRow) Copy() TypedMsg { return m.CopyTyped() }
+func (m DataRow) Parse() (out pgproto3.DataRow, err error) {
+	return DecodeMsg[pgproto3.DataRow](m.Msg())
+}
+func (m DataRow) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m DataRow) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m DataRow) Len() int                            { return Msg(m).Len() }
@@ -981,7 +1277,7 @@ func (m DataRow) Retain() RawMessageSource            { return Msg(m).Retain() }
 var _ ServerMsg = DataRow{}
 
 // EmptyQueryResponse is a server response message.
-// Response to [Execute], [Query].
+// Response to [ErrorResponse], [Query].
 type EmptyQueryResponse Msg
 
 func (m EmptyQueryResponse) String() string                { return fmt.Sprintf("EmptyQueryResponse(%v)", Msg(m)) }
@@ -999,7 +1295,6 @@ func (m EmptyQueryResponse) Validate() error {
 	}
 	return nil
 }
-
 func (m EmptyQueryResponse) ExpectedFrom() Sender        { return SenderServer }
 func (m EmptyQueryResponse) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m EmptyQueryResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1007,6 +1302,12 @@ func (m EmptyQueryResponse) CopyServer() ServerMsg       { return m.CopyTyped() 
 func (m EmptyQueryResponse) From() Sender   { return Msg(m).Sender }
 func (m EmptyQueryResponse) Msg() Msg       { return Msg(m) }
 func (m EmptyQueryResponse) Copy() TypedMsg { return m.CopyTyped() }
+func (m EmptyQueryResponse) Parse() (out pgproto3.EmptyQueryResponse, err error) {
+	return DecodeMsg[pgproto3.EmptyQueryResponse](m.Msg())
+}
+func (m EmptyQueryResponse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m EmptyQueryResponse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m EmptyQueryResponse) Len() int                            { return Msg(m).Len() }
@@ -1020,7 +1321,7 @@ func (m EmptyQueryResponse) Retain() RawMessageSource            { return Msg(m)
 var _ ServerMsg = EmptyQueryResponse{}
 
 // ErrorResponse is a server response message.
-// Response to [Bind], [Close], [Describe], [Execute], [Parse], [FunctionCall], [Query].
+// Response to [Bind], [CommandComplete], [DataRow], [ErrorResponse], [Parse], [FunctionCall], [Query].
 type ErrorResponse Msg
 
 func (m ErrorResponse) String() string           { return fmt.Sprintf("ErrorResponse(%v)", Msg(m)) }
@@ -1038,7 +1339,6 @@ func (m ErrorResponse) Validate() error {
 	}
 	return nil
 }
-
 func (m ErrorResponse) ExpectedFrom() Sender        { return SenderServer }
 func (m ErrorResponse) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m ErrorResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1046,6 +1346,12 @@ func (m ErrorResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m ErrorResponse) From() Sender   { return Msg(m).Sender }
 func (m ErrorResponse) Msg() Msg       { return Msg(m) }
 func (m ErrorResponse) Copy() TypedMsg { return m.CopyTyped() }
+func (m ErrorResponse) Parse() (out pgproto3.ErrorResponse, err error) {
+	return DecodeMsg[pgproto3.ErrorResponse](m.Msg())
+}
+func (m ErrorResponse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m ErrorResponse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m ErrorResponse) Len() int                            { return Msg(m).Len() }
@@ -1079,7 +1385,6 @@ func (m FunctionCallResponse) Validate() error {
 	}
 	return nil
 }
-
 func (m FunctionCallResponse) ExpectedFrom() Sender        { return SenderServer }
 func (m FunctionCallResponse) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m FunctionCallResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1087,6 +1392,12 @@ func (m FunctionCallResponse) CopyServer() ServerMsg       { return m.CopyTyped(
 func (m FunctionCallResponse) From() Sender   { return Msg(m).Sender }
 func (m FunctionCallResponse) Msg() Msg       { return Msg(m) }
 func (m FunctionCallResponse) Copy() TypedMsg { return m.CopyTyped() }
+func (m FunctionCallResponse) Parse() (out pgproto3.FunctionCallResponse, err error) {
+	return DecodeMsg[pgproto3.FunctionCallResponse](m.Msg())
+}
+func (m FunctionCallResponse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m FunctionCallResponse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m FunctionCallResponse) Len() int                            { return Msg(m).Len() }
@@ -1100,7 +1411,7 @@ func (m FunctionCallResponse) Retain() RawMessageSource            { return Msg(
 var _ ServerMsg = FunctionCallResponse{}
 
 // NoData is a server response message.
-// Response to [Describe].
+// Response to [DataRow].
 type NoData Msg
 
 func (m NoData) String() string        { return fmt.Sprintf("NoData(%v)", Msg(m)) }
@@ -1118,7 +1429,6 @@ func (m NoData) Validate() error {
 	}
 	return nil
 }
-
 func (m NoData) ExpectedFrom() Sender        { return SenderServer }
 func (m NoData) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m NoData) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1126,6 +1436,12 @@ func (m NoData) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m NoData) From() Sender   { return Msg(m).Sender }
 func (m NoData) Msg() Msg       { return Msg(m) }
 func (m NoData) Copy() TypedMsg { return m.CopyTyped() }
+func (m NoData) Parse() (out pgproto3.NoData, err error) {
+	return DecodeMsg[pgproto3.NoData](m.Msg())
+}
+func (m NoData) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m NoData) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m NoData) Len() int                            { return Msg(m).Len() }
@@ -1157,7 +1473,6 @@ func (m NoticeResponse) Validate() error {
 	}
 	return nil
 }
-
 func (m NoticeResponse) ExpectedFrom() Sender        { return SenderServer }
 func (m NoticeResponse) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m NoticeResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1165,6 +1480,12 @@ func (m NoticeResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m NoticeResponse) From() Sender   { return Msg(m).Sender }
 func (m NoticeResponse) Msg() Msg       { return Msg(m) }
 func (m NoticeResponse) Copy() TypedMsg { return m.CopyTyped() }
+func (m NoticeResponse) Parse() (out pgproto3.NoticeResponse, err error) {
+	return DecodeMsg[pgproto3.NoticeResponse](m.Msg())
+}
+func (m NoticeResponse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m NoticeResponse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m NoticeResponse) Len() int                            { return Msg(m).Len() }
@@ -1197,7 +1518,6 @@ func (m NotificationResponse) Validate() error {
 	}
 	return nil
 }
-
 func (m NotificationResponse) ExpectedFrom() Sender        { return SenderServer }
 func (m NotificationResponse) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m NotificationResponse) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1205,6 +1525,12 @@ func (m NotificationResponse) CopyServer() ServerMsg       { return m.CopyTyped(
 func (m NotificationResponse) From() Sender   { return Msg(m).Sender }
 func (m NotificationResponse) Msg() Msg       { return Msg(m) }
 func (m NotificationResponse) Copy() TypedMsg { return m.CopyTyped() }
+func (m NotificationResponse) Parse() (out pgproto3.NotificationResponse, err error) {
+	return DecodeMsg[pgproto3.NotificationResponse](m.Msg())
+}
+func (m NotificationResponse) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m NotificationResponse) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m NotificationResponse) Len() int                            { return Msg(m).Len() }
@@ -1218,7 +1544,7 @@ func (m NotificationResponse) Retain() RawMessageSource            { return Msg(
 var _ ServerMsg = NotificationResponse{}
 
 // ParameterDescription is a server response message.
-// Response to [Describe].
+// Response to [DataRow].
 type ParameterDescription Msg
 
 func (m ParameterDescription) String() string        { return fmt.Sprintf("ParameterDescription(%v)", Msg(m)) }
@@ -1238,7 +1564,6 @@ func (m ParameterDescription) Validate() error {
 	}
 	return nil
 }
-
 func (m ParameterDescription) ExpectedFrom() Sender        { return SenderServer }
 func (m ParameterDescription) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m ParameterDescription) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1246,6 +1571,12 @@ func (m ParameterDescription) CopyServer() ServerMsg       { return m.CopyTyped(
 func (m ParameterDescription) From() Sender   { return Msg(m).Sender }
 func (m ParameterDescription) Msg() Msg       { return Msg(m) }
 func (m ParameterDescription) Copy() TypedMsg { return m.CopyTyped() }
+func (m ParameterDescription) Parse() (out pgproto3.ParameterDescription, err error) {
+	return DecodeMsg[pgproto3.ParameterDescription](m.Msg())
+}
+func (m ParameterDescription) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m ParameterDescription) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m ParameterDescription) Len() int                            { return Msg(m).Len() }
@@ -1276,7 +1607,6 @@ func (m ParameterStatus) Validate() error {
 	}
 	return nil
 }
-
 func (m ParameterStatus) ExpectedFrom() Sender        { return SenderServer }
 func (m ParameterStatus) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m ParameterStatus) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1284,6 +1614,12 @@ func (m ParameterStatus) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m ParameterStatus) From() Sender   { return Msg(m).Sender }
 func (m ParameterStatus) Msg() Msg       { return Msg(m) }
 func (m ParameterStatus) Copy() TypedMsg { return m.CopyTyped() }
+func (m ParameterStatus) Parse() (out pgproto3.ParameterStatus, err error) {
+	return DecodeMsg[pgproto3.ParameterStatus](m.Msg())
+}
+func (m ParameterStatus) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m ParameterStatus) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m ParameterStatus) Len() int                            { return Msg(m).Len() }
@@ -1315,7 +1651,6 @@ func (m ParseComplete) Validate() error {
 	}
 	return nil
 }
-
 func (m ParseComplete) ExpectedFrom() Sender        { return SenderServer }
 func (m ParseComplete) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m ParseComplete) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1323,6 +1658,12 @@ func (m ParseComplete) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m ParseComplete) From() Sender   { return Msg(m).Sender }
 func (m ParseComplete) Msg() Msg       { return Msg(m) }
 func (m ParseComplete) Copy() TypedMsg { return m.CopyTyped() }
+func (m ParseComplete) Parse() (out pgproto3.ParseComplete, err error) {
+	return DecodeMsg[pgproto3.ParseComplete](m.Msg())
+}
+func (m ParseComplete) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m ParseComplete) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m ParseComplete) Len() int                            { return Msg(m).Len() }
@@ -1336,7 +1677,7 @@ func (m ParseComplete) Retain() RawMessageSource            { return Msg(m).Reta
 var _ ServerMsg = ParseComplete{}
 
 // PortalSuspended is a server response message.
-// Response to [Execute].
+// Response to [ErrorResponse].
 type PortalSuspended Msg
 
 func (m PortalSuspended) String() string             { return fmt.Sprintf("PortalSuspended(%v)", Msg(m)) }
@@ -1354,7 +1695,6 @@ func (m PortalSuspended) Validate() error {
 	}
 	return nil
 }
-
 func (m PortalSuspended) ExpectedFrom() Sender        { return SenderServer }
 func (m PortalSuspended) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m PortalSuspended) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1362,6 +1702,12 @@ func (m PortalSuspended) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m PortalSuspended) From() Sender   { return Msg(m).Sender }
 func (m PortalSuspended) Msg() Msg       { return Msg(m) }
 func (m PortalSuspended) Copy() TypedMsg { return m.CopyTyped() }
+func (m PortalSuspended) Parse() (out pgproto3.PortalSuspended, err error) {
+	return DecodeMsg[pgproto3.PortalSuspended](m.Msg())
+}
+func (m PortalSuspended) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m PortalSuspended) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m PortalSuspended) Len() int                            { return Msg(m).Len() }
@@ -1375,7 +1721,7 @@ func (m PortalSuspended) Retain() RawMessageSource            { return Msg(m).Re
 var _ ServerMsg = PortalSuspended{}
 
 // ReadyForQuery is a server response message.
-// Response to [FunctionCall], [Query], [Sync].
+// Response to [FunctionCall], [Query], [ParameterStatus].
 type ReadyForQuery Msg
 
 func (m ReadyForQuery) String() string           { return fmt.Sprintf("ReadyForQuery(%v)", Msg(m)) }
@@ -1393,7 +1739,6 @@ func (m ReadyForQuery) Validate() error {
 	}
 	return nil
 }
-
 func (m ReadyForQuery) ExpectedFrom() Sender        { return SenderServer }
 func (m ReadyForQuery) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m ReadyForQuery) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1401,6 +1746,12 @@ func (m ReadyForQuery) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m ReadyForQuery) From() Sender   { return Msg(m).Sender }
 func (m ReadyForQuery) Msg() Msg       { return Msg(m) }
 func (m ReadyForQuery) Copy() TypedMsg { return m.CopyTyped() }
+func (m ReadyForQuery) Parse() (out pgproto3.ReadyForQuery, err error) {
+	return DecodeMsg[pgproto3.ReadyForQuery](m.Msg())
+}
+func (m ReadyForQuery) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m ReadyForQuery) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m ReadyForQuery) Len() int                            { return Msg(m).Len() }
@@ -1414,7 +1765,7 @@ func (m ReadyForQuery) Retain() RawMessageSource            { return Msg(m).Reta
 var _ ServerMsg = ReadyForQuery{}
 
 // RowDescription is a server response message.
-// Response to [Describe], [Query].
+// Response to [DataRow], [Query].
 type RowDescription Msg
 
 func (m RowDescription) String() string            { return fmt.Sprintf("RowDescription(%v)", Msg(m)) }
@@ -1432,7 +1783,6 @@ func (m RowDescription) Validate() error {
 	}
 	return nil
 }
-
 func (m RowDescription) ExpectedFrom() Sender        { return SenderServer }
 func (m RowDescription) ExpectedServerType() MsgType { return m.ExpectedType() }
 func (m RowDescription) CopyServer() ServerMsg       { return m.CopyTyped() }
@@ -1440,6 +1790,12 @@ func (m RowDescription) CopyServer() ServerMsg       { return m.CopyTyped() }
 func (m RowDescription) From() Sender   { return Msg(m).Sender }
 func (m RowDescription) Msg() Msg       { return Msg(m) }
 func (m RowDescription) Copy() TypedMsg { return m.CopyTyped() }
+func (m RowDescription) Parse() (out pgproto3.RowDescription, err error) {
+	return DecodeMsg[pgproto3.RowDescription](m.Msg())
+}
+func (m RowDescription) ParseAny() (pgproto3.Message, error) {
+	return DecodeTypedMsg(m)
+}
 
 func (m RowDescription) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m RowDescription) Len() int                            { return Msg(m).Len() }
@@ -1451,82 +1807,6 @@ func (m RowDescription) AppendTo(buf []byte) ([]byte, error) { return Msg(m).App
 func (m RowDescription) Retain() RawMessageSource            { return Msg(m).Retain() }
 
 var _ ServerMsg = RowDescription{}
-
-// CopyData is a client or server message.
-type CopyData Msg
-
-func (m CopyData) String() string        { return fmt.Sprintf("CopyData(%v)", Msg(m)) }
-func (m CopyData) ExpectedType() MsgType { return MsgClientCopyData }
-func (m CopyData) CopyTyped() CopyData   { return CopyData(m.Msg().Copy()) }
-func (m CopyData) Validate() error {
-	if err := Msg(m).Validate(); err != nil {
-		return err
-	}
-	if m.MessageType() != m.ExpectedType() {
-		return ErrMsgGoTypeMismatch
-	}
-	return nil
-}
-
-func (m CopyData) ExpectedFrom() Sender        { return m.From() }
-func (m CopyData) ExpectedClientType() MsgType { return m.ExpectedType() }
-func (m CopyData) ExpectedServerType() MsgType { return m.ExpectedType() }
-func (m CopyData) CopyClient() ClientMsg       { return m.CopyTyped() }
-func (m CopyData) CopyServer() ServerMsg       { return m.CopyTyped() }
-
-func (m CopyData) From() Sender   { return Msg(m).Sender }
-func (m CopyData) Msg() Msg       { return Msg(m) }
-func (m CopyData) Copy() TypedMsg { return m.CopyTyped() }
-
-func (m CopyData) MessageType() MsgType                { return Msg(m).MessageType() }
-func (m CopyData) Len() int                            { return Msg(m).Len() }
-func (m CopyData) Bytes() []byte                       { return Msg(m).Bytes() }
-func (m CopyData) Body() []byte                        { return Msg(m).Body() }
-func (m CopyData) NewReader() io.Reader                { return Msg(m).NewReader() }
-func (m CopyData) WriteTo(w io.Writer) (int64, error)  { return Msg(m).WriteTo(w) }
-func (m CopyData) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf) }
-func (m CopyData) Retain() RawMessageSource            { return Msg(m).Retain() }
-
-var _ ClientMsg = CopyData{}
-var _ ServerMsg = CopyData{}
-
-// CopyDone is a client or server message.
-type CopyDone Msg
-
-func (m CopyDone) String() string        { return fmt.Sprintf("CopyDone(%v)", Msg(m)) }
-func (m CopyDone) ExpectedType() MsgType { return MsgClientCopyDone }
-func (m CopyDone) CopyTyped() CopyDone   { return CopyDone(m.Msg().Copy()) }
-func (m CopyDone) Validate() error {
-	if err := Msg(m).Validate(); err != nil {
-		return err
-	}
-	if m.MessageType() != m.ExpectedType() {
-		return ErrMsgGoTypeMismatch
-	}
-	return nil
-}
-
-func (m CopyDone) ExpectedFrom() Sender        { return m.From() }
-func (m CopyDone) ExpectedClientType() MsgType { return m.ExpectedType() }
-func (m CopyDone) ExpectedServerType() MsgType { return m.ExpectedType() }
-func (m CopyDone) CopyClient() ClientMsg       { return m.CopyTyped() }
-func (m CopyDone) CopyServer() ServerMsg       { return m.CopyTyped() }
-
-func (m CopyDone) From() Sender   { return Msg(m).Sender }
-func (m CopyDone) Msg() Msg       { return Msg(m) }
-func (m CopyDone) Copy() TypedMsg { return m.CopyTyped() }
-
-func (m CopyDone) MessageType() MsgType                { return Msg(m).MessageType() }
-func (m CopyDone) Len() int                            { return Msg(m).Len() }
-func (m CopyDone) Bytes() []byte                       { return Msg(m).Bytes() }
-func (m CopyDone) Body() []byte                        { return Msg(m).Body() }
-func (m CopyDone) NewReader() io.Reader                { return Msg(m).NewReader() }
-func (m CopyDone) WriteTo(w io.Writer) (int64, error)  { return Msg(m).WriteTo(w) }
-func (m CopyDone) AppendTo(buf []byte) ([]byte, error) { return Msg(m).AppendTo(buf) }
-func (m CopyDone) Retain() RawMessageSource            { return Msg(m).Retain() }
-
-var _ ClientMsg = CopyDone{}
-var _ ServerMsg = CopyDone{}
 
 // UnknownMsg wraps a message with an unrecognized type byte.
 type UnknownMsg Msg
@@ -1544,6 +1824,9 @@ func (m UnknownMsg) Validate() error {
 func (m UnknownMsg) From() Sender   { return Msg(m).Sender }
 func (m UnknownMsg) Msg() Msg       { return Msg(m) }
 func (m UnknownMsg) Copy() TypedMsg { return m.CopyTyped() }
+func (m UnknownMsg) ParseAny() (pgproto3.Message, error) {
+	return nil, fmt.Errorf("UnknownMsg cannot be parsed")
+}
 
 func (m UnknownMsg) MessageType() MsgType                { return Msg(m).MessageType() }
 func (m UnknownMsg) Len() int                            { return Msg(m).Len() }
@@ -1570,8 +1853,11 @@ func Typed(m Msg) TypedMsg {
 			return Describe(m)
 		}
 		return DataRow(m)
-	case MsgClientCopyData:
-		return CopyData(m)
+	case MsgClientCopyData: // ClientCopyData (client) / ServerCopyData (server)
+		if m.Sender == SenderClient {
+			return ClientCopyData(m)
+		}
+		return ServerCopyData(m)
 	case MsgServerReadyForQuery:
 		return ReadyForQuery(m)
 	case MsgClientClose: // Close (client) / CommandComplete (server)
@@ -1616,8 +1902,11 @@ func Typed(m Msg) TypedMsg {
 		return CopyOutResponse(m)
 	case MsgServerCopyBothResponse:
 		return CopyBothResponse(m)
-	case MsgClientCopyDone:
-		return CopyDone(m)
+	case MsgClientCopyDone: // ClientCopyDone (client) / ServerCopyDone (server)
+		if m.Sender == SenderClient {
+			return ClientCopyDone(m)
+		}
+		return ServerCopyDone(m)
 	case MsgClientCopyFail:
 		return CopyFail(m)
 	case MsgServerNoticeResponse:
@@ -1646,8 +1935,8 @@ func Typed(m Msg) TypedMsg {
 		return SSLRequest(m)
 	case MsgCancelRequest:
 		return CancelRequest(m)
-	case MsgGSSENCRequest:
-		return GSSENCRequest(m)
+	case MsgGSSEncRequest:
+		return GSSEncRequest(m)
 	}
 	return UnknownMsg(m)
 }

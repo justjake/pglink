@@ -41,7 +41,7 @@ const (
 	MsgStartup       MsgType = 0x00 // StartupMessage (version 3.0)
 	MsgSSLRequest    MsgType = 0x01 // SSLRequest
 	MsgCancelRequest MsgType = 0x02 // CancelRequest
-	MsgGSSENCRequest MsgType = 0x03 // GSSENCRequest
+	MsgGSSEncRequest MsgType = 0x03 // GSSEncRequest
 )
 
 // Client (frontend) message types
@@ -141,7 +141,7 @@ var MsgIsStartup = MsgLookup[bool]{
 	MsgStartup:       true, // StartupMessage
 	MsgSSLRequest:    true, // SSLRequest
 	MsgCancelRequest: true, // CancelRequest
-	MsgGSSENCRequest: true, // GSSENCRequest
+	MsgGSSEncRequest: true, // GSSEncRequest
 
 	// Server startup messages
 	'R': true, // Authentication (all variants)
@@ -161,7 +161,7 @@ var MsgName = MsgLookup[string]{
 	0x00: "StartupMessage",
 	0x01: "SSLRequest",
 	0x02: "CancelRequest",
-	0x03: "GSSENCRequest",
+	0x03: "GSSEncRequest",
 
 	// Client messages
 	'B': "Bind",
@@ -206,7 +206,7 @@ var ClientMsgName = MsgLookup[string]{
 	0x00: "StartupMessage",
 	0x01: "SSLRequest",
 	0x02: "CancelRequest",
-	0x03: "GSSENCRequest",
+	0x03: "GSSEncRequest",
 
 	// Client messages (with client-specific names for shared types)
 	'B': "Bind",
@@ -432,5 +432,11 @@ var MsgParsePriority = []MsgType{
 	MsgStartup,       // 0x00
 	MsgSSLRequest,    // 0x01
 	MsgCancelRequest, // 0x02
-	MsgGSSENCRequest, // 0x03
+	MsgGSSEncRequest, // 0x03
+}
+
+// TypedMsgDisablePgproto3 lists message type names that don't have a Parse() method
+// generated because they don't have a single matching pgproto3 type.
+var TypedMsgDisablePgproto3 = map[string]bool{
+	"Authentication": true, // pgproto3 has AuthenticationOk, AuthenticationMD5Password, etc.
 }

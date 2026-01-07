@@ -6,15 +6,13 @@ import (
 	"log/slog"
 	"net"
 	"time"
-
-	"github.com/justjake/pglink/pkg/pgwire"
 )
 
 // MessageTracker is a pluggable mechanism for tracking state as messages are processed.
 type MessageTracker interface {
 	// TrackMessage tracks the message.
 	// The tracker may return a modified context for tracing.
-	TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error)
+	TrackMessage(ctx context.Context, msg *Pos2) (context.Context, error)
 }
 
 // Conn represents a connection to a frontend (client) or backend (server).
@@ -63,7 +61,7 @@ type Backend interface {
 //
 // The error returned from the handler will be returned by [Session.Run],
 // possibly wrapped with additional errors encountered stopping the session.
-type ProxyHandler func(ctx context.Context, session *Session, pos Pos, err error) error
+type ProxyHandler func(ctx context.Context, session *Session, pos *Pos2, err error) error
 
 // SessionConfig configures a [Session].
 type SessionConfig struct {
@@ -131,5 +129,6 @@ type Runtime interface {
 	// The Session will attempt to terminate the Conn.
 	StopConn(ctx context.Context, role ProxyRole) error
 	// Flush pending writes to a connection.
-	WriteConn(ctx context.Context, role ProxyRole, queued *pgwire.WriteQueue) error
+	// TODO: way to handle backpressure?
+	WriteConn(ctx context.Context, role ProxyRole, queued *Outbox) error
 }

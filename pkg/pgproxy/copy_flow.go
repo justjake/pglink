@@ -16,31 +16,31 @@ func NewCopyFlowTracker(onComplete FlowCompleteHandler[CopyFlow]) FlowTracker[Co
 	return NewFlowTracker(onComplete, waitingForCopyResponse)
 }
 
-func waitingForCopyResponse(ctx context.Context, state FlowState[CopyFlow], msg pgwire.Message) (bool, FlowState[CopyFlow], FlowReducer[CopyFlow], error) {
-	switch msg.(type) {
-	case *pgwire.ServerCopyBothResponse:
+func waitingForCopyResponse(ctx context.Context, state FlowState[CopyFlow], msg FlowMsg) (bool, FlowState[CopyFlow], FlowReducer[CopyFlow], error) {
+	switch msg.Typed().(type) {
+	case pgwire.CopyBothResponse:
 		return true, StartedFlowState(state, CopyFlow{Mode: pgwire.CopyBoth}), copyActive, nil
-	case *pgwire.ServerCopyInResponse:
+	case pgwire.CopyInResponse:
 		return true, StartedFlowState(state, CopyFlow{Mode: pgwire.CopyIn}), copyActive, nil
-	case *pgwire.ServerCopyOutResponse:
+	case pgwire.CopyOutResponse:
 		return true, StartedFlowState(state, CopyFlow{Mode: pgwire.CopyOut}), copyActive, nil
 	default:
 		return false, state, waitingForCopyResponse, nil
 	}
 }
 
-func copyActive(ctx context.Context, state FlowState[CopyFlow], msg pgwire.Message) (bool, FlowState[CopyFlow], FlowReducer[CopyFlow], error) {
-	switch msg := msg.(type) {
-	case *pgwire.ServerCopyData:
+func copyActive(ctx context.Context, state FlowState[CopyFlow], msg FlowMsg) (bool, FlowState[CopyFlow], FlowReducer[CopyFlow], error) {
+	switch msg := msg.Typed().(type) {
+	case pgwire.ServerCopyData:
 		state.Flow.ServerBytes += int64(msg.DataSize())
 		return true, state, copyActive, nil
-	case *pgwire.ClientCopyData:
+	case pgwire.ClientCopyData:
 		state.Flow.ClientBytes += int64(msg.DataSize())
 		return true, state, copyActive, nil
 
-	case *pgwire.ServerCommandComplete:
+	case pgwire.CommandComplete:
 		return true, EndedFlowState(state), nil, nil
-	case *pgwire.ServerErrorResponse:
+	case pgwire.ErrorResponse:
 		return true, EndedFlowState(state), nil, nil
 
 	default:

@@ -14,9 +14,9 @@ func NewTerminateFlowTracker() FlowTracker[TerminateFlow] {
 	return NewFlowTracker(nil, waitingForTerminate)
 }
 
-func waitingForTerminate(ctx context.Context, state FlowState[TerminateFlow], msg pgwire.Message) (bool, FlowState[TerminateFlow], FlowReducer[TerminateFlow], error) {
-	switch msg.(type) {
-	case *pgwire.ClientTerminate:
+func waitingForTerminate(ctx context.Context, state FlowState[TerminateFlow], msg FlowMsg) (bool, FlowState[TerminateFlow], FlowReducer[TerminateFlow], error) {
+	switch msg.Typed().(type) {
+	case pgwire.Terminate:
 		return true, StartedFlowState(state, TerminateFlow{}), waitingForTerminate, nil
 	}
 	return false, state, waitingForTerminate, nil

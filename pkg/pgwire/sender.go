@@ -9,6 +9,10 @@ const (
 	SenderProxy  Sender = 'P' // TODO: remove?
 )
 
+func (s Sender) IsZero() bool {
+	return s == SenderNone
+}
+
 func (s Sender) String() string {
 	switch s {
 	case SenderClient:

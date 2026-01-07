@@ -47,7 +47,7 @@ func (f *FrontendConn) GetExtraData(key any) any {
 
 // Receive receives a message with context deadline support.
 // If ctx has a deadline, it's applied to the read operation.
-func (f *FrontendConn) Receive(ctx context.Context) (pgwire.ClientMessage, error) {
+func (f *FrontendConn) Receive(ctx context.Context) (pgproto3.FrontendMessage, error) {
 	if f.connAcquired {
 		return nil, ErrNetConnInUse
 	}
@@ -75,12 +75,7 @@ func (f *FrontendConn) Receive(ctx context.Context) (pgwire.ClientMessage, error
 		}
 		return nil, err
 	}
-
-	if m, ok := pgwire.ToClientMessage(msg); ok {
-		return m, nil
-	}
-
-	return nil, fmt.Errorf("unknown frontend message: %T", msg)
+	return msg, nil
 }
 
 // Send sends and flushes a message with context deadline support.

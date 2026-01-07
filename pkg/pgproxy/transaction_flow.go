@@ -17,32 +17,36 @@ func NewTransactionFlowTracker(onComplete FlowCompleteHandler[TransactionFlow]) 
 	return NewFlowTracker(onComplete, waitingForTransactionStart)
 }
 
-func waitingForTransactionStart(ctx context.Context, state FlowState[TransactionFlow], msg pgwire.Message) (bool, FlowState[TransactionFlow], FlowReducer[TransactionFlow], error) {
+func waitingForTransactionStart(ctx context.Context, state FlowState[TransactionFlow], msg FlowMsg) (bool, FlowState[TransactionFlow], FlowReducer[TransactionFlow], error) {
 	transactionStarted := func() (bool, FlowState[TransactionFlow], FlowReducer[TransactionFlow], error) {
 		return true, StartedFlowState(state, TransactionFlow{}), inTransaction, nil
 	}
-	switch msg.(type) {
-	case *pgwire.ClientQuery:
+	switch msg.Typed().(type) {
+	case pgwire.Query:
 		return transactionStarted()
-	case *pgwire.ClientParse:
+	case pgwire.Parse:
 		return transactionStarted()
-	case *pgwire.ClientBind:
+	case pgwire.Bind:
 		return transactionStarted()
-	case *pgwire.ClientExecute:
+	case pgwire.Execute:
 		return transactionStarted()
-	case *pgwire.ClientFunctionCall:
+	case pgwire.FunctionCall:
 		return transactionStarted()
 	default:
 		return false, state, waitingForTransactionStart, nil
 	}
 }
 
-func inTransaction(ctx context.Context, state FlowState[TransactionFlow], msg pgwire.Message) (bool, FlowState[TransactionFlow], FlowReducer[TransactionFlow], error) {
-	if msg, ok := msg.(pgwire.ServerMessage); ok {
+func inTransaction(ctx context.Context, state FlowState[TransactionFlow], msg FlowMsg) (bool, FlowState[TransactionFlow], FlowReducer[TransactionFlow], error) {
+	if msg, ok := msg.Typed().(pgwire.ServerMsg); ok {
 		state.Flow.LastServerMessageTime = time.Now()
 
-		if msg, ok := msg.(*pgwire.ServerReadyForQuery); ok {
-			state.Flow.TxStatus = msg.TxStatus()
+		if msg, ok := msg.(pgwire.ReadyForQuery); ok {
+			tx, err := msg.TxStatus()
+			if err != nil {
+				return false, state, inTransaction, err
+			}
+			state.Flow.TxStatus = tx
 			if state.Flow.TxStatus == pgwire.TxIdle {
 				return true, EndedFlowState(state), waitingForTransactionStart, nil
 			}

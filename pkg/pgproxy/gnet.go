@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/justjake/pglink/pkg/pgwire"
@@ -156,6 +157,7 @@ type gnetProxyRuntime struct {
 	running atomic.Bool
 	runErr  error
 	pos     Pos2
+	bufs    net.Buffers
 }
 
 func NewGnetProxyRuntime(ctx context.Context, session *Session) (Runtime, error) {
@@ -358,9 +360,13 @@ func (g *gnetProxyRuntime) StopConn(ctx context.Context, role ProxyRole) error {
 
 // WriteConn implements [Runtime].
 // Assumed to be only called from within the loop...?
-func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, queued *pgwire.WriteQueue) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
+func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, outbox *Outbox) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if outbox.Len() == 0 {
+		return nil
 	}
 
 	p := *g.conn(role)
@@ -370,34 +376,86 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, queued
 
 	var written int64
 	if g.logger.Enabled(ctx, slog.LevelDebug) {
-		g.logger.Debug("gnetProxyRuntime.WriteConn", "role", role, "queued", queued)
+		g.logger.Debug("gnetProxyRuntime.WriteConn", "role", role, "queued", outbox)
 		defer func() {
-			g.logger.Debug("gnetProxyRuntime.WriteConn: done", "written", written)
+			g.logger.Debug("gnetProxyRuntime.WriteConn: done", "written", written, "error", err)
 		}()
 	}
 
-	// TODO: use writev
-	var err error
-	if p.gconn == nil {
-		// Still starting up
-		g.logger.Debug("gnetProxyRuntime.WriteConn: connection not started yet, promise to write later")
-		written, err = queued.WriteTo(&p.promisedWrites)
-		if err != nil {
-			return fmt.Errorf("gconn WriteTo promisedWrites buffer: %w", err)
+	if p.promisedStreaming {
+		return fmt.Errorf("%w: cannot buffer additional writes while streaming", syscall.EAGAIN)
+	}
+
+	bufs := g.bufs[:0]
+	defer func() {
+		g.bufs = bufs[:0]
+	}()
+
+	var streamFrom pgwire.Sender
+	for outbox.Len() > 0 {
+		// TODO: backpressure that doesn't drop messages.
+		msg, s, ok := outbox.Next()
+		if !ok {
+			break
 		}
-	} else if buffers := queued.Buffers(); buffers != nil {
-		writtenInt, err := p.gconn.Writev(buffers)
-		written = int64(writtenInt)
-		if err != nil {
-			return fmt.Errorf("gconn Writev: %w", err)
-		}
-	} else {
-		written, err = queued.WriteTo(p.gconn)
-		if err != nil {
-			return fmt.Errorf("gconn WriteTo: %w", err)
+
+		bufs = append(bufs, msg.Data)
+		if s != 0 {
+			streamFrom = s
+			break
 		}
 	}
 
+	if len(bufs) == 0 && streamFrom == 0 {
+		// Should never happen
+		return nil
+	}
+
+	// No matter what, we need to handle streaming
+	// by either writing the stream out to ourselves,
+	// or if there's an error, to io.Discard.
+	//
+	// todo: backpressure that doesn't drop messages.
+	defer func() {
+		if streamFrom == 0 {
+			return
+		}
+
+		var streamDestination io.Writer
+		if err != nil {
+			streamDestination = io.Discard
+		} else if p.gconn != nil {
+			streamDestination = p.gconn
+		} else {
+			streamDestination = &p.promisedWrites
+		}
+
+		streamErr := g.pipeStreamingMessage(streamDestination, streamFrom, func() {
+			p.promisedStreaming = false
+		})
+		if streamErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to pipe streaming message: %w", streamErr))
+		}
+		p.promisedStreaming = true
+	}()
+
+	// p.gconn is nil during startup of the connection,
+	// when the connection was created from the event loop
+	// for example, while handling a client message, we decided to acquire the
+	// backend and forward a message.
+	// then, we flushed; but the conn isn't enrolled yet.
+	if p.gconn == nil {
+		written, err = bufs.WriteTo(&p.promisedWrites)
+		if err != nil {
+			return fmt.Errorf("gconn WriteTo promisedWrites buffer: %w", err)
+		}
+	}
+
+	writtenInt, err := p.gconn.Writev([][]byte(bufs))
+	written = int64(writtenInt)
+	if err != nil {
+		return fmt.Errorf("gconn Writev: %w", err)
+	}
 	return nil
 }
 
@@ -416,6 +474,9 @@ func (g *gnetProxyRuntime) handleBatchEnd(p *gnetProxyConn, processed int) error
 			p.logger.Warn("failed to flush after handling batch", "error", flushErr)
 		}
 	}
+
+	g.session.Outbox(pgwire.SenderServer).Retain()
+	g.session.Outbox(pgwire.SenderClient).Retain()
 
 	return nil
 }
@@ -454,6 +515,33 @@ func (g *gnetProxyRuntime) handleMessage(p *gnetProxyConn, streamPos pgwire.Stre
 		return errors.Join(err, stopErr)
 	}
 
+	return nil
+}
+
+func (g *gnetProxyRuntime) pipeStreamingMessage(to io.Writer, from pgwire.Sender, onComplete func()) error {
+	fromConn := *g.conn(from)
+	if fromConn == nil {
+		return fmt.Errorf("cannot stream from %v: sender connection not started", from)
+	}
+
+	if fromConn.streamingLargeMessageWriter == nil {
+		return fmt.Errorf("cannot stream from %v: sender not streaming large message", from)
+	}
+
+	if fromConn.streamingLargeMessageWriter.Writer != nil {
+		return fmt.Errorf("cannot stream from %v: sender streaming large message is already writing to a different destination: %v", from, fromConn.streamingLargeMessageWriter.Writer)
+	}
+
+	if fromConn.streamingLargeMessageWriter.Remaining == 0 {
+		return fmt.Errorf("cannot stream from %v: sender streaming large message is exhausted", from)
+	}
+
+	if fromConn.streamingLargeMessageWriter.Written != 0 {
+		return fmt.Errorf("cannot stream from %v: sender already wrote %v bytes", from, fromConn.streamingLargeMessageWriter.Written)
+	}
+
+	fromConn.streamingLargeMessageWriter.Writer = to
+	fromConn.streamingLargeMessageWriter.OnComplete = onComplete
 	return nil
 }
 
@@ -507,9 +595,10 @@ func await[T any](ctx context.Context, loop gnet.EventLoop, ch <-chan T, then fu
 }
 
 type LimitedWriter struct {
-	Written   int
-	Remaining int
-	Writer    io.Writer
+	Written    int
+	Remaining  int
+	OnComplete func()
+	Writer     io.Writer
 }
 
 var ErrLimitedWriterExhausted = errors.New("limited writer exhausted")
@@ -522,6 +611,12 @@ func (w *LimitedWriter) Write(b []byte) (int, error) {
 	if w.Remaining == 0 {
 		return 0, ErrLimitedWriterExhausted
 	}
+
+	defer func() {
+		if w.Remaining == 0 && w.OnComplete != nil {
+			w.OnComplete()
+		}
+	}()
 
 	slice := b[:min(len(b), w.Remaining)]
 	n, err := w.Writer.Write(slice)
@@ -548,10 +643,11 @@ type gnetProxyConn struct {
 	onClose func()
 
 	// state
-	started        atomic.Bool
-	gconn          gnet.Conn
-	promisedWrites bytes.Buffer
-	closed         atomic.Bool
+	started           atomic.Bool
+	gconn             gnet.Conn
+	promisedWrites    bytes.Buffer
+	promisedStreaming bool
+	closed            atomic.Bool
 
 	streamingLargeMessageWriter *LimitedWriter
 	offset                      int64
@@ -638,7 +734,7 @@ func (p *gnetProxyConn) handleTraffic(c gnet.Conn) (err error) {
 	}
 
 	// Buf either begins with a message header, or we are streaming a large message.
-	buf, err := c.Next(max)
+	buf, err := c.Peek(max)
 	if err != nil {
 		return fmt.Errorf("failed to read next %v bytes: %w", max, err)
 	}
@@ -650,7 +746,7 @@ func (p *gnetProxyConn) handleTraffic(c gnet.Conn) (err error) {
 		discarded, discardErr := c.Discard(processed)
 		err = errors.Join(err, discardErr)
 		if discarded != processed {
-			p.logger.Error("Boundary issue: discarded %v bytes, but wrote %v bytes", discarded, processed)
+			p.logger.Error(fmt.Sprintf("Boundary issue: discarded %v bytes, but wrote %v bytes", discarded, processed))
 		}
 		startOffset := p.offset
 		p.offset += int64(discarded)
@@ -759,4 +855,8 @@ func (p *gnetProxyConn) debugEnabled() bool {
 		return p.runtime.session.DebugEnabled(p.runtime.runCtx)
 	}
 	return p.logger.Enabled(context.Background(), slog.LevelDebug)
+}
+
+type promisedWrites struct {
+	order []bytes.Buffer
 }

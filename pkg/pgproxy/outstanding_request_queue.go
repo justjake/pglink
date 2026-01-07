@@ -38,15 +38,15 @@ func (q *OutstandingRequestQueue) LastOutstanding() *OutstandingRequest {
 	return nil
 }
 
-func (q *OutstandingRequestQueue) GetResponseHandler(res pgwire.ServerMessage) *OutstandingRequest {
+func (q *OutstandingRequestQueue) GetResponseHandler(res pgwire.ServerMsg) *OutstandingRequest {
 	if req := q.LastCompleted(); req != nil {
-		if pgwire.MsgTerminalResponse.Get(req.flowState.Flow.ReqType).Contains(res.MsgType()) {
+		if pgwire.MsgTerminalResponse.Get(req.flowState.Flow.ReqType).Contains(res.MessageType()) {
 			return req
 		}
 	}
 
 	if req := q.FirstOutstanding(); req != nil {
-		if pgwire.MsgResponse.Get(req.flowState.Flow.ReqType).Contains(res.MsgType()) {
+		if pgwire.MsgResponse.Get(req.flowState.Flow.ReqType).Contains(res.MessageType()) {
 			return req
 		}
 	}
@@ -54,19 +54,19 @@ func (q *OutstandingRequestQueue) GetResponseHandler(res pgwire.ServerMessage) *
 	return nil
 }
 
-func (q *OutstandingRequestQueue) TrackEffect(msg pgwire.Message) pure.Effect {
+func (q *OutstandingRequestQueue) TrackEffect(msg FlowMsg) pure.Effect {
 	return pure.DoNamedCleanup(fmt.Sprintf("OutstandingRequestQueue.Track(%T)", msg), func(ctx context.Context) (cleanup pure.Effect, err error) {
 		_, err = q.trackNow(ctx, msg)
 		return
 	})
 }
 
-func (q *OutstandingRequestQueue) TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error) {
+func (q *OutstandingRequestQueue) TrackMessage(ctx context.Context, msg FlowMsg) (context.Context, error) {
 	_, err := q.trackNow(ctx, msg)
 	return ctx, err
 }
 
-func (q *OutstandingRequestQueue) trackNow(ctx context.Context, msg pgwire.Message) (bool, error) {
+func (q *OutstandingRequestQueue) trackNow(ctx context.Context, msg FlowMsg) (bool, error) {
 	// The message may be a response to the earliest outstanding request.
 	if req := q.FirstOutstanding(); req != nil {
 		changed, flowState, _, err := inOutstandingRequest(ctx, req.flowState, msg)
@@ -122,7 +122,7 @@ func (r *OutstandingRequest) String() string {
 	return fmt.Sprintf("OutstandingRequest(%d %v)", r.Seq(), r.ReqType())
 }
 
-func (r *OutstandingRequest) Handle(ctx context.Context, msg pgwire.ServerMessage) (Action, bool) {
+func (r *OutstandingRequest) Handle(ctx context.Context, msg FlowMsg) (Action, bool) {
 	if r.handler == nil {
 		return nil, false
 	}
@@ -161,8 +161,8 @@ type RequestFlow struct {
 	ReqType pgwire.MsgType
 }
 
-func waitingForRequestStart(ctx context.Context, state FlowState[RequestFlow], msg pgwire.Message) (bool, FlowState[RequestFlow], FlowReducer[RequestFlow], error) {
-	msgType := msg.MsgType()
+func waitingForRequestStart(ctx context.Context, state FlowState[RequestFlow], msg FlowMsg) (bool, FlowState[RequestFlow], FlowReducer[RequestFlow], error) {
+	msgType := msg.MessageType()
 	responseTypes := pgwire.MsgResponse.Get(msgType)
 	if len(responseTypes) != 0 {
 		return true, StartedFlowState(state, RequestFlow{ReqType: msgType}), inOutstandingRequest, nil
@@ -171,9 +171,9 @@ func waitingForRequestStart(ctx context.Context, state FlowState[RequestFlow], m
 	return false, state, waitingForRequestStart, nil
 }
 
-func inOutstandingRequest(ctx context.Context, state FlowState[RequestFlow], msg pgwire.Message) (bool, FlowState[RequestFlow], FlowReducer[RequestFlow], error) {
+func inOutstandingRequest(ctx context.Context, state FlowState[RequestFlow], msg FlowMsg) (bool, FlowState[RequestFlow], FlowReducer[RequestFlow], error) {
 	responseTypes := pgwire.MsgResponse.Get(state.Flow.ReqType)
-	if pgwire.MsgTypeIndex(responseTypes, msg.MsgType()) != -1 {
+	if pgwire.MsgTypeIndex(responseTypes, msg.MessageType()) != -1 {
 		return true, EndedFlowState(state), nil, nil
 	}
 

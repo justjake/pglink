@@ -15,6 +15,8 @@ import (
 	"github.com/justjake/pglink/pkg/pgwire"
 )
 
+var ErrMsgNotHandled = errors.New("message not handled")
+
 // Session wraps a connected [Frontend] to proxy its messages to a [Backend] and vis versa.
 //
 // While the session is open, it takes ownership of the ClientConn and Backend connections.
@@ -26,12 +28,12 @@ import (
 // See [Pos] and [Action] for how to handle messages.
 type Session struct {
 	clientConn     Frontend
-	crq            pgwire.WriteQueue
+	crq            Outbox
 	clientTrackers []MessageTracker
 
 	backendConn     Backend
 	backendTrackers []MessageTracker
-	bwq             pgwire.WriteQueue
+	bwq             Outbox
 
 	runtime   Runtime
 	cancelRun func()
@@ -48,7 +50,8 @@ type Session struct {
 }
 
 func NewDefaultRuntime(ctx context.Context, session *Session) (Runtime, error) {
-	return newRingBufferRuntime(ctx, session, pgwire.DefaultRingBufferConfig())
+	// return NewRingBufferRuntime(ctx, session)
+	return NewGnetProxyRuntime(ctx, session)
 }
 
 // NewSession creates a new session.
@@ -122,7 +125,7 @@ func (s *Session) DebugEnabled(ctx context.Context) bool {
 // This method is called by the session's [Runtime].
 func (s *Session) HandlePos(ctx context.Context, pos *Pos2, posErr error) error {
 	if pos != nil {
-		trackCtx, trackErr := s.trackPos(ctx, pos.From(), pos.unwrap())
+		trackCtx, trackErr := s.trackPos(ctx, pos.From(), pos)
 		if trackErr != nil {
 			pos.Logger().Error("failed to track message before handler", "err", trackErr)
 			if handlerErr := s.cfg.Handler(ctx, s, pos, trackErr); handlerErr != nil {
@@ -132,11 +135,6 @@ func (s *Session) HandlePos(ctx context.Context, pos *Pos2, posErr error) error 
 		if trackCtx != nil {
 			ctx = trackCtx
 		}
-
-		pos.unwrap().ctx = ctx
-		defer func() {
-			pos.unwrap().ctx = nil
-		}()
 	}
 
 	var handleErr error
@@ -156,9 +154,9 @@ func (s *Session) HandlePos(ctx context.Context, pos *Pos2, posErr error) error 
 		return handleErr
 	}
 
-	if notHandledErr := pos.unwrap().notHandledError(); notHandledErr != nil {
+	if !pos.Handled {
 		logger.Error("poxy message not handled, exiting")
-		return notHandledErr
+		return fmt.Errorf("%w: %v", ErrMsgNotHandled, pos)
 	}
 
 	return nil
@@ -243,8 +241,8 @@ func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
 			s.Logger().Debug("flush: done")
 		}()
 	}
-	writeQueue := s.writeQueue(dest)
-	if writeQueue.IsEmpty() {
+	writeQueue := s.Outbox(dest)
+	if writeQueue.Len() == 0 {
 		return nil
 	}
 
@@ -255,6 +253,7 @@ func (s *Session) flush(ctx context.Context, dest ProxyRole) error {
 	}
 
 	if err := s.runtime.WriteConn(ctx, dest, writeQueue); err != nil {
+		writeQueue.Retain() // send on next call to flush.
 		return fmt.Errorf("flush %s: %w: %w", dest, ErrRuntime, err)
 	}
 	writeQueue.Clear()
@@ -338,50 +337,23 @@ func (s *Session) ReleaseBackend(ctx context.Context) error {
 // QueueSend queues a message to be sent to its destination.
 // Messages from the backend are queued to the client.
 // Messages from the client are queued to the backend. During flush, backend will be acquired if needed.
-func (s *Session) QueueSend(ctx context.Context, msg pgwire.Message) error {
-	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
-		return closedErr
-	}
-	if dest(msg) == RoleServer {
-		if _, err := s.AcquireBackend(ctx); err != nil {
-			return fmt.Errorf("queue send: %w", err)
-		}
-	}
-	if _, err := s.trackMessage(ctx, dest(msg), msg); err != nil {
-		return err
-	}
-	return s.writeQueue(dest(msg)).WriteMsg(msg)
-}
-
 func (s *Session) QueueSendMsg(ctx context.Context, msg pgwire.Msg) error {
 	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
 		return closedErr
 	}
 
 	if msg.Destination().IsServer() {
+		// TODO: need to deeply consider how backend acquisition works.
+		// it can't block the event loop...
+		// ...
+		// How does "flush" work in this universe?
 		if _, err := s.AcquireBackend(ctx); err != nil {
 			return fmt.Errorf("queue send: %w", err)
 		}
 	}
 
-	panic("not implemented")
-}
-
-func (s *Session) QueueSendPos(ctx context.Context, pos Pos) error {
-	if closedErr := s.alreadyClosedError("send"); closedErr != nil {
-		return closedErr
-	}
-	unwrapped := pos.unwrap()
-	to := unwrapped.From().To()
-	if to == RoleServer {
-		if _, err := s.AcquireBackend(ctx); err != nil {
-			return fmt.Errorf("queue pos: %w", err)
-		}
-	}
-	if _, err := s.trackPos(ctx, to, unwrapped); err != nil {
-		return err
-	}
-	return s.writeQueue(to).WriteRawMsg(pos)
+	s.Outbox(msg.Destination()).PushMsg(msg)
+	return nil
 }
 
 // TerminateClient sends terminationMessage to the client, flushes pending writes, and terminates the client connection.
@@ -396,7 +368,10 @@ func (s *Session) TerminateClient(ctx context.Context, terminationMessage *pgwir
 		return closedErr
 	}
 
-	if err := s.QueueSend(ctx, terminationMessage.ToMessage()); err != nil {
+	encoded, err := terminationMessage.Encode()
+	if err != nil {
+		logger.Warn("ignored error encoding termination message", "err", err)
+	} else if err := s.QueueSendMsg(ctx, encoded.Msg()); err != nil {
 		logger.Warn("ignored error sending termination message", "err", err)
 	}
 
@@ -531,20 +506,11 @@ func (s *Session) Trackers(role ProxyRole) iter.Seq[MessageTracker] {
 	}
 }
 
-func (s *Session) trackPos(rootCtx context.Context, role ProxyRole, pos *pos) (context.Context, error) {
-	msg, err := pos.AsMessage()
-	if err != nil {
-		return rootCtx, fmt.Errorf("track %s: %v: %w", role, pos, err)
-	}
-
-	return s.trackMessage(rootCtx, role, msg)
-}
-
-func (s *Session) trackMessage(rootCtx context.Context, role ProxyRole, msg pgwire.Message) (context.Context, error) {
+func (s *Session) trackPos(rootCtx context.Context, role ProxyRole, pos *Pos2) (context.Context, error) {
 	var errs []error
 	ctx := rootCtx
 	for tracker := range s.Trackers(role) {
-		nextCtx, err := tracker.TrackMessage(ctx, msg)
+		nextCtx, err := tracker.TrackMessage(ctx, pos)
 		if err != nil {
 			errs = append(errs, err)
 		} else if nextCtx != nil {
@@ -552,7 +518,7 @@ func (s *Session) trackMessage(rootCtx context.Context, role ProxyRole, msg pgwi
 		}
 	}
 	if len(errs) > 0 {
-		return rootCtx, fmt.Errorf("track %v: %T: %w", role, msg, errors.Join(errs...))
+		return rootCtx, fmt.Errorf("track %v: %v: %w", role, pos, errors.Join(errs...))
 	}
 	return ctx, nil
 }
@@ -561,31 +527,14 @@ func (s *Session) ClientTerminateTracker() FlowTracker[TerminateFlow] {
 	return s.clientTerminateTracker
 }
 
-func (s *Session) beforeReadPos(ctx context.Context, unwrapped *pos) (context.Context, error) {
-	posCtx, err := s.trackPos(ctx, unwrapped.From(), unwrapped)
-	if err != nil {
-		return ctx, err
-	}
-	if posCtx != nil {
-		ctx = posCtx
-	}
-	unwrapped.ctx = ctx
-
-	return ctx, nil
-}
-
-func (s *Session) afterReadPos(pos *pos, loopContinues bool) error {
-	if loopContinues {
-		return pos.notHandledError()
-	}
-	return nil
-}
-
-func (s *Session) writeQueue(dest ProxyRole) *pgwire.WriteQueue {
-	if dest == RoleServer {
+func (s *Session) Outbox(dest ProxyRole) *Outbox {
+	switch dest {
+	case RoleServer:
 		return &s.bwq
-	} else {
+	case RoleClient:
 		return &s.crq
+	default:
+		return nil
 	}
 }
 

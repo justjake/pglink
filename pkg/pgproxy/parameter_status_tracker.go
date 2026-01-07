@@ -2,10 +2,8 @@ package pgproxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/justjake/pglink/pkg/pgwire"
-	"github.com/justjake/pglink/pkg/pure"
 )
 
 type ParameterStatusTracker struct {
@@ -23,30 +21,20 @@ func (t *ParameterStatusTracker) SetState(state pgwire.ParameterStatuses) {
 	}
 }
 
-func (t *ParameterStatusTracker) TrackNow(msg pgwire.Message) {
-	switch msg := msg.(type) {
-	case *pgwire.ServerParameterStatus:
-		data := msg.Parse()
-		if _, ok := t.ParameterStatuses[data.Name]; !ok {
-			t.Parameters = append(t.Parameters, data.Name)
+func (t *ParameterStatusTracker) TrackNow(msg FlowMsg) {
+}
+
+func (t *ParameterStatusTracker) TrackMessage(ctx context.Context, msg FlowMsg) (context.Context, error) {
+	switch msg := msg.Typed().(type) {
+	case pgwire.ParameterStatus:
+		name, value, err := msg.NameValue()
+		if err != nil {
+			return ctx, pgwire.NewProtocolViolation(err, msg)
 		}
-		t.ParameterStatuses[data.Name] = data.Value
+		if _, ok := t.ParameterStatuses[name]; !ok {
+			t.Parameters = append(t.Parameters, name)
+		}
+		t.ParameterStatuses[name] = value
 	}
-}
-
-func (t *ParameterStatusTracker) TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error) {
-	t.TrackNow(msg)
 	return ctx, nil
-}
-
-func (t *ParameterStatusTracker) TrackEffect(msg pgwire.Message) pure.Effect {
-	if msg, ok := msg.(*pgwire.ServerParameterStatus); ok {
-		return pure.WithNameFunc(func() string {
-			data := msg.Parse()
-			return fmt.Sprintf("SetParameterStatus(%s=%q)", data.Name, data.Value)
-		}, pure.Do(func() {
-			t.TrackNow(msg)
-		}))
-	}
-	return nil
 }

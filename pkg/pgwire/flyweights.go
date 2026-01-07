@@ -22,8 +22,8 @@ type ClientFlyweights struct {
 	flush    ClientFlush
 
 	// Copy
-	copyData ClientCopyData
-	copyDone ClientCopyDone
+	copyData OldClientCopyData
+	copyDone OldClientCopyDone
 	copyFail ClientCopyFail
 
 	// Terminate
@@ -70,10 +70,10 @@ func (fw *ClientFlyweights) Parse(source RawMessageSource) (ClientMessage, error
 
 	// Copy
 	case MsgClientCopyData:
-		fw.copyData = ClientCopyData{source: source}
+		fw.copyData = OldClientCopyData{source: source}
 		return &fw.copyData, nil
 	case MsgClientCopyDone:
-		fw.copyDone = ClientCopyDone{source: source}
+		fw.copyDone = OldClientCopyDone{source: source}
 		return &fw.copyDone, nil
 	case MsgClientCopyFail:
 		fw.copyFail = ClientCopyFail{source: source}
@@ -117,8 +117,8 @@ type ServerFlyweights struct {
 	copyInResponse   ServerCopyInResponse
 	copyOutResponse  ServerCopyOutResponse
 	copyBothResponse ServerCopyBothResponse
-	copyData         ServerCopyData
-	copyDone         ServerCopyDone
+	copyData         OldServerCopyData
+	copyDone         OldServerCopyDone
 
 	// Async
 	noticeResponse       ServerNoticeResponse
@@ -198,10 +198,10 @@ func (fw *ServerFlyweights) Parse(source RawMessageSource) (ServerMessage, error
 		fw.copyBothResponse = ServerCopyBothResponse{source: source}
 		return &fw.copyBothResponse, nil
 	case MsgServerCopyData:
-		fw.copyData = ServerCopyData{source: source}
+		fw.copyData = OldServerCopyData{source: source}
 		return &fw.copyData, nil
 	case MsgServerCopyDone:
-		fw.copyDone = ServerCopyDone{source: source}
+		fw.copyDone = OldServerCopyDone{source: source}
 		return &fw.copyDone, nil
 
 	// Async

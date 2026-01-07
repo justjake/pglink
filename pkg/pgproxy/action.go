@@ -8,6 +8,7 @@ import (
 )
 
 type ActionType string
+type ActionMsg = *Pos2
 
 const (
 	ProxyForward         ActionType = "forward"
@@ -36,7 +37,7 @@ const (
 type Action interface {
 	Type() ActionType
 	From() ProxyRole
-	To() ProxyRole
+	Destination() ProxyRole
 	String() string
 	Err() error
 	WithEffects(effects ...pure.Effect) Action
@@ -47,8 +48,8 @@ type Action interface {
 
 type action struct {
 	t               ActionType
-	incoming        pgwire.Message
-	outgoing        pgwire.Message
+	incoming        ActionMsg
+	outgoing        ActionMsg
 	effects         pure.Effects
 	responseHandler ResponseHandler
 
@@ -62,30 +63,16 @@ func (a *action) Type() ActionType {
 
 func (a *action) From() ProxyRole {
 	if a.incoming == nil {
-		return a.To().To()
+		return a.Destination()
 	}
-	switch a.incoming.(type) {
-	case pgwire.ClientMessage:
-		return RoleClient
-	case pgwire.ServerMessage:
-		return RoleServer
-	default:
-		panic(fmt.Sprintf("unexpected incoming message type: %T", a.incoming))
-	}
+	return a.incoming.From()
 }
 
-func (a *action) To() ProxyRole {
+func (a *action) Destination() ProxyRole {
 	if a.outgoing == nil {
-		return a.From().To()
+		return a.From().Destination()
 	}
-	switch a.outgoing.(type) {
-	case pgwire.ClientMessage:
-		return RoleClient
-	case pgwire.ServerMessage:
-		return RoleServer
-	default:
-		panic(fmt.Sprintf("unexpected outgoing message type: %T", a.outgoing))
-	}
+	return a.outgoing.Destination()
 }
 
 func (a *action) Err() error {
@@ -111,29 +98,29 @@ func (a *action) unwrap() *action {
 func (a *action) String() string {
 	switch a.t {
 	case ProxyForward:
-		return fmt.Sprintf("Forward(%T -> %s %v)", a.incoming, a.To(), a.effects)
+		return fmt.Sprintf("Forward(%T -> %s %v)", a.incoming, a.Destination(), a.effects)
 	case ProxyRespond:
-		return fmt.Sprintf("Respond(req %T -> %s, res %T -> %s %v)", a.incoming, a.From().To(), a.outgoing, a.To(), a.effects)
+		return fmt.Sprintf("Respond(req %T -> %s, res %T -> %s %v)", a.incoming, a.From().Destination(), a.outgoing, a.Destination(), a.effects)
 	case ProxyRewrite:
-		return fmt.Sprintf("Rewrite(%T to %T -> %s %v)", a.incoming, a.outgoing, a.To(), a.effects)
+		return fmt.Sprintf("Rewrite(%T to %T -> %s %v)", a.incoming, a.outgoing, a.Destination(), a.effects)
 	case ProxySend:
-		return fmt.Sprintf("Send(%T -> %s %v)", a.outgoing, a.To(), a.effects)
+		return fmt.Sprintf("Send(%T -> %s %v)", a.outgoing, a.Destination(), a.effects)
 	case ProxySkip:
-		return fmt.Sprintf("Skip(%T -!-> %s %v)", a.incoming, a.To(), a.effects)
+		return fmt.Sprintf("Skip(%T -!-> %s %v)", a.incoming, a.Destination(), a.effects)
 	case ProxyTerminateClient:
-		return fmt.Sprintf("TerminateClient(%T -> %s: %v %s)", a.incoming, a.To(), a.err, a.effects)
+		return fmt.Sprintf("TerminateClient(%T -> %s: %v %s)", a.incoming, a.Destination(), a.err, a.effects)
 	case ProxyTerminateServer:
-		return fmt.Sprintf("TerminateServer(%T -> %s: %v %s)", a.incoming, a.To(), a.err, a.effects)
+		return fmt.Sprintf("TerminateServer(%T -> %s: %v %s)", a.incoming, a.Destination(), a.err, a.effects)
 	case ProxyTerminateBoth:
-		return fmt.Sprintf("TerminateBoth(%T -> %s: %v %s)", a.incoming, a.To(), a.err, a.effects.String())
+		return fmt.Sprintf("TerminateBoth(%T -> %s: %v %s)", a.incoming, a.Destination(), a.err, a.effects.String())
 	case ProxyUnexpectedError:
-		return fmt.Sprintf("UnexpectedError(%T -> %s: %v %s)", a.incoming, a.To(), a.err, a.effects)
+		return fmt.Sprintf("UnexpectedError(%T -> %s: %v %s)", a.incoming, a.Destination(), a.err, a.effects)
 	default:
 		panic(fmt.Sprintf("unexpected proxy action type: %#v", string(a.t)))
 	}
 }
 
-func Forward(msg pgwire.Message) Action {
+func Forward(msg ActionMsg) Action {
 	return &action{
 		t:        ProxyForward,
 		incoming: msg,
@@ -141,7 +128,7 @@ func Forward(msg pgwire.Message) Action {
 	}
 }
 
-func ForwardAndHandleResponse(msg pgwire.ClientMessage, responseHandler ResponseHandler) Action {
+func ForwardAndHandleResponse(msg ActionMsg, responseHandler ResponseHandler) Action {
 	return &action{
 		t:               ProxyForward,
 		incoming:        msg,
@@ -150,7 +137,7 @@ func ForwardAndHandleResponse(msg pgwire.ClientMessage, responseHandler Response
 	}
 }
 
-func Rewrite(msg pgwire.Message, rewritten pgwire.Message) Action {
+func Rewrite(msg ActionMsg, rewritten ActionMsg) Action {
 	return &action{
 		t:        ProxyRewrite,
 		incoming: msg,
@@ -158,7 +145,7 @@ func Rewrite(msg pgwire.Message, rewritten pgwire.Message) Action {
 	}
 }
 
-func RewriteAndHandleResponse(msg pgwire.ClientMessage, rewritten pgwire.ClientMessage, responseHandler ResponseHandler) Action {
+func RewriteAndHandleResponse(msg ActionMsg, rewritten ActionMsg, responseHandler ResponseHandler) Action {
 	return &action{
 		t:               ProxyRewrite,
 		incoming:        msg,
@@ -167,7 +154,7 @@ func RewriteAndHandleResponse(msg pgwire.ClientMessage, rewritten pgwire.ClientM
 	}
 }
 
-func SendToServerAndHandleResponse(msg pgwire.ClientMessage, responseHandler ResponseHandler) Action {
+func SendToServerAndHandleResponse(msg ActionMsg, responseHandler ResponseHandler) Action {
 	return &action{
 		t:               ProxySend,
 		outgoing:        msg,
@@ -175,21 +162,21 @@ func SendToServerAndHandleResponse(msg pgwire.ClientMessage, responseHandler Res
 	}
 }
 
-func SendToClient(msg pgwire.ServerMessage) Action {
+func SendToClient(msg ActionMsg) Action {
 	return &action{
 		t:        ProxySend,
 		outgoing: msg,
 	}
 }
 
-func Skip(msg pgwire.Message) Action {
+func Skip(msg ActionMsg) Action {
 	return &action{
 		t:        ProxySkip,
 		incoming: msg,
 	}
 }
 
-func TerminateClient(msg pgwire.ClientMessage, err error) Action {
+func TerminateClient(msg ActionMsg, err error) Action {
 	return &action{
 		t:        ProxyTerminateClient,
 		incoming: msg,
@@ -197,7 +184,7 @@ func TerminateClient(msg pgwire.ClientMessage, err error) Action {
 	}
 }
 
-func TerminateServer(msg pgwire.ServerMessage, err error) Action {
+func TerminateServer(msg ActionMsg, err error) Action {
 	return &action{
 		t:        ProxyTerminateServer,
 		incoming: msg,
@@ -205,7 +192,7 @@ func TerminateServer(msg pgwire.ServerMessage, err error) Action {
 	}
 }
 
-func TerminateBoth(msg pgwire.Message, err error) Action {
+func TerminateBoth(msg ActionMsg, err error) Action {
 	return &action{
 		t:        ProxyTerminateBoth,
 		incoming: msg,
@@ -213,7 +200,7 @@ func TerminateBoth(msg pgwire.Message, err error) Action {
 	}
 }
 
-func UnexpectedError(msg pgwire.Message, err error) Action {
+func UnexpectedError(msg ActionMsg, err error) Action {
 	return &action{
 		t:        ProxyUnexpectedError,
 		incoming: msg,

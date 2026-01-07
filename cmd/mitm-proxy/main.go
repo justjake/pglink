@@ -164,11 +164,11 @@ func (p *MitmProxy) AuthHandler(ctx context.Context, conn *pgserver.Unauthorized
 	}
 
 	// Receive password
-	msg, err := pgwire.Expect[*pgwire.ClientPasswordMessage](conn.Receive(ctx))
+	msg, err := pgwire.Expect[*pgproto3.PasswordMessage](conn.Receive(ctx))
 	if err != nil {
 		return nil, err
 	}
-	password := msg.Parse().Password
+	password := msg.Password
 
 	// Extract user and database from startup params
 	params := pgwire.ParameterStatuses(conn.StartupMessage.Parameters)
@@ -268,7 +268,8 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (ret
 	if p.UseSplit {
 		newRuntime = pgproxy.NewGnetProxyRuntime
 	} else {
-		newRuntime = pgproxy.NewRingBufferRuntime
+		panic("not implemented")
+		// newRuntime = pgproxy.NewRingBufferRuntime
 	}
 
 	session, err := pgproxy.NewSession(ctx, pgproxy.SessionConfig{
@@ -278,7 +279,7 @@ func (p *MitmProxy) Handler(ctx context.Context, conn *pgserver.ClientConn) (ret
 			return backendAdapter, nil
 		},
 		Logger: p.Logger,
-		Handler: func(ctx context.Context, session *pgproxy.Session, pos pgproxy.Pos, err error) error {
+		Handler: func(ctx context.Context, session *pgproxy.Session, pos *pgproxy.Pos2, err error) error {
 			if err != nil {
 				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 					return io.EOF // Signal normal termination to Run()

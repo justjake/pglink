@@ -40,9 +40,9 @@ func ToClientMessage(msg pgproto3.FrontendMessage) (ClientMessage, bool) {
 		return (*ClientCancelRequest)(ClientParsed(m)), true
 	// Copy
 	case *pgproto3.CopyData:
-		return (*ClientCopyData)(ClientParsed(m)), true
+		return (*OldClientCopyData)(ClientParsed(m)), true
 	case *pgproto3.CopyDone:
-		return (*ClientCopyDone)(ClientParsed(m)), true
+		return (*OldClientCopyDone)(ClientParsed(m)), true
 	case *pgproto3.CopyFail:
 		return (*ClientCopyFail)(ClientParsed(m)), true
 	// SimpleQuery
@@ -114,9 +114,9 @@ func ToServerMessage(msg pgproto3.BackendMessage) (ServerMessage, bool) {
 	case *pgproto3.CopyBothResponse:
 		return (*ServerCopyBothResponse)(ServerParsed(m)), true
 	case *pgproto3.CopyData:
-		return (*ServerCopyData)(ServerParsed(m)), true
+		return (*OldServerCopyData)(ServerParsed(m)), true
 	case *pgproto3.CopyDone:
-		return (*ServerCopyDone)(ServerParsed(m)), true
+		return (*OldServerCopyDone)(ServerParsed(m)), true
 	// ExtendedQuery
 	case *pgproto3.ParseComplete:
 		return (*ServerParseComplete)(ServerParsed(m)), true

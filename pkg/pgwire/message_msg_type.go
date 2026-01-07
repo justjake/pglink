@@ -29,9 +29,9 @@ func (t *ClientClose) MsgType() MsgType    { return MsgClientClose }    // 'C'
 func (t *ClientFlush) MsgType() MsgType    { return MsgClientFlush }    // 'H'
 
 // Client Copy messages
-func (t *ClientCopyData) MsgType() MsgType { return MsgClientCopyData } // 'd'
-func (t *ClientCopyDone) MsgType() MsgType { return MsgClientCopyDone } // 'c'
-func (t *ClientCopyFail) MsgType() MsgType { return MsgClientCopyFail } // 'f'
+func (t *OldClientCopyData) MsgType() MsgType { return MsgClientCopyData } // 'd'
+func (t *OldClientCopyDone) MsgType() MsgType { return MsgClientCopyDone } // 'c'
+func (t *ClientCopyFail) MsgType() MsgType    { return MsgClientCopyFail } // 'f'
 
 // Client Cancel - special startup-like message
 func (t *ClientCancelRequest) MsgType() MsgType { return 0 }
@@ -63,8 +63,8 @@ func (t *ServerCloseComplete) MsgType() MsgType        { return MsgServerCloseCo
 func (t *ServerCopyInResponse) MsgType() MsgType   { return MsgServerCopyInResponse }   // 'G'
 func (t *ServerCopyOutResponse) MsgType() MsgType  { return MsgServerCopyOutResponse }  // 'H'
 func (t *ServerCopyBothResponse) MsgType() MsgType { return MsgServerCopyBothResponse } // 'W'
-func (t *ServerCopyData) MsgType() MsgType         { return MsgServerCopyData }         // 'd'
-func (t *ServerCopyDone) MsgType() MsgType         { return MsgServerCopyDone }         // 'c'
+func (t *OldServerCopyData) MsgType() MsgType      { return MsgServerCopyData }         // 'd'
+func (t *OldServerCopyDone) MsgType() MsgType      { return MsgServerCopyDone }         // 'c'
 
 // Server Response messages
 func (t *ServerReadyForQuery) MsgType() MsgType        { return MsgServerReadyForQuery }      // 'Z'

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 type Msg struct {
@@ -19,7 +21,7 @@ var ErrMsgTooLong = errors.New("msg too long")
 var ErrMsgUnknownSender = errors.New("msg sender unknown")
 var ErrMsgTypeUnknown = errors.New("msg has unknown type byte for sender")
 
-func (m Msg) Name() string {
+func (m Msg) StringName() string {
 	if len(m.Data) == 0 {
 		return "Zero"
 	}
@@ -38,7 +40,7 @@ func (m Msg) Name() string {
 }
 
 func (m Msg) String() string {
-	return fmt.Sprintf("Msg{%v %s %s}", m.Sender, m.Name(), describeMsgLen(m.Data))
+	return fmt.Sprintf("Msg{%v %s %s}", m.Sender, m.StringName(), describeMsgLen(m.Data))
 }
 
 func (m Msg) IsZero() bool {
@@ -159,6 +161,19 @@ func (m Msg) Copy() Msg {
 	return Msg{Sender: m.Sender, Data: bytes.Clone(m.Data)}
 }
 
+// Parser wraps m's data as a MessageParser.
+func (m Msg) Parser() MessageParser {
+	return MessageParser{m.Data}
+}
+
+func (m Msg) BodyParser() (MessageParser, error) {
+	p := m.Parser()
+	if err := p.SkipMessageHeader(); err != nil {
+		return MessageParser{}, err
+	}
+	return p, nil
+}
+
 var _ RawMessageSource = Msg{}
 
 // MsgLen assumes `data` starts at a message boundary.
@@ -184,4 +199,18 @@ func describeMsgLen(data []byte) string {
 		return fmt.Sprintf("%3d bytes %d required", bytes, required)
 	}
 	return fmt.Sprintf("%3d bytes", bytes)
+}
+
+func DecodeMsg[T any, PT interface {
+	*T
+	pgproto3.Message
+}](msg Msg) (out T, err error) {
+	data := msg.Data
+	// We don't use BodyErr because pgproto3 typically has more descriptive errors
+	// when body is too short.
+	if len(data) < 5 {
+		return out, ErrMsgTooShort
+	}
+	err = PT(&out).Decode(data[5:])
+	return
 }

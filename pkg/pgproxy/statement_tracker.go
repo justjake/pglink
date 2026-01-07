@@ -2,10 +2,8 @@ package pgproxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/justjake/pglink/pkg/pgwire"
-	"github.com/justjake/pglink/pkg/pure"
 )
 
 // StatementTracker tracks prepared statements on a backend connection.
@@ -41,45 +39,33 @@ func (t *StatementTracker) HasStatement(name string) bool {
 }
 
 // TrackMessage implements MessageTracker.
-func (t *StatementTracker) TrackMessage(ctx context.Context, msg pgwire.Message) (context.Context, error) {
-	t.trackNow(msg)
-	return ctx, nil
-}
-
-// TrackEffect implements MessageTracker.
-func (t *StatementTracker) TrackEffect(msg pgwire.Message) pure.Effect {
-	switch msg.(type) {
-	case *pgwire.ClientParse, *pgwire.ClientClose, *pgwire.ClientQuery,
-		*pgwire.ServerParseComplete, *pgwire.ServerCloseComplete:
-		return pure.WithNameFunc(func() string {
-			return fmt.Sprintf("StatementTracker.Track(%T)", msg)
-		}, pure.Do(func() {
-			t.trackNow(msg)
-		}))
-	}
-	return nil
-}
-
-func (t *StatementTracker) trackNow(msg pgwire.Message) {
-	switch msg := msg.(type) {
-	case *pgwire.ClientParse:
+func (t *StatementTracker) TrackMessage(ctx context.Context, msg FlowMsg) (context.Context, error) {
+	switch msg := msg.Typed().(type) {
+	case pgwire.Parse:
 		// Parse starts creating a statement
-		parsed := msg.Parse()
-		t.PendingCreate[parsed.Name] = true
+		name, err := msg.Name()
+		if err != nil {
+			return ctx, err
+		}
+		t.PendingCreate[name] = true
 
-	case *pgwire.ClientClose:
+	case pgwire.Close:
 		// Close starts closing a statement or portal
-		parsed := msg.Parse()
+		parsed, err := msg.Parse()
+		if err != nil {
+			return ctx, err
+		}
 		if parsed.ObjectType == pgwire.ObjectTypePreparedStatement {
 			t.PendingClose[parsed.Name] = true
 		}
 
-	case *pgwire.ClientQuery:
+	case pgwire.Query:
 		// Simple query invalidates the unnamed statement
 		delete(t.Alive, "")
 		delete(t.PendingCreate, "")
 
-	case *pgwire.ServerParseComplete:
+		// TODO: this is incorrect - we got 1 success, we should succeed 1 request.
+	case pgwire.ParseComplete:
 		// ParseComplete confirms the statement was created
 		// Move all pending creates to alive
 		for name := range t.PendingCreate {
@@ -87,11 +73,12 @@ func (t *StatementTracker) trackNow(msg pgwire.Message) {
 		}
 		clear(t.PendingCreate)
 
-	case *pgwire.ServerCloseComplete:
+	case pgwire.CloseComplete:
 		// CloseComplete confirms statements were closed
 		for name := range t.PendingClose {
 			delete(t.Alive, name)
 		}
 		clear(t.PendingClose)
 	}
+	return ctx, nil
 }

@@ -837,49 +837,49 @@ type ClientCopy interface {
 
 // Compile-time checks that all wrapper types implement the interface.
 var (
-	_ ClientCopy = (*ClientCopyData)(nil)
-	_ ClientCopy = (*ClientCopyDone)(nil)
+	_ ClientCopy = (*OldClientCopyData)(nil)
+	_ ClientCopy = (*OldClientCopyDone)(nil)
 	_ ClientCopy = (*ClientCopyFail)(nil)
 )
 
-// ClientCopyData wraps *pgproto3.CopyData from the client.
-type ClientCopyData FromClient[*pgproto3.CopyData]
+// OldClientCopyData wraps *pgproto3.CopyData from the client.
+type OldClientCopyData FromClient[*pgproto3.CopyData]
 
-func (*ClientCopyData) Client() {}
-func (*ClientCopyData) Copy()   {}
-func (m *ClientCopyData) Parse() *pgproto3.CopyData {
+func (*OldClientCopyData) Client() {}
+func (*OldClientCopyData) Copy()   {}
+func (m *OldClientCopyData) Parse() *pgproto3.CopyData {
 	return (*FromClient[*pgproto3.CopyData])(m).Parse()
 }
-func (m *ClientCopyData) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientCopyData) Source() RawMessageSource                { return m.source }
-func (m *ClientCopyData) IsParsed() bool                          { return m.isParsed }
-func (m *ClientCopyData) ParseAny() pgproto3.Message              { return m.Parse() }
+func (m *OldClientCopyData) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *OldClientCopyData) Source() RawMessageSource                { return m.source }
+func (m *OldClientCopyData) IsParsed() bool                          { return m.isParsed }
+func (m *OldClientCopyData) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientCopyData) Retain() ClientCopyData {
+func (m OldClientCopyData) Retain() OldClientCopyData {
 	src, parsed, isParsed := (*FromClient[*pgproto3.CopyData])(&m).retainFields()
-	return ClientCopyData{source: src, parsed: parsed, isParsed: isParsed}
+	return OldClientCopyData{source: src, parsed: parsed, isParsed: isParsed}
 }
 
-// ClientCopyDone wraps *pgproto3.CopyDone from the client.
-type ClientCopyDone FromClient[*pgproto3.CopyDone]
+// OldClientCopyDone wraps *pgproto3.CopyDone from the client.
+type OldClientCopyDone FromClient[*pgproto3.CopyDone]
 
-func (*ClientCopyDone) Client() {}
-func (*ClientCopyDone) Copy()   {}
-func (m *ClientCopyDone) Parse() *pgproto3.CopyDone {
+func (*OldClientCopyDone) Client() {}
+func (*OldClientCopyDone) Copy()   {}
+func (m *OldClientCopyDone) Parse() *pgproto3.CopyDone {
 	return (*FromClient[*pgproto3.CopyDone])(m).Parse()
 }
-func (m *ClientCopyDone) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
-func (m *ClientCopyDone) Source() RawMessageSource                { return m.source }
-func (m *ClientCopyDone) IsParsed() bool                          { return m.isParsed }
-func (m *ClientCopyDone) ParseAny() pgproto3.Message              { return m.Parse() }
+func (m *OldClientCopyDone) ParseFrontend() pgproto3.FrontendMessage { return m.Parse() }
+func (m *OldClientCopyDone) Source() RawMessageSource                { return m.source }
+func (m *OldClientCopyDone) IsParsed() bool                          { return m.isParsed }
+func (m *OldClientCopyDone) ParseAny() pgproto3.Message              { return m.Parse() }
 
 // Retain returns a copy of this message with retained source bytes.
 // Use this when the message must outlive the current iteration.
-func (m ClientCopyDone) Retain() ClientCopyDone {
+func (m OldClientCopyDone) Retain() OldClientCopyDone {
 	src, parsed, isParsed := (*FromClient[*pgproto3.CopyDone])(&m).retainFields()
-	return ClientCopyDone{source: src, parsed: parsed, isParsed: isParsed}
+	return OldClientCopyDone{source: src, parsed: parsed, isParsed: isParsed}
 }
 
 // ClientCopyFail wraps *pgproto3.CopyFail from the client.
@@ -907,9 +907,9 @@ func (m ClientCopyFail) Retain() ClientCopyFail {
 func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 	switch m := msg.(type) {
 	case *pgproto3.CopyData:
-		return (*ClientCopyData)(ClientParsed(m)), true
+		return (*OldClientCopyData)(ClientParsed(m)), true
 	case *pgproto3.CopyDone:
-		return (*ClientCopyDone)(ClientParsed(m)), true
+		return (*OldClientCopyDone)(ClientParsed(m)), true
 	case *pgproto3.CopyFail:
 		return (*ClientCopyFail)(ClientParsed(m)), true
 	}
@@ -919,8 +919,8 @@ func ToClientCopy(msg pgproto3.FrontendMessage) (ClientCopy, bool) {
 // ClientCopyHandlers provides type-safe handlers for each ClientCopy variant.
 type ClientCopyHandlers[T any] struct {
 	Default  func(msg ClientCopy) (T, error)
-	CopyData func(msg *ClientCopyData) (T, error)
-	CopyDone func(msg *ClientCopyDone) (T, error)
+	CopyData func(msg *OldClientCopyData) (T, error)
+	CopyDone func(msg *OldClientCopyDone) (T, error)
 	CopyFail func(msg *ClientCopyFail) (T, error)
 }
 
@@ -934,12 +934,12 @@ func (h ClientCopyHandlers[T]) HandleDefault(msg ClientCopy, defaultHandler func
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientCopyData:
+	case *OldClientCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(msg)
 		}
 		return defaultHandler(msg)
-	case *ClientCopyDone:
+	case *OldClientCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(msg)
 		}
@@ -962,8 +962,8 @@ func (h ClientCopyHandlers[T]) Handle(msg ClientCopy) (T, error) {
 // ClientCopyHandlersCtx provides type-safe handlers with context and an argument for each ClientCopy variant.
 type ClientCopyHandlersCtx[Arg, Result any] struct {
 	Default  func(ctx context.Context, msg ClientCopy, arg Arg) (Result, error)
-	CopyData func(ctx context.Context, msg *ClientCopyData, arg Arg) (Result, error)
-	CopyDone func(ctx context.Context, msg *ClientCopyDone, arg Arg) (Result, error)
+	CopyData func(ctx context.Context, msg *OldClientCopyData, arg Arg) (Result, error)
+	CopyDone func(ctx context.Context, msg *OldClientCopyDone, arg Arg) (Result, error)
 	CopyFail func(ctx context.Context, msg *ClientCopyFail, arg Arg) (Result, error)
 }
 
@@ -977,12 +977,12 @@ func (h ClientCopyHandlersCtx[Arg, Result]) HandleDefault(ctx context.Context, m
 		}
 	}
 	switch msg := msg.(type) {
-	case *ClientCopyData:
+	case *OldClientCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCopyDone:
+	case *OldClientCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(ctx, msg, arg)
 		}
@@ -1248,8 +1248,8 @@ type ClientHandlers[Arg, Result any] struct {
 
 	// Copy
 	Copy     *ClientCopyHandlersCtx[Arg, Result]
-	CopyData func(ctx context.Context, msg *ClientCopyData, arg Arg) (Result, error)
-	CopyDone func(ctx context.Context, msg *ClientCopyDone, arg Arg) (Result, error)
+	CopyData func(ctx context.Context, msg *OldClientCopyData, arg Arg) (Result, error)
+	CopyDone func(ctx context.Context, msg *OldClientCopyDone, arg Arg) (Result, error)
 	CopyFail func(ctx context.Context, msg *ClientCopyFail, arg Arg) (Result, error)
 
 	// Cancel
@@ -1415,7 +1415,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.ExtendedQuery.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCopyData:
+	case *OldClientCopyData:
 		if h.CopyData != nil {
 			return h.CopyData(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyData != nil {
@@ -1424,7 +1424,7 @@ func (h ClientHandlers[Arg, Result]) HandleDefault(ctx context.Context, msg Clie
 			return h.Copy.Default(ctx, msg, arg)
 		}
 		return defaultHandler(ctx, msg, arg)
-	case *ClientCopyDone:
+	case *OldClientCopyDone:
 		if h.CopyDone != nil {
 			return h.CopyDone(ctx, msg, arg)
 		} else if h.Copy != nil && h.Copy.CopyDone != nil {
