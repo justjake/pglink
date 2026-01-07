@@ -25,29 +25,13 @@ func (t ActionType) String() string {
 	return string(t)
 }
 
-type ProxyRole string
+type ProxyRole = pgwire.Sender
 
 const (
-	RoleProxy  ProxyRole = "proxy"
-	RoleClient ProxyRole = "client"
-	RoleServer ProxyRole = "server"
+	RoleProxy  ProxyRole = pgwire.SenderProxy
+	RoleClient ProxyRole = pgwire.SenderClient
+	RoleServer ProxyRole = pgwire.SenderServer
 )
-
-func (d ProxyRole) String() string {
-	s := string(d)
-	if s == "" {
-		return "?"
-	}
-	return s
-}
-
-func (d ProxyRole) To() ProxyRole {
-	if d == RoleClient {
-		return RoleServer
-	} else {
-		return RoleClient
-	}
-}
 
 type Action interface {
 	Type() ActionType

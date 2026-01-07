@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -141,22 +142,20 @@ var defaultGnetEngine = &gnetProxyEngine{}
 
 type gnetProxyRuntime struct {
 	// static
-	session   *Session
-	logger    *slog.Logger
-	engine    *gnetProxyEngine
-	runCtx    context.Context
-	msgParser flyweightParser
+	session *Session
+	logger  *slog.Logger
+	engine  *gnetProxyEngine
+	runCtx  context.Context
 
 	// state
-	mu       sync.Mutex
-	wg       sync.WaitGroup
-	client   *gnetProxyConn
-	backend  *gnetProxyConn
-	loop     gnet.EventLoop
-	running  atomic.Bool
-	runErr   error
-	pos      pos
-	sliceMsg pgwire.StreamSliceMsg
+	mu      sync.Mutex
+	wg      sync.WaitGroup
+	client  *gnetProxyConn
+	backend *gnetProxyConn
+	loop    gnet.EventLoop
+	running atomic.Bool
+	runErr  error
+	pos     Pos2
 }
 
 func NewGnetProxyRuntime(ctx context.Context, session *Session) (Runtime, error) {
@@ -263,7 +262,6 @@ func (g *gnetProxyRuntime) StartConn(ctx context.Context, role ProxyRole, conn C
 		runtime: g,
 		logger:  g.logger.With("role", role),
 	}
-	proxyConn.parser = pgwire.NewStreamBatchParser(proxyConn.handleBatch)
 
 	onSuccess := func(gconn gnet.Conn) {
 		if g.logger.Enabled(context.Background(), slog.LevelDebug) {
@@ -403,37 +401,9 @@ func (g *gnetProxyRuntime) WriteConn(ctx context.Context, role ProxyRole, queued
 	return nil
 }
 
-func (g *gnetProxyRuntime) handleBatch(p *gnetProxyConn, batch pgwire.StreamBatch) {
+func (g *gnetProxyRuntime) handleBatchEnd(p *gnetProxyConn, processed int) error {
 	if g.logger.Enabled(g.runCtx, slog.LevelDebug) {
-		g.logger.Debug("gnetProxyRuntime.handleBatch", "p", p, "batch", batch)
-	}
-
-	defer func() {
-		g.sliceMsg = pgwire.StreamSliceMsg{}
-	}()
-	for msg := range batch.Complete.All() {
-		g.sliceMsg = msg
-		if err := g.handleMessage(p, &g.sliceMsg); err != nil {
-			if IsCleanTermination(err) {
-				p.logger.Info("exit: clean termination", "error", err)
-			} else {
-				p.logger.Error("exit: handler returned error", "error", err)
-			}
-			g.runErr = err
-			return
-		}
-	}
-
-	if batch.Partial != nil {
-		if err := g.handleMessage(p, batch.Partial); err != nil {
-			if IsCleanTermination(err) {
-				p.logger.Info("exit: clean termination (partial message)", "error", err)
-			} else {
-				p.logger.Error("exit: handler returned error (partial message)", "error", err)
-			}
-			g.runErr = err
-			return
-		}
+		g.logger.Debug("gnetProxyRuntime.handleBatch", "p", p, "processed", processed)
 	}
 
 	flushErr := g.session.Flush(g.runCtx)
@@ -441,11 +411,13 @@ func (g *gnetProxyRuntime) handleBatch(p *gnetProxyConn, batch pgwire.StreamBatc
 		if err := g.handleConnErr(p, flushErr); err != nil {
 			p.logger.Error("exit: handler returned error (handling flush error)", "error", err, "flushErr", flushErr)
 			g.runErr = err
-			return
+			return err
 		} else {
 			p.logger.Warn("failed to flush after handling batch", "error", flushErr)
 		}
 	}
+
+	return nil
 }
 
 func (g *gnetProxyRuntime) handleConnErr(p *gnetProxyConn, err error) error {
@@ -461,16 +433,12 @@ func (g *gnetProxyRuntime) handleConnErr(p *gnetProxyConn, err error) error {
 	return nil
 }
 
-func (g *gnetProxyRuntime) handleMessage(p *gnetProxyConn, msg ProxyMessage) error {
-	parser := &g.msgParser
-	parser.Prepare(p.role)
-	defer parser.Release()
-
+func (g *gnetProxyRuntime) handleMessage(p *gnetProxyConn, streamPos pgwire.StreamPos, msg pgwire.Msg) error {
 	pos := &g.pos
-	pos.reset(p.role, msg, g.session, g.runCtx, parser)
-	defer func() {
-		pos.reset(RoleProxy, nil, nil, nil, nil)
-	}()
+	pos.StreamPos = streamPos
+	pos.Msg = msg
+	pos.Session = g.session
+	pos.Handled = false
 
 	err := g.session.HandlePos(g.runCtx, pos, nil)
 	if err != nil {
@@ -538,6 +506,38 @@ func await[T any](ctx context.Context, loop gnet.EventLoop, ch <-chan T, then fu
 	}()
 }
 
+type LimitedWriter struct {
+	Written   int
+	Remaining int
+	Writer    io.Writer
+}
+
+var ErrLimitedWriterExhausted = errors.New("limited writer exhausted")
+
+func (w *LimitedWriter) Write(b []byte) (int, error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
+
+	if w.Remaining == 0 {
+		return 0, ErrLimitedWriterExhausted
+	}
+
+	slice := b[:min(len(b), w.Remaining)]
+	n, err := w.Writer.Write(slice)
+	w.Remaining -= n
+	w.Written += n
+	if err != nil {
+		return n, err
+	}
+
+	if len(slice) < len(b) {
+		return n, ErrLimitedWriterExhausted
+	}
+
+	return n, nil
+}
+
 var _ Runtime = (*gnetProxyRuntime)(nil)
 
 type gnetProxyConn struct {
@@ -551,8 +551,11 @@ type gnetProxyConn struct {
 	started        atomic.Bool
 	gconn          gnet.Conn
 	promisedWrites bytes.Buffer
-	parser         *pgwire.StreamBatchParser
 	closed         atomic.Bool
+
+	streamingLargeMessageWriter *LimitedWriter
+	offset                      int64
+	seq                         int64
 }
 
 type filedupConn interface {
@@ -581,6 +584,15 @@ func (p *gnetProxyConn) OnOpen(c gnet.Conn) (action gnet.Action) {
 	return gnet.None
 }
 
+func (p *gnetProxyConn) OnClose(c gnet.Conn) (action gnet.Action) {
+	p.logger.Info("gnetProxyConn.OnClose", "c", c)
+	if err := p.Close(); err != nil {
+		p.logger.Error("gnetProxyConn.OnClose: failed to close", "error", err)
+		return gnet.Close
+	}
+	return gnet.None
+}
+
 func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	// TODO: panic/recover?
 
@@ -601,16 +613,131 @@ func (p *gnetProxyConn) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 		return gnet.Close
 	}
 
+	if p.runtime.runErr != nil {
+		p.logger.Error("gnetProxyConn.OnTraffic: detected runtime error, closing connection", "error", p.runtime.runErr)
+		return gnet.Close
+	}
+
 	return gnet.None
 }
 
-func (p *gnetProxyConn) OnClose(c gnet.Conn) (action gnet.Action) {
-	p.logger.Info("gnetProxyConn.OnClose", "c", c)
-	if err := p.Close(); err != nil {
-		p.logger.Error("gnetProxyConn.OnClose: failed to close", "error", err)
-		return gnet.Close
+func (p *gnetProxyConn) handleTraffic(c gnet.Conn) (err error) {
+	if !p.runtime.running.Load() {
+		p.logger.Debug("not running, ignoring traffic")
+		return nil
 	}
-	return gnet.None
+
+	if p.runtime.runCtx.Err() != nil {
+		return p.runtime.runCtx.Err()
+	}
+
+	max := c.InboundBuffered()
+	if max == 0 {
+		p.logger.Debug("no inbound buffered, ignoring traffic")
+		return nil
+	}
+
+	// Buf either begins with a message header, or we are streaming a large message.
+	buf, err := c.Next(max)
+	if err != nil {
+		return fmt.Errorf("failed to read next %v bytes: %w", max, err)
+	}
+
+	var processed int
+	startSeq := p.seq
+	DEBUG := p.debugEnabled()
+	defer func() {
+		discarded, discardErr := c.Discard(processed)
+		err = errors.Join(err, discardErr)
+		if discarded != processed {
+			p.logger.Error("Boundary issue: discarded %v bytes, but wrote %v bytes", discarded, processed)
+		}
+		startOffset := p.offset
+		p.offset += int64(discarded)
+		if DEBUG {
+			p.logger.Debug("progress", "processed", processed, "startSeq", startSeq, "endSeq", p.seq, "startOffset", startOffset, "endOffset", p.offset)
+		}
+	}()
+
+	if p.streamingLargeMessageWriter != nil {
+		processed, err = p.streamingLargeMessageWriter.Write(buf)
+		if err == ErrLimitedWriterExhausted || p.streamingLargeMessageWriter.Remaining == 0 {
+			p.logger.Debug("finished streaming large message", "seq", p.seq, "endOffset", p.offset)
+			p.streamingLargeMessageWriter = nil
+			p.seq++
+			buf = buf[processed:]
+		} else if err != nil {
+			return fmt.Errorf("large message writer: %w", err)
+		} else {
+			if DEBUG {
+				p.logger.Debug("streaming large message", "seq", p.seq, "currentOffset", p.offset)
+			}
+			return nil
+		}
+	}
+
+	for len(buf) >= 5 {
+		msgLen, ok := pgwire.MsgRequiredLen(buf)
+		if !ok {
+			// Should never happen (>= 5 bytes).
+			return fmt.Errorf("MsgRequiredLen failed to determine msg len, even though we have at least 5 bytes")
+		}
+
+		// Buffer ends with incomplete message.
+		if len(buf) < msgLen {
+			if DEBUG {
+				p.logger.Debug("buffer ends mid-message", "msgLen", msgLen, "bufLen", len(buf))
+			}
+
+			if msgLen > gnetMaxMessageSize {
+				// Start streaming large message.
+				// We initially set destination to nil, so Write will panic rather than
+				// silently discarding bytes.
+				//
+				// If the session informes us it wishes to stream to a different
+				// destination, we will update the writer as long as nothing was written.
+				//
+				// Once `handleTraffic` returns, the session must have already chosen a destination,
+				// otherwise we'll end up with part of the message discarded.
+				p.streamingLargeMessageWriter = &LimitedWriter{
+					Remaining: msgLen,
+					Writer:    nil, // Write will panic unless destination is set.
+				}
+				// Note: below, we send the incomplete message to the application so it
+				// can decide how to handle it.
+			} else {
+				// Small message: wait for message to buffer.
+				break
+			}
+		}
+
+		// We impliclty handle large messages by streaming them; they are detected [Msg.IsIncomplete].
+		offset := p.offset + int64(processed)
+		seq := p.seq
+		data := buf[:min(len(buf), msgLen)]
+		err = p.runtime.handleMessage(p, pgwire.StreamPos{Seq: seq, Offset: offset}, pgwire.Msg{Sender: p.role, Data: data})
+		// Didn't panic? Update state.
+		if msgLen > gnetMaxMessageSize {
+			// Decrement remaining bytes by the length we revealed to the application.
+			p.streamingLargeMessageWriter.Remaining -= len(data)
+		}
+		processed += len(data)
+		p.seq++
+		buf = buf[len(data):]
+		if err != nil {
+			break
+		}
+	}
+
+	// TODO: somehow, arrange to handle streaming requests
+	// We may need to store the original `buf` ?
+
+	if processed > 0 {
+		// Do we need to put this in defer?
+		return errors.Join(err, p.runtime.handleBatchEnd(p, processed))
+	}
+
+	return nil
 }
 
 func (p *gnetProxyConn) Close() error {
@@ -627,50 +754,9 @@ func (p *gnetProxyConn) Close() error {
 	return nil
 }
 
-func (p *gnetProxyConn) handleTraffic(c gnet.Conn) error {
-	if !p.runtime.running.Load() {
-		p.logger.Debug("not running, ignoring traffic")
-		return nil
+func (p *gnetProxyConn) debugEnabled() bool {
+	if p.runtime != nil && p.runtime.session != nil {
+		return p.runtime.session.DebugEnabled(p.runtime.runCtx)
 	}
-
-	if p.runtime.runCtx.Err() != nil {
-		return p.runtime.runCtx.Err()
-	}
-
-	max := c.InboundBuffered()
-	if max == 0 {
-		p.logger.Debug("no inbound buffered, ignoring traffic")
-		return nil
-	}
-
-	buf, err := c.Next(max)
-	if err != nil {
-		return fmt.Errorf("gnetStream.OnTraffic: failed to read next %v bytes: %w", max, err)
-	}
-
-	// Parser will call p.handleBatch implicitly if necessary.
-	written, err := p.parser.Write(buf)
-	_, discardErr := c.Discard(written)
-
-	p.logger.Debug("parser.Write", "written", written, "parser", p.parser)
-
-	if discardErr != nil {
-		return errors.Join(err, fmt.Errorf("gnetProxyConn.handleTraffic: failed to discard: %w", discardErr))
-	}
-	if errors.Is(err, pgwire.ErrIncompleteMessage) {
-		p.logger.Debug("gnetProxyConn.handleTraffic: incomplete message (waiting for more data)", "error", err)
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("gnetProxyConn.handleTraffic: failed to write to parser: %w", err)
-	}
-
-	return p.runtime.runErr
-}
-
-func (p *gnetProxyConn) handleBatch(batch pgwire.StreamBatch) {
-	if p.logger.Enabled(context.Background(), slog.LevelDebug) {
-		p.logger.Debug("handleBatch", "batch", batch)
-	}
-	// delegate
-	p.runtime.handleBatch(p, batch)
+	return p.logger.Enabled(context.Background(), slog.LevelDebug)
 }

@@ -6,6 +6,7 @@ const (
 	SenderNone   Sender = 0
 	SenderClient Sender = 'C'
 	SenderServer Sender = 'S'
+	SenderProxy  Sender = 'P' // TODO: remove?
 )
 
 func (s Sender) String() string {

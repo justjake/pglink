@@ -111,9 +111,16 @@ func (s *Session) Run(ctx context.Context) error {
 	return nil
 }
 
+func (s *Session) DebugEnabled(ctx context.Context) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.Logger().Enabled(ctx, slog.LevelDebug)
+}
+
 // HandlePos handles a message position and any errors.
 // This method is called by the session's [Runtime].
-func (s *Session) HandlePos(ctx context.Context, pos Pos, posErr error) error {
+func (s *Session) HandlePos(ctx context.Context, pos *Pos2, posErr error) error {
 	if pos != nil {
 		trackCtx, trackErr := s.trackPos(ctx, pos.From(), pos.unwrap())
 		if trackErr != nil {

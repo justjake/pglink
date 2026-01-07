@@ -49,6 +49,10 @@ func (m Msg) RequiredLen() (int, bool) {
 	return MsgRequiredLen(m.Data)
 }
 
+func (m Msg) From() Sender {
+	return m.Sender
+}
+
 func (m Msg) Destination() Sender {
 	return m.Sender.Destination()
 }
